@@ -118,10 +118,11 @@ export async function chatScreen(go, { roomId }) {
     const load = () => S.client.openMedia(m);
     if (m.body.mode === 'once') {
       if (mine) return h('span', { class: 'media-tag', text: 'Foto de ver uma vez (enviada)' });
-      if (m.consumed) return h('span', { class: 'media-tag', text: 'Foto de ver uma vez (já vista)' });
+      if (m.consumed || !m.body.key) return h('span', { class: 'media-tag', text: 'Foto de ver uma vez (já vista)' });
+      // O núcleo do cliente já apaga a chave depois da tentativa; aqui só redesenha.
       return holdButton('Segure para ver (uma vez)', load, m.body.mime, async (err) => {
         if (err && !/410|404/.test(err.message)) toast(`Não abriu: ${err.message}`);
-        await S.store.putMessage({ ...m, consumed: true });
+        setTimeout(() => render().catch(() => {}), 300);
       });
     }
     return h('button', { class: 'open media-tag', text: 'Foto · tocar para ver', onclick: () => openPhoto(load, m.body.mime).catch((e) => toast(`Não abriu: ${e.message}`)) });

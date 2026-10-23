@@ -207,14 +207,32 @@ export class MessengerClient {
     const body = { mediaId: up.mediaId, key: b64(key), mime, mode, size: bytes.byteLength, ...(caption ? { caption } : {}) };
     key.fill(0);
     const msg = await this.sendInner(roomId, 'media', body, { msgKind: 'media' });
+    if (mode === 'once') {
+      // Quem enviou não reabre (§15.6): a chave não fica nem no aparelho dele.
+      const stored = await this.store.getMessage(msg.msgId);
+      if (stored) await this.store.putMessage({ ...stored, body: { ...stored.body, key: null }, consumed: true });
+      msg.body = { ...msg.body, key: null };
+      await this.onDestroy([]);
+    }
     if (mode === 'doc') msg.quota = await this.api.post('/v1/docs/publish', { mediaId: up.mediaId, msgId: msg.msgId });
     return msg;
   }
 
   async openMedia(msg) {
-    const blob = await this.api.post(`/v1/media/${msg.body.mediaId}/open`, undefined, { binary: true });
+    if (!msg.body?.key) throw new Error('mídia sem chave neste aparelho (já vista ou enviada por você)');
+    const once = msg.body.mode === 'once';
+    const forget = async () => {
+      // Ver uma vez: depois da tentativa (dê certo ou não), a chave some do
+      // aparelho e o banco é refeito sem ela (ADR 0012).
+      const stored = await this.store.getMessage(msg.msgId);
+      if (stored) await this.store.putMessage({ ...stored, body: { ...stored.body, key: null }, consumed: true });
+      await this.onDestroy([]);
+    };
+    let blob;
+    try { blob = await this.api.post(`/v1/media/${msg.body.mediaId}/open`, undefined, { binary: true }); }
+    catch (e) { if (once && [404, 410].includes(e.status)) await forget(); throw e; }
     const key = unb64(msg.body.key);
-    try { return await decryptMedia(key, blob); } finally { key.fill(0); }
+    try { return await decryptMedia(key, blob); } finally { key.fill(0); if (once) await forget(); }
   }
 
   // ---------- sincronização ----------

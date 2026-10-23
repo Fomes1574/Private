@@ -111,8 +111,13 @@ test('mídia cifrada em segmentos; ver uma vez pelo cliente', async () => {
   await p.bia.sync(); await p.caio.sync();
   const bm = await p.bia.store.getMessage(m.msgId);
   assert.deepEqual(await p.bia.openMedia(bm), photo);
-  await assert.rejects(p.bia.openMedia(bm), /410/, 'segunda vez não');
-  await assert.rejects(p.ana.openMedia(m), /403/, 'quem enviou não reabre');
+  const after = await p.bia.store.getMessage(m.msgId);
+  assert.equal(after.body.key, null, 'chave apagada do aparelho depois de ver');
+  assert.equal(after.consumed, true);
+  await assert.rejects(p.bia.openMedia(after), /sem chave/, 'segunda vez não');
+  await assert.rejects(p.bia.openMedia(bm), /410/, 'nem com a chave antiga: o servidor já consumiu');
+  assert.equal((await p.ana.store.getMessage(m.msgId)).body.key, null, 'quem enviou não guarda a chave');
+  await assert.rejects(p.ana.openMedia(m), /sem chave/, 'quem enviou não reabre');
   assert.deepEqual(await p.caio.openMedia(await p.caio.store.getMessage(m.msgId)), photo);
 });
 

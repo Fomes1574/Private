@@ -11,6 +11,9 @@ function close() {
   current = null;
 }
 addEventListener('blur', close);
+// Ver uma vez: soltar o dedo em QUALQUER lugar fecha (o botão pode ter sido
+// redesenhado enquanto a pessoa segurava).
+for (const ev of ['pointerup', 'pointercancel']) addEventListener(ev, () => { if (current?.holdOnly) close(); }, true);
 addEventListener('pagehide', close);
 document.addEventListener('visibilitychange', () => { if (document.hidden) close(); });
 
@@ -22,7 +25,7 @@ function show(bytes, mime, { holdOnly }) {
   const overlay = h('div', { class: 'viewer', role: 'dialog', 'aria-modal': 'true', oncontextmenu: (e) => e.preventDefault() }, img,
     holdOnly ? null : h('button', { class: 'viewer-close', 'aria-label': 'Fechar', text: '×', onclick: close }));
   document.body.append(overlay);
-  current = { overlay, url };
+  current = { overlay, url, holdOnly };
 }
 
 // Foto comum: abre até fechar.

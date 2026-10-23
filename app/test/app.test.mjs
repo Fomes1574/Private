@@ -108,6 +108,26 @@ test('apagar para todos some do outro lado', async () => {
   await ana.page.waitForFunction(() => ![...document.querySelectorAll('.msg .text')].some((e) => e.textContent === 'vou apagar isto'), null, { timeout: 40000 });
 });
 
+test('foto de ver uma vez: segurar para ver, soltar esconde, uma vez só', async () => {
+  const chooser = ana.page.waitForEvent('filechooser');
+  await ana.page.click('[aria-label="Anexar foto"]');
+  await ana.page.click('text=Foto de ver uma vez');
+  await (await chooser).setFiles(new URL('../../poc/01-vodozemac-wasm/web/icon-512.png', import.meta.url).pathname);
+  await ana.page.waitForSelector('text=Foto de ver uma vez (enviada)', { timeout: 30000 });
+  assert.equal(await ana.page.$('.hold'), null, 'quem enviou não tem botão para reabrir');
+
+  await bia.page.waitForSelector('.hold', { timeout: 40000 });
+  const box = await (await bia.page.$('.hold')).boundingBox();
+  await bia.page.mouse.move(box.x + 10, box.y + 10);
+  await bia.page.mouse.down();
+  await bia.page.waitForSelector('.viewer img', { timeout: 15000 });
+  const overlayText = await bia.page.textContent('.viewer');
+  assert.equal(overlayText.trim(), '', 'nada escrito sobre a foto (sem marca d\'água, nome, data)');
+  await bia.page.mouse.up();
+  await bia.page.waitForSelector('.viewer', { state: 'detached' });
+  await bia.page.waitForSelector('text=Foto de ver uma vez (já vista)', { timeout: 15000 });
+});
+
 const dbDirs = (p) => p.page.evaluate(async () => {
   const out = [];
   for await (const [name] of (await navigator.storage.getDirectory()).entries()) if (name.startsWith('.mp-')) out.push(name);
