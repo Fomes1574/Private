@@ -1,6 +1,6 @@
 {
   "appId": "com.mensageiro.privado",
-  "appName": "Mensageiro",
+  "appName": "Pacto Talk",
   "webDir": "../app/dist",
   "loggingBehavior": "none",
   "android": {

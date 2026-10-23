@@ -10,7 +10,7 @@ const TAGLINE = 'O único lugar verdadeiramente seguro para o pacto.';
 export function welcome(go) {
   const isSetup = location.hash === '#instalar';
   mount(h('main', { class: 'center' },
-    h('div', { class: 'brand' }, h('div', { class: 'logo', 'aria-hidden': 'true' }), h('p', { class: 'muted', text: TAGLINE })),
+    h('div', { class: 'brand' }, h('div', { class: 'logo', 'aria-hidden': 'true' }), h('h1', { class: 'brand-name', text: 'Pacto Talk' }), h('p', { class: 'muted', text: TAGLINE })),
     isSetup
       ? h('button', { class: 'block', text: 'Instalar a primeira pessoa', onclick: () => withLock(go, 'bootstrap') })
       : [

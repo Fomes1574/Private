@@ -42,7 +42,8 @@ for (const [from, to] of [
   ['poc/06-video-safari/web/compress.js', 'video/compress.js'],
   ['poc/06-video-safari/web/vendor', 'video/vendor'],
 ]) await cp(join(repo, from), join(stage, to), { recursive: true });
-for (const f of ['icon-180.png', 'icon-512.png']) await cp(join(repo, 'poc/01-vodozemac-wasm/web', f), join(stage, f));
+await cp(join(repo, 'branding/pacto-talk-icon-180.png'), join(stage, 'icon-180.png'));
+await cp(join(repo, 'branding/pacto-talk-icon-512.webp'), join(stage, 'icon-512.webp'));
 
 // Cópia de terceiros precisa bater com o SHA256SUMS conferido no CI.
 for (const dir of ['vendor/sqlite', 'video/vendor']) {
@@ -62,9 +63,9 @@ const pubB64 = createPublicKey(priv).export({ format: 'der', type: 'spki' }).sub
 
 // 3) Manifesto do app e configuração.
 const manifest = {
-  id: '/', name: 'Mensageiro', short_name: 'Mensageiro', start_url: './', scope: './', display: 'standalone',
+  id: '/', name: 'Pacto Talk', short_name: 'Pacto Talk', start_url: './', scope: './', display: 'standalone',
   background_color: '#0B1220', theme_color: '#0B1220',
-  icons: [{ src: 'icon-180.png', sizes: '180x180', type: 'image/png' }, { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }],
+  icons: [{ src: 'icon-180.png', sizes: '180x180', type: 'image/png' }, { src: 'icon-512.webp', sizes: '512x512', type: 'image/webp' }],
 };
 await writeFile(join(stage, 'manifest.webmanifest'), JSON.stringify(manifest, null, 2));
 
@@ -113,7 +114,7 @@ if (mode === 'plain') {
   const sw = (await readFile(join(here, 'sw/sw.js'), 'utf8')).replace('__PUBLIC_KEY__', pubB64);
   await writeFile(join(dist, 'sw.js'), sw);
   // Primeira visita: a mesma página da release, que registra o SW e recarrega.
-  for (const f of ['index.html', 'styles.css', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png']) await cp(join(stage, f), join(dist, f));
+  for (const f of ['index.html', 'styles.css', 'manifest.webmanifest', 'icon-180.png', 'icon-512.webp']) await cp(join(stage, f), join(dist, f));
   await cp(join(here, 'sw/bootstrap.js'), join(dist, 'bootstrap.js'));
   const boot = (await readFile(join(dist, 'index.html'), 'utf8')).replace('<script type="module" src="main.js"></script>', '<script src="bootstrap.js"></script>');
   await writeFile(join(dist, 'index.html'), boot);

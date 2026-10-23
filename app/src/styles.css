@@ -1,4 +1,4 @@
-/* Paleta provisória do protótipo (V6-030). Nome e logo ficam para depois. */
+/* Paleta do aplicativo Pacto Talk. */
 :root {
   --bg: #0B1220; --bar: #0E1728; --card: #131D31; --in: #172338; --out: #1D3A63;
   --text: #E8EEF8; --muted: #93A1B8; --accent: #6CB4FF; --danger: #FF7A7A; --warn: #F5C26B;
@@ -17,7 +17,8 @@ p { margin: 0; }
 .code { font-family: ui-monospace, Menlo, monospace; letter-spacing: .5px; word-break: break-all; }
 .code.big { font-size: 28px; letter-spacing: 3px; }
 .brand { display: grid; gap: 12px; justify-items: center; margin-bottom: 16px; }
-.logo { width: 72px; height: 72px; border-radius: 22px; background: radial-gradient(circle at 50% 45%, var(--accent) 0 34%, var(--out) 35% 100%); }
+.logo { width: 76px; height: 76px; border-radius: 20px; background: url("icon-512.webp") center / contain no-repeat; }
+.brand-name { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: .2px; }
 label { display: block; text-align: left; color: var(--muted); font-size: 14px; margin: 8px 0 4px; }
 input, select, textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--in); background: var(--bar); color: var(--text); font: inherit; font-size: 16px; }
 button { padding: 12px 16px; border-radius: 12px; border: 0; background: var(--accent); color: #06101f; font: inherit; font-weight: 600; min-height: 44px; cursor: pointer; }
