@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
-<title>Chave de assinatura</title>
+<title>Chaves e códigos</title>
 <style>
   body { font: 16px/1.5 -apple-system, system-ui, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; background: #0B1220; color: #E8EEF8; }
   textarea { width: 100%; height: 150px; font: 13px ui-monospace, Menlo, monospace; background: #131D31; color: #E8EEF8; border: 1px solid #2a3a58; border-radius: 8px; padding: 8px; box-sizing: border-box; }
@@ -13,7 +13,7 @@
 </style>
 </head>
 <body>
-<h1>Chave de assinatura das versões do app</h1>
+<h1>Chave de assinatura e códigos do Mensageiro</h1>
 <p class="muted">Abra este arquivo direto do seu computador (sem internet funciona). A chave é criada aqui mesmo, pelo navegador, e não vai para nenhum servidor.</p>
 <button id="go">Gerar chave</button>
 <div id="out" hidden>
@@ -24,6 +24,14 @@
   <p class="muted">Anote. Ela aparece no log de cada publicação: se um dia vier outra, alguém trocou a chave.</p>
   <textarea id="pub" readonly style="height:60px"></textarea>
   <p class="muted">Depois de colar no GitHub, feche esta aba. Guarde uma cópia da chave privada no seu gerenciador de senhas: sem ela, quem já instalou o app não aceita atualizações.</p>
+</div>
+<h2>3. Códigos aleatórios para os outros segredos</h2>
+<p class="muted">Feitos pelo gerador aleatório do próprio navegador. Copie cada um para o segredo de mesmo nome no GitHub e guarde no gerenciador de senhas.</p>
+<button id="codes">Gerar códigos</button>
+<div id="codesOut" hidden>
+  <p><strong>PROVA_TOKEN_SECRET</strong> (48 caracteres)</p><textarea id="c1" readonly style="height:48px"></textarea>
+  <p><strong>MP_SETUP_CODE</strong> (24 caracteres; você digita uma vez no iPhone)</p><textarea id="c2" readonly style="height:48px"></textarea>
+  <p><strong>PROVA_ACCESS_CODE</strong> (12 caracteres; você digita na Prova 5)</p><textarea id="c3" readonly style="height:48px"></textarea>
 </div>
 <p id="err" class="warn"></p>
 <script>
@@ -41,6 +49,22 @@ document.getElementById('go').onclick = async () => {
   } catch (e) {
     document.getElementById('err').textContent = 'Este navegador não gera chave Ed25519. Use Chrome, Edge, Firefox ou Safari atualizados. (' + e.message + ')';
   }
+};
+// Sem letras parecidas (0/O, 1/l/I) para digitar no celular sem errar.
+const ABC = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function code(n) {
+  const out = [];
+  while (out.length < n) {
+    const b = crypto.getRandomValues(new Uint8Array(n * 2));
+    for (const x of b) if (x < 224 && out.length < n) out.push(ABC[x % ABC.length]); // 224 = 4 × 56: sem viés
+  }
+  return out.join('');
+}
+document.getElementById('codes').onclick = () => {
+  document.getElementById('c1').value = code(48);
+  document.getElementById('c2').value = code(24);
+  document.getElementById('c3').value = code(12);
+  document.getElementById('codesOut').hidden = false;
 };
 </script>
 </body>

@@ -112,6 +112,7 @@ falta, sem mostrar valores.
 5. Ajustes → confira que a "Versão do app" bate com o código do passo 8.3.
 
 ## O que não fazer
+- **Não usar "Import a repository" / Workers Builds** (a tela que pede "Project name", "Build command", "Deploy command"). Ela dá à Cloudflare acesso de leitura ao código e publica sem a release assinada. A publicação é só pelo GitHub Actions.
 - Não criar o bucket R2 à mão nem mexer nas regras dele (o deploy-api faz).
 - Não adicionar domínio agora.
 - Não mandar token, chaves ou códigos para ninguém (nem para mim).
