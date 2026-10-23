@@ -15,8 +15,17 @@ se as partes mais arriscadas da arquitetura funcionam antes de escrever o app.
 
 Cada pasta tem um `RELATORIO.md` com o que funcionou e o que não funcionou.
 
+## Onde está cada coisa
+
+- [`docs/especificacao/`](docs/especificacao/) especificação normativa v7 (fonte da verdade).
+- [`docs/adr/`](docs/adr/) decisões de arquitetura registradas.
+- [`docs/ACOES_DO_PROPRIETARIO.md`](docs/ACOES_DO_PROPRIETARIO.md) o que só o dono pode fazer (contas, aparelhos, decisões com custo).
+- [`docs/PENDENCIAS.md`](docs/PENDENCIAS.md) estado de cada pendência P-xx.
+- [`SECURITY.md`](SECURITY.md) regras de segurança e o que o projeto não promete.
+
 ## Regras do repositório
 
 - Nada de chaves, tokens ou senhas no código, nem em arquivos de exemplo.
+  Ative o hook local uma vez: `git config core.hooksPath .githooks`.
 - Dependências com versão travada (`=x.y.z` no Cargo, `Cargo.lock` no repositório).
 - Provas são descartáveis: o app de verdade não importa código daqui sem revisão.

@@ -42,8 +42,8 @@ Números no Chromium de desktop: WASM carrega em ~12 ms, restaurar o estado leva
 
 Tamanho: `vz_poc_bg.wasm` tem 375 KB (136 KB com gzip). Recompilar do zero na
 mesma máquina dá o mesmo SHA-256
-(`ba2a480a590ce6afb53146354bc2a174756c5452a3db498035bf6f0367f295f2`).
-Ainda não é build reproduzível entre máquinas: isso fica para a prova 4.
+(`6de828fa04c3e0d00b65de9a483c334fd50685d789d0f2f2380a2d7512aa5631`).
+O build remove os caminhos da máquina (`--remap-path-prefix`) e usa toolchain fixa (`rust-toolchain.toml`); compilar com outro `CARGO_HOME` e em outra pasta deu o mesmo hash. O CI recompila e falha se o WASM do repositório for diferente.
 
 ### Aparelhos reais
 

@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+# Menor privilégio: o CI só lê o repositório.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  segredos:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0, persist-credentials: false }
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24", cache: false }
+      - name: gitleaks (histórico inteiro)
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          "$(go env GOPATH)/bin/gitleaks" git --redact --no-banner .
+
+  dependencias:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24", cache: false }
+      - name: osv-scanner (todas as lockfiles)
+        run: |
+          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.6.0
+          "$(go env GOPATH)/bin/osv-scanner" scan source -r .
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          for lock in $(git ls-files '*Cargo.lock'); do
+            echo "== $lock"; cargo audit --file "$lock"
+          done
+
+  prova-01:
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: poc/01-vodozemac-wasm } }
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Ferramentas Rust travadas
+        run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
+      - name: Build reproduzível (o WASM no repositório tem que bater)
+        run: |
+          ./build.sh
+          git diff --exit-code -- web/pkg || { echo "WASM publicado difere do build"; exit 1; }
+      - run: npm test
