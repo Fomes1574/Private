@@ -67,14 +67,22 @@ jobs:
           "$BT/apksigner" sign --key "$d/key.der" --cert "$d/cert.pem" --v4-signing-enabled false --out "$RUNNER_TEMP/teste-release.apk" "$d/aligned.apk"
           bash scripts/android/verificar-apk.sh "$RUNNER_TEMP/teste-release.apk" "$(cat "$d/sha256.txt")" com.pactotalk.app 1
           rm -rf "$d"
+      - name: Liberar disco para o emulador
+        # O runner chega com ~7 GB livres depois do build; o emulador pede mais.
+        # Só ferramentas que este job não usa.
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/lib/android/sdk/ndk
+          df -h "$HOME"
       - name: Ligar KVM para o emulador
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Emulador (Android 14) com o APK de release
+        timeout-minutes: 25
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
+          disk-size: 3000M
           api-level: 34
           target: google_apis
           arch: x86_64
