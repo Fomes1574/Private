@@ -65,5 +65,12 @@ test('mídia: só formatos que o app gera (V7-016); ver uma vez só foto/vídeo'
   assert.ok(p.encodeInner(media({ mime: 'video/mp4', mode: 'once', duration: 300000 })));
   assert.throws(() => p.encodeInner(media({ mime: 'audio/mp4', duration: 4e6 })), /duração/);
   assert.throws(() => p.encodeInner(media({ mime: 'audio/mp4', duration: -1 })), /duração/);
-  assert.ok(p.encodeInner(media({ mime: 'application/pdf', mode: 'doc' })), 'documento tem regra própria');
+  assert.ok(p.encodeInner(media({ mime: 'text/plain;charset=utf-8', mode: 'doc', name: 'lista de compras.txt' })));
+  for (const mime of ['application/pdf', 'text/html', 'image/svg+xml', 'text/plain']) {
+    assert.throws(() => p.encodeInner(media({ mime, mode: 'doc' })), /tipo de mídia/, `documento ${mime} fora da lista positiva`);
+  }
+  for (const name of ['../../etc/passwd', 'a\u0000b', '', 'x'.repeat(101), 42]) {
+    assert.throws(() => p.encodeInner(media({ mime: 'text/plain;charset=utf-8', mode: 'doc', name })), /nome/);
+  }
+  assert.throws(() => p.encodeInner(media({ mime: 'image/jpeg', name: 'foto.jpg' })), /nome/, 'nome só em documento');
 });

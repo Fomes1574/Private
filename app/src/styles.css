@@ -87,3 +87,7 @@ fieldset { border: 1px solid var(--in); border-radius: 12px; padding: 8px 12px; 
 .rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); }
 .audio-box { display: grid; gap: 6px; margin-top: 6px; } .audio-box audio { width: 100%; }
 button.small { padding: 6px 10px; min-height: 36px; font-size: 14px; }
+
+.viewer.doc { display: grid; grid-template-rows: auto 1fr; place-items: stretch; background: var(--bg, #0B1220); }
+.doc-head { padding: calc(14px + env(safe-area-inset-top)) 60px 10px 16px; color: #fff; font-weight: 600; overflow-wrap: anywhere; }
+.doc-text { margin: 0; padding: 0 16px calc(16px + env(safe-area-inset-bottom)); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: #E6EAF2; font: 15px/1.5 ui-monospace, Menlo, monospace; }

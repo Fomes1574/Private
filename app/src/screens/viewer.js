@@ -9,7 +9,7 @@ function close() {
   const v = current.overlay.querySelector('video');
   if (v) { v.pause(); v.removeAttribute('src'); v.load(); } // solta o decodificador e o blob
   current.overlay.remove();
-  URL.revokeObjectURL(current.url);
+  if (current.url) URL.revokeObjectURL(current.url);
   current = null;
 }
 addEventListener('blur', close);
@@ -80,4 +80,19 @@ export async function playAudio(load, mime, host) {
   host.append(box);
   currentAudio = { el, url, box };
   el.play().catch(() => {});
+}
+
+// Documento de texto: decodificado como UTF-8 e mostrado SÓ como texto
+// (textContent), nunca como HTML; sem baixar, abrir fora ou copiar.
+export async function openText(load, name) {
+  close();
+  const bytes = await load();
+  let text;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } finally { bytes.fill(0); }
+  const overlay = h('div', { class: 'viewer doc', role: 'dialog', 'aria-modal': 'true', 'aria-label': name || 'Documento', oncontextmenu: (e) => e.preventDefault(), oncopy: (e) => e.preventDefault() },
+    h('div', { class: 'doc-head' }, h('span', { text: name || 'Documento' })),
+    h('pre', { class: 'doc-text', text }),
+    h('button', { class: 'viewer-close', 'aria-label': 'Fechar', text: '×', onclick: close }));
+  document.body.append(overlay);
+  current = { overlay, url: '', holdOnly: false };
 }

@@ -33,6 +33,11 @@ export function unpad(padded) {
 
 // Foto JPEG/WebP, vídeo MP4, áudio Opus (WebM/Ogg) ou AAC/MP4 do Safari.
 export const MEDIA_MIME = /^(image\/(jpeg|webp)|video\/mp4|audio\/(webm|ogg|mp4|aac))(;\s?codecs="?[a-z0-9.]+"?)?$/;
+// Documentos (P-12, lista positiva): por enquanto só texto UTF-8, que o app
+// mostra como texto puro, nunca como HTML. PDF e outros esperam a decisão.
+export const DOC_MIME = /^text\/plain;charset=utf-8$/;
+// Nome do arquivo: só para exibir; sem barras, sem caracteres de controle.
+export const validDocName = (n) => typeof n === 'string' && n.length >= 1 && n.length <= 100 && !/[\u0000-\u001f\u007f/\\]/.test(n);
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
 
 // Valida a estrutura. Não decide permissão (isso é de policy.js).
@@ -58,7 +63,8 @@ export function validateInner(m) {
       if (!ID.test(b?.mediaId ?? '') || typeof b.key !== 'string' || !['once', 'media', 'doc'].includes(b.mode)) fail('mídia');
       // V7-016: só formatos que o próprio app gera ao recodificar. Qualquer
       // outro tipo é recusado antes de chegar perto de um decodificador.
-      if (b.mode !== 'doc' && !MEDIA_MIME.test(b.mime ?? '')) fail('tipo de mídia');
+      if (!(b.mode === 'doc' ? DOC_MIME : MEDIA_MIME).test(b.mime ?? '')) fail('tipo de mídia');
+      if (b.name !== undefined && (b.mode !== 'doc' || !validDocName(b.name))) fail('nome do documento');
       if (b.mode === 'once' && !/^(image|video)\//.test(b.mime)) fail('ver uma vez só para foto ou vídeo');
       if (b.duration !== undefined && !(Number.isSafeInteger(b.duration) && b.duration >= 0 && b.duration <= 3_600_000 + 5_000)) fail('duração');
       break;

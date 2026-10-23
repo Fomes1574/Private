@@ -4,7 +4,9 @@ import { h, mount, header, toast, choiceSheet, confirmSheet } from '../ui.js';
 import * as session from '../session.js';
 import { formatTime, formatDateTime } from '../packages/protocol/src/time.js';
 import { preparePhoto } from '../media.js';
-import { openMedia, holdButton, playAudio } from './viewer.js';
+import { openMedia, holdButton, playAudio, openText } from './viewer.js';
+import { MAX_DOC_BYTES } from '../packages/protocol/src/documents.js';
+import { validDocName } from '../packages/protocol/src/envelope.js';
 import { CONFIG } from '../config.js';
 import { startRecording, fmtDuration } from '../audio.js';
 import { roomMenu } from './room-menu.js';
@@ -23,7 +25,7 @@ export async function chatScreen(go, { roomId }) {
   const input = h('textarea', { id: 'composer', rows: '1', maxlength: '4000', placeholder: 'Mensagem', autocomplete: 'off', autocorrect: 'off', spellcheck: 'false', 'aria-label': 'Mensagem' });
   const replyBar = h('div', { class: 'reply-bar', hidden: true });
   const fileIn = h('input', { type: 'file', accept: 'image/*', hidden: true });
-  let pick = { video: false, once: false };
+  let pick = { video: false, once: false, doc: false };
   const progressBar = h('div', { class: 'progress', hidden: true });
   let videoJob = null;
 
@@ -33,6 +35,8 @@ export async function chatScreen(go, { roomId }) {
     input.value = '';
     try {
       await S.client.sendText(roomId, text, replyTo ? { replyTo } : {});
+      clearTimeout(draftTimer);
+      await session.setDraft(roomId, '');
       setReply(null);
       await render();
     } catch (e) { input.value = text; toast(e.code === 'gone' ? 'Conversa encerrada.' : `Não enviou: ${e.message}`); }
@@ -47,7 +51,8 @@ export async function chatScreen(go, { roomId }) {
     const f = fileIn.files[0];
     fileIn.value = '';
     if (!f) return;
-    const { video, once } = pick;
+    const { video, once, doc } = pick;
+    if (doc) return sendDoc(f);
     if (video) return sendVideo(f, once);
     try {
       toast('Preparando a foto…');
@@ -97,13 +102,35 @@ export async function chatScreen(go, { roomId }) {
     finally { bytes?.fill(0); videoJob = null; progressBar.hidden = true; progressBar.replaceChildren(); }
   }
 
+  // Documento (§16, P-12): por enquanto só texto UTF-8, mostrado como texto
+  // puro dentro do app. Três ativos por pessoa no app inteiro; o quarto
+  // revoga o mais antigo para todos, então avisa antes.
+  async function sendDoc(file) {
+    let bytes = null;
+    try {
+      if (file.size > MAX_DOC_BYTES) throw new Error('documento acima de 20 MB.');
+      bytes = new Uint8Array(await file.arrayBuffer());
+      try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { throw new Error('só documentos de texto (UTF-8) por enquanto.'); }
+      if (bytes.includes(0)) throw new Error('arquivo binário: só documentos de texto por enquanto.');
+      const q = await S.client.api.get('/v1/docs/mine');
+      if (q.active >= q.max && !await confirmSheet(`Você já tem ${q.max} documentos ativos no app. Enviar este apaga o mais antigo para todos, em qualquer conversa.`, 'Enviar mesmo assim')) return;
+      let name = file.name.replace(/[\u0000-\u001f\u007f/\\]/g, '').trim().slice(0, 100);
+      if (!validDocName(name)) name = 'documento.txt';
+      const m = await S.client.sendMedia(roomId, bytes, { mode: 'doc', mime: 'text/plain;charset=utf-8', name });
+      if (m.quota?.evicted?.length) toast('Documento enviado. O mais antigo foi apagado para todos (limite de 3).');
+      await render();
+    } catch (e) { toast(`Não enviou: ${e.message}`); }
+    finally { bytes?.fill(0); }
+  }
+
   const attach = async () => {
     const c = await choiceSheet('Enviar', [
       { label: 'Foto', value: 'photo' }, { label: 'Foto de ver uma vez', value: 'photo-once' },
-      { label: 'Vídeo (até 5 min)', value: 'video' }, { label: 'Vídeo de ver uma vez', value: 'video-once' }]);
+      { label: 'Vídeo (até 5 min)', value: 'video' }, { label: 'Vídeo de ver uma vez', value: 'video-once' },
+      { label: 'Documento de texto (até 20 MB)', value: 'doc' }]);
     if (!c) return;
-    pick = { video: c.startsWith('video'), once: c.endsWith('-once') };
-    fileIn.accept = pick.video ? 'video/*' : 'image/*';
+    pick = { video: c.startsWith('video'), once: c.endsWith('-once'), doc: c === 'doc' };
+    fileIn.accept = pick.doc ? '.txt,.md,.csv,text/plain' : pick.video ? 'video/*' : 'image/*';
     fileIn.click();
   };
   // Microfone: tocar para gravar; enviar ou descartar. Até 1 hora.
@@ -143,6 +170,12 @@ export async function chatScreen(go, { roomId }) {
           h('button', { class: 'send', 'aria-label': 'Enviar', text: '➤', onclick: send })),
         fileIn)));
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+  // Rascunho: volta ao reabrir a conversa (cifrado no aparelho).
+  let draftTimer = null, editing = false;
+  const draft = await session.getDraft(roomId);
+  if (!input.value) input.value = draft;
+  const saveDraft = () => { if (!editing) session.setDraft(roomId, input.value.trim() ? input.value : '').catch(() => {}); };
+  input.addEventListener('input', () => { clearTimeout(draftTimer); draftTimer = setTimeout(saveDraft, 500); });
 
   async function actions(m) {
     const mine = m.sender === S.client.userId;
@@ -156,9 +189,10 @@ export async function chatScreen(go, { roomId }) {
       if (c === 'reply') { setReply(m); input.focus(); }
       if (c === 'react') { const e = await choiceSheet('Reação', REACTIONS.map((r) => ({ label: r, value: r }))); if (e) await S.client.react(roomId, m.msgId, e); }
       if (c === 'edit') {
+        editing = true;
         input.value = m.text;
         input.focus();
-        const done = async () => { const t = input.value.trim(); input.value = ''; if (t && t !== m.text) await S.client.edit(roomId, m.msgId, t); await render(); };
+        const done = async () => { editing = false; const t = input.value.trim(); input.value = ''; if (t && t !== m.text) await S.client.edit(roomId, m.msgId, t); await render(); };
         input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); input.onkeydown = null; done(); } };
         toast('Edite e aperte Enter. A mensagem fica com "*editado" e o mesmo prazo.');
       }
@@ -189,6 +223,10 @@ export async function chatScreen(go, { roomId }) {
   function mediaBlock(m, mine) {
     const load = () => S.client.openMedia(m);
     const what = mediaName(m);
+    if (m.body.mode === 'doc') {
+      if (!m.body.key) return h('span', { class: 'media-tag', text: `Documento · ${m.body.name ?? ''}` });
+      return h('button', { class: 'open media-tag', text: `Documento · ${m.body.name ?? 'sem nome'} · abrir`, onclick: () => openText(load, m.body.name).catch((e) => toast(`Não abriu: ${e.message}`)) });
+    }
     if (m.body.mode === 'once') {
       const a = what === 'Foto' ? 'a' : 'o';
       if (mine) return h('span', { class: 'media-tag', text: `${what} de ver uma vez (enviad${a})` });
@@ -218,10 +256,11 @@ export async function chatScreen(go, { roomId }) {
   await render();
   const timer = setInterval(() => render().catch(() => {}), 30_000); // vencidas somem sozinhas
   const off = session.onChange((w) => { if (w === 'synced') render().catch(() => {}); });
-  return () => { clearInterval(timer); off(); };
+  return () => { clearInterval(timer); off(); if (draftTimer) { clearTimeout(draftTimer); saveDraft(); } };
 }
 
 function mediaName(m) {
+  if (m.body?.mode === 'doc') return 'Documento';
   const mime = m.body?.mime ?? '';
   return /^audio\//.test(mime) ? 'Áudio' : /^video\//.test(mime) ? 'Vídeo' : 'Foto';
 }

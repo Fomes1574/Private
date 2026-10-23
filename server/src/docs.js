@@ -12,6 +12,21 @@ export class DocQuota extends DurableObject {
   }
   load() { const r = this.sql.exec('SELECT json FROM docs').toArray()[0]; return r ? JSON.parse(r.json) : []; }
 
+  // Quantos documentos desta pessoa ainda estão ativos (para avisar antes
+  // de o quarto envio revogar o mais antigo).
+  active() {
+    const now = Date.now();
+    return this.load().filter((d) => d.state === 'active' && d.expiresAt > now).length;
+  }
+
+  // Apagado para todos (pela mensagem ou pela mídia): libera a vaga na hora.
+  release(id) {
+    const all = this.load();
+    const keep = all.filter((d) => d.docId !== id && d.msgId !== id);
+    if (keep.length !== all.length) this.sql.exec('INSERT OR REPLACE INTO docs(id, json) VALUES (1, ?)', JSON.stringify(keep));
+    return { released: all.length - keep.length };
+  }
+
   publish(owner, doc) {
     const now = Date.now();
     let res;

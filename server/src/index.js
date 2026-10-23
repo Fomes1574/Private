@@ -2,7 +2,7 @@
 // atômica fica num Durable Object; aqui só roteamento, autenticação e limites.
 import { json, fail, readJson, HttpError, unwrap, randomId, assertId, sameBytes, SECURITY_HEADERS } from './http.js';
 import { CHUNK } from './media.js';
-import { MAX_DOC_BYTES } from '../../packages/protocol/src/documents.js';
+import { MAX_DOC_BYTES, MAX_ACTIVE_DOCS } from '../../packages/protocol/src/documents.js';
 import { CIRCLE_ROOM_ID } from '../../packages/protocol/src/room.js';
 
 export { Circle } from './circle.js';
@@ -162,6 +162,7 @@ route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/messages', async ({ env, ctx, req
 });
 route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/messages/([A-Za-z0-9_-]{8,64})/delete', async ({ env, ctx, me, p }) => {
   const r = unwrap(await room(env, p[1]).deleteForAll(me.userId, p[2]));
+  await quota(env, me.userId).release(p[2]); // se era documento, a vaga volta (§16)
   await nudge(env, ctx, r.recipients.filter((u) => u !== me.userId));
   return json(200, { ok: true });
 });
@@ -257,7 +258,13 @@ route('POST', '/v1/media/([A-Za-z0-9_-]{8,64})/open', async ({ env, ctx, me, p }
   });
   return new Response(stream, { headers });
 });
-route('POST', '/v1/media/([A-Za-z0-9_-]{8,64})/revoke', async ({ env, me, p }) => json(200, unwrap(await media(env, p[1]).revokeAll(me.userId))));
+route('POST', '/v1/media/([A-Za-z0-9_-]{8,64})/revoke', async ({ env, me, p }) => {
+  const r = unwrap(await media(env, p[1]).revokeAll(me.userId)); // só o autor (conferido no DO)
+  await quota(env, me.userId).release(p[1]);
+  return json(200, r);
+});
+
+route('GET', '/v1/docs/mine', async ({ env, me }) => json(200, { active: await quota(env, me.userId).active(), max: MAX_ACTIVE_DOCS }));
 
 // Documento publicado: cota global de 3 por pessoa (V6-019, V6-020).
 route('POST', '/v1/docs/publish', async ({ env, ctx, request, me }) => {

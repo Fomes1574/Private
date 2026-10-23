@@ -242,12 +242,12 @@ export class MessengerClient {
   }
 
   // ---------- mídia ----------
-  async sendMedia(roomId, bytes, { mode = 'media', mime = 'application/octet-stream', caption, duration } = {}) {
+  async sendMedia(roomId, bytes, { mode = 'media', mime = 'application/octet-stream', caption, duration, name } = {}) {
     const key = await newMediaKey();
     const blob = await encryptMedia(key, bytes);
     const up = await this.api.post(`/v1/rooms/${roomId}/media?mode=${mode}`, blob);
     // A chave vai só dentro do envelope Olm de cada destinatário.
-    const body = { mediaId: up.mediaId, key: b64(key), mime, mode, size: bytes.byteLength, ...(caption ? { caption } : {}), ...(duration ? { duration: Math.round(duration) } : {}) };
+    const body = { mediaId: up.mediaId, key: b64(key), mime, mode, size: bytes.byteLength, ...(caption ? { caption } : {}), ...(duration ? { duration: Math.round(duration) } : {}), ...(name ? { name } : {}) };
     key.fill(0);
     const msg = await this.sendInner(roomId, 'media', body, { msgKind: 'media' });
     if (mode === 'once') {

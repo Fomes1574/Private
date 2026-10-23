@@ -269,6 +269,22 @@ export function searchPeople(term) {
   return searchByPrefix(dir, term, { self: S.client.userId });
 }
 
+// ---------- rascunhos ----------
+// Só neste aparelho, dentro do banco cifrado (secure_delete apaga as páginas
+// antigas). Somem ao enviar e não passam do prazo máximo de 15 dias.
+const DRAFT_TTL = 15 * 86_400_000;
+export async function getDraft(roomId) {
+  const d = ((await S.store.get('drafts')) ?? {})[roomId];
+  return d && Date.now() - d.at < DRAFT_TTL ? d.text : '';
+}
+export async function setDraft(roomId, text) {
+  if (!S.unlocked) return;
+  const all = (await S.store.get('drafts')) ?? {};
+  for (const [k, d] of Object.entries(all)) if (Date.now() - d.at >= DRAFT_TTL) delete all[k];
+  if (text) all[roomId] = { text, at: Date.now() }; else delete all[roomId];
+  await S.store.put('drafts', all);
+}
+
 // ---------- conversas ----------
 const viewCache = new Map();
 export async function roomView(roomId, fresh = false) {

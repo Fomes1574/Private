@@ -195,6 +195,45 @@ test('vídeo: recodificado no aparelho, enviado cifrado, abre do outro lado; ver
   await bia.page.waitForSelector('text=Vídeo de ver uma vez (já visto)', { timeout: 15000 });
 });
 
+test('documento de texto: enviado cifrado, aberto como texto puro (HTML não vira página)', async () => {
+  const text = 'lista:\n- pão\n<img src=x onerror="document.title=\'xss\'"><script>document.title=\'xss\'</script>\nção ✓';
+  const chooser = ana.page.waitForEvent('filechooser');
+  await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
+  await ana.page.click('text=Documento de texto (até 20 MB)');
+  await (await chooser).setFiles({ name: 'notas/../secreto.txt', mimeType: 'text/plain', buffer: Buffer.from(text) });
+  await ana.page.waitForSelector('.msg.mine >> text=/Documento · notas..secreto.txt/', { timeout: 30000 })
+    .catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} | aviso: ${await status(ana)}`); });
+  await bia.page.waitForSelector('.msg:not(.mine) >> text=/Documento · notas..secreto.txt · abrir/', { timeout: 40000 });
+  await bia.page.click('.msg:not(.mine) >> text=/Documento ·/');
+  await bia.page.waitForSelector('.viewer.doc .doc-text');
+  assert.equal(await bia.page.textContent('.viewer.doc .doc-text'), text, 'conteúdo idêntico, como texto');
+  assert.equal(await bia.page.$('.viewer img, .viewer script'), null, 'nenhum elemento criado a partir do documento');
+  assert.notEqual(await bia.page.title(), 'xss');
+  await bia.page.click('.viewer-close');
+
+  // Binário é recusado antes de sair do aparelho.
+  const c2 = ana.page.waitForEvent('filechooser');
+  await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
+  await ana.page.click('text=Documento de texto (até 20 MB)');
+  await (await c2).setFiles({ name: 'x.txt', mimeType: 'text/plain', buffer: Buffer.from([0xff, 0xfe, 0, 1, 2]) });
+  await ana.page.waitForFunction(() => /Não enviou: só documentos de texto/.test(document.querySelector('#toast').textContent));
+});
+
+test('rascunho: fica no aparelho ao sair da conversa e some ao enviar', async () => {
+  await bia.page.fill('#composer', 'rascunho que não foi enviado');
+  await bia.page.waitForTimeout(800);
+  await bia.page.click('[aria-label=Voltar]');
+  await bia.page.click('.row-btn .title');
+  await bia.page.waitForSelector('#composer');
+  assert.equal(await bia.page.inputValue('#composer'), 'rascunho que não foi enviado');
+  await bia.page.click('[aria-label=Enviar]');
+  await bia.page.waitForSelector('.msg.mine >> text=rascunho que não foi enviado');
+  await bia.page.click('[aria-label=Voltar]');
+  await bia.page.click('.row-btn .title');
+  await bia.page.waitForSelector('#composer');
+  assert.equal(await bia.page.inputValue('#composer'), '');
+});
+
 const dbDirs = (p) => p.page.evaluate(async () => {
   const out = [];
   for await (const [name] of (await navigator.storage.getDirectory()).entries()) if (name.startsWith('.mp-')) out.push(name);

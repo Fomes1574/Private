@@ -159,6 +159,7 @@ test('ver uma vez pela API: destinatário uma vez, autor nunca', async () => {
 
 test('documentos: o 4º revoga o mais antigo e manda tombstone', async () => {
   const docs = [];
+  assert.deepEqual((await people.bia.get('/v1/docs/mine')).data, { active: 0, max: 3 });
   for (let i = 0; i < 4; i++) {
     const up = await people.bia.post(`/v1/rooms/${roomId}/media?mode=doc`, new Uint8Array(1000));
     const m = msgId();
@@ -168,6 +169,15 @@ test('documentos: o 4º revoga o mais antigo e manda tombstone', async () => {
     docs.push({ mediaId: up.data.mediaId, msgId: m, evicted: pub.data.evicted });
   }
   assert.deepEqual(docs[3].evicted, [docs[0].mediaId]);
+  assert.equal((await people.bia.get('/v1/docs/mine')).data.active, 3, 'contagem só da própria pessoa, nunca passa de 3');
+  assert.equal((await people.admin.get('/v1/docs/mine')).data.active, 0);
+  // Apagar para todos libera a vaga na hora (pela mensagem ou pela mídia).
+  assert.equal((await people.bia.post(`/v1/rooms/${roomId}/messages/${docs[1].msgId}/delete`)).status, 200);
+  assert.equal((await people.bia.get('/v1/docs/mine')).data.active, 2);
+  assert.equal((await people.bia.post(`/v1/media/${docs[2].mediaId}/revoke`)).status, 200);
+  assert.equal((await people.bia.get('/v1/docs/mine')).data.active, 1);
+  assert.equal((await people.admin.post(`/v1/media/${docs[3].mediaId}/revoke`)).status !== 200, true, 'só o autor revoga');
+  assert.equal((await people.bia.get('/v1/docs/mine')).data.active, 1, 'tentativa de outra pessoa não mexe na cota');
   assert.equal((await people.admin.post(`/v1/media/${docs[0].mediaId}/open`)).status, 404, 'documento revogado sumiu');
   assert.equal((await people.admin.post(`/v1/media/${docs[1].mediaId}/open`, undefined, { raw: true })).status, 200);
   assert.ok((await people.admin.get('/v1/sync')).data.tombstones.some((t) => t.msgId === docs[0].msgId));
