@@ -33,6 +33,16 @@ export function toast(text) {
   toastTimer = setTimeout(() => { t.hidden = true; }, 3500);
 }
 
+// Ao trancar ou apagar: nada do que estava na tela fica (aviso, folha,
+// visualizador, editor, câmera). No PIN de coação, nem a palavra "coação"
+// de um aviso anterior pode aparecer.
+export function clearOverlays() {
+  clearTimeout(toastTimer);
+  const t = document.getElementById('toast');
+  if (t) { t.textContent = ''; t.hidden = true; }
+  for (const el of document.querySelectorAll('.sheet, .viewer, .editor, .camera')) el.remove();
+}
+
 export function header(title, { back, actions = [] } = {}) {
   return h('header', { class: 'bar' },
     back ? h('button', { class: 'icon', 'aria-label': 'Voltar', onclick: back, text: '‹' }) : h('span', { class: 'spacer' }),

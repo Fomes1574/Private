@@ -588,9 +588,10 @@ test('PIN de coação: abre "novo", apaga tudo sem aviso; o PIN de verdade não 
   await bia.page.fill('#secret', '739182');
   await bia.page.click('text=Desbloquear');
   await bia.page.waitForSelector('text=Tenho um convite', { timeout: 20000 });
-  assert.equal(await bia.page.$('text=/destru|apagad|coação/i'), null, 'nenhum aviso visível');
+  assert.doesNotMatch(await bia.page.evaluate(() => document.body.innerText), /destru|apagad|coação/i, 'nenhum aviso visível');
   assert.equal((await rawDbScan(bia)).size, 0, 'nada do banco ficou no aparelho');
-  assert.equal(await bia.page.evaluate(() => new Promise((ok) => { const r = indexedDB.open('mp-app'); r.onsuccess = () => { const n = r.result.objectStoreNames.length; r.result.close(); ok(n); }; r.onerror = () => ok(-1); })), 0, 'cofre apagado do IndexedDB');
+  assert.equal(await bia.page.evaluate(() => Promise.race([new Promise((ok) => setTimeout(() => ok('travado'), 5000)),
+    indexedDB.databases().then((l) => l.filter((d) => d.name === 'mp-app').length)])), 0, 'banco do cofre removido do IndexedDB');
 });
 
 test('código de emergência: de outro aparelho, mata o celular perdido', async () => {

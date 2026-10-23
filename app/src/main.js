@@ -5,7 +5,7 @@ import { CONFIG as BUILD } from './config.js';
 // Release: nada vai para o console (no Android o console do WebView pode
 // parar no logcat; no iPhone, no Web Inspector). Só builds de teste falam.
 if (!BUILD.testHooks && !BUILD.devBuild) for (const k of ['log', 'info', 'warn', 'error', 'debug', 'trace']) console[k] = () => {};
-import { h, mount, toast } from './ui.js';
+import { h, mount, toast, clearOverlays } from './ui.js';
 import { CONFIG } from './config.js';
 import { scriptURL } from './tt.js';
 import * as session from './session.js';
@@ -59,7 +59,10 @@ function setupPrivacy() {
     if (session.S.unlocked) session.syncNow().catch(() => {});
   });
   addEventListener('focus', () => { if (!document.hidden) cover(false); });
-  session.onChange((w) => { if (w?.locked && w.locked !== 'wipe') go('unlock'); });
+  session.onChange((w) => {
+    if (w?.locked) clearOverlays();
+    if (w?.locked && w.locked !== 'wipe') go('unlock');
+  });
 }
 
 async function registerSW() {

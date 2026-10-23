@@ -8,7 +8,7 @@ import { normalize, searchByPrefix, validNickname } from './packages/protocol/sr
 import { MessengerClient } from './packages/client/src/client.js';
 import { Api } from './packages/client/src/api.js';
 import { EncryptedStore } from './db/store.js';
-import { idbGet, idbPut, idbClear, idbPutMany } from './idb.js';
+import { idbGet, idbPut, idbPutMany, idbDestroy } from './idb.js';
 import * as vault from './vault/vault.js';
 import * as passkey from './vault/passkey.js';
 import * as native from './vault/native.js';
@@ -219,8 +219,7 @@ export async function wipeEverything() {
   // Arquivos do banco que não chegaram a ser abertos nesta sessão também saem.
   try { const root = await navigator.storage.getDirectory(); for await (const [name] of root.entries()) await root.removeEntry(name, { recursive: true }).catch(() => {}); } catch {}
   await native.nativeDestroy();
-  await idbClear();
-  try { indexedDB.deleteDatabase('mp-app'); } catch {}
+  await idbDestroy();
 }
 
 // ---------- proteções de emergência (ADR 0014) ----------
