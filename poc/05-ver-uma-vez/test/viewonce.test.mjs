@@ -112,3 +112,17 @@ for (const [backend, port, extra] of [['do', 8799, []], ['r2', 8798, ['--env', '
     });
   });
 }
+
+describe('rota de tokens publicada exige código de acesso', { timeout: 120000 }, () => {
+  let w;
+  before(async () => { w = await startWorker(8797, ['--var', 'PROVA_ACCESS_CODE:codigo-de-teste-123']); });
+  after(() => w?.stop());
+  test('sem código ou com código errado: 401; com o certo: token', async () => {
+    const ask = (code) => fetch(`${w.base}/v1/dev/token`, { method: 'POST', body: JSON.stringify({ member: 'ana' }), headers: code ? { 'x-prova': code } : {} });
+    assert.equal((await ask()).status, 401);
+    assert.equal((await ask('errado')).status, 401);
+    const ok = await ask('codigo-de-teste-123');
+    assert.equal(ok.status, 200);
+    assert.ok((await ok.json()).token);
+  });
+});

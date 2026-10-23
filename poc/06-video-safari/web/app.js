@@ -1,3 +1,4 @@
+import './tt.js'; // precisa vir antes de qualquer import da mediabunny
 import { compress, VideoRejected } from './compress.js';
 
 const $ = (s) => document.querySelector(s);

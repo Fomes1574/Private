@@ -1,4 +1,5 @@
 import * as store from './store.js';
+import { scriptURL } from './tt.js';
 
 const $ = (s) => document.querySelector(s);
 const diag = { events: [] };
@@ -7,7 +8,7 @@ const ROOM = 'sala-teste';
 // (§10): o relógio do aparelho nunca decide prazo.
 const trustedNow = () => Date.now();
 
-const worker = new Worker('./db-worker.js', { type: 'module' });
+const worker = new Worker(scriptURL('./db-worker.js'), { type: 'module' });
 let seq = 0;
 const pending = new Map();
 worker.onmessage = ({ data }) => {

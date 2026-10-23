@@ -4,3 +4,4 @@
 #viewer img { max-width: 100%; max-height: 100%; pointer-events: none; -webkit-user-drag: none; }
 input[type=file] { color: var(--muted); font-size: 14px; }
 #viewer[hidden] { display: none; }
+#code { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--in); background: var(--bar); color: var(--text); font-size: 16px; }

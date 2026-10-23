@@ -1,0 +1,57 @@
+name: deploy-provas
+
+# Só roda quando o proprietário manda (Actions → deploy-provas → Run workflow).
+on:
+  workflow_dispatch:
+    inputs:
+      confirmar:
+        description: 'Digite PUBLICAR para publicar as provas na Cloudflare'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-provas
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event.inputs.confirmar == 'PUBLICAR'
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: deploy/provas } }
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v7
+        with: { node-version: "22" }
+      - name: Conferir segredos (sem mostrar valores)
+        env:
+          TOKEN_SECRET: ${{ secrets.PROVA_TOKEN_SECRET }}
+          ACCESS: ${{ secrets.PROVA_ACCESS_CODE }}
+        run: |
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID TOKEN_SECRET ACCESS; do
+            [ -n "${!v}" ] || { echo "Falta o segredo $v (veja docs/CLOUDFLARE_PASSO_A_PASSO.md)"; exit 1; }
+          done
+          [ ${#TOKEN_SECRET} -ge 32 ] || { echo "PROVA_TOKEN_SECRET precisa de 32+ caracteres"; exit 1; }
+      - run: npm ci
+      - name: Montar dist e conferir hashes das cópias de terceiros
+        run: |
+          node build.mjs
+          (cd ../../poc/03-banco-local-cifrado && npm ci && node vendor.mjs --check)
+          (cd ../../poc/06-video-safari && npm ci && node vendor.mjs --check)
+      - name: Publicar
+        run: npx wrangler deploy
+      - name: Gravar segredos do Worker
+        env:
+          TOKEN_SECRET: ${{ secrets.PROVA_TOKEN_SECRET }}
+          ACCESS: ${{ secrets.PROVA_ACCESS_CODE }}
+        run: |
+          printf '%s' "$TOKEN_SECRET" | npx wrangler secret put TOKEN_SECRET
+          printf '%s' "$ACCESS" | npx wrangler secret put PROVA_ACCESS_CODE
+      - name: Hash do que foi publicado (registrar no RELEASES)
+        run: find dist -type f | sort | xargs sha256sum | sha256sum

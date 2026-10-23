@@ -52,3 +52,9 @@ falta deixar o app instalado parado alguns dias para ver se o iOS apaga.
   instantes; não há texto nem nome.
 - Alternativa avaliada e não usada: SQLite3 Multiple Ciphers (cifra o arquivo
   inteiro). Fica como opção se a cifra por registro pesar no iPhone.
+
+## Trusted Types
+Com `require-trusted-types-for 'script'` (V7-017), `new Worker(url)` é
+bloqueado sem política. `web/tt.js` cria a política `mp-urls`, que só aceita
+arquivos da própria origem com nome da lista. A CSP publicada permite só esse
+nome de política (`trusted-types mp-urls`).

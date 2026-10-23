@@ -11,7 +11,8 @@ function log(t) { diag.events.push(`${new Date().toISOString().slice(11, 19)} ${
 
 async function token(m) {
   if (!tokens[m]) {
-    const r = await fetch('/v1/dev/token', { method: 'POST', body: JSON.stringify({ member: m }) });
+    const r = await fetch('/v1/dev/token', { method: 'POST', body: JSON.stringify({ member: m }), headers: { 'x-prova': $('#code').value } });
+    if (r.status === 401) throw new Error('código de acesso da prova errado');
     if (!r.ok) throw new Error('servidor sem tokens de teste');
     tokens[m] = (await r.json()).token;
   }

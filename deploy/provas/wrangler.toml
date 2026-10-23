@@ -1,0 +1,29 @@
+# Worker único das provas: arquivos estáticos de todas + API da Prova 5.
+# Publicado só pelo CI (.github/workflows/deploy-provas.yml).
+name = "mp-provas"
+main = "../../poc/05-ver-uma-vez/src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = true
+preview_urls = false
+
+[observability]
+enabled = false
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+run_worker_first = ["/v1/*"]
+not_found_handling = "none"
+
+[vars]
+BLOB_BACKEND = "do"
+DEV_TOKENS = "1"
+# TOKEN_SECRET e PROVA_ACCESS_CODE são segredos: o CI grava com `wrangler secret put`.
+
+[[durable_objects.bindings]]
+name = "MEDIA_BOX"
+class_name = "MediaBox"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MediaBox"]

@@ -126,13 +126,28 @@ jobs:
 
   navegador:
     runs-on: ubuntu-24.04
-    needs: [provas-wasm, prova-03, prova-04, prova-06]
-    defaults: { run: { working-directory: e2e } }
+    needs: [provas-wasm, prova-03, prova-04, prova-05, prova-06]
     steps:
       - uses: actions/checkout@v7
         with: { persist-credentials: false }
       - uses: actions/setup-node@v7
         with: { node-version: "22" }
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: npm test
+      - name: Worker de deploy das provas (mesmos cabeçalhos da Cloudflare)
+        working-directory: deploy/provas
+        env: { WRANGLER_SEND_METRICS: "false" }
+        run: |
+          npm ci
+          node build.mjs
+          npx wrangler dev --local --port 8790 --ip 127.0.0.1 \
+            --var TOKEN_SECRET:"$(openssl rand -hex 24)" \
+            --var PROVA_ACCESS_CODE:codigo-ci > /tmp/wrangler.log 2>&1 &
+          for i in $(seq 60); do curl -sf http://127.0.0.1:8790/poc1/ >/dev/null && break; sleep 1; done
+      - name: Testes de navegador
+        working-directory: e2e
+        env:
+          E2E_BASE: http://localhost:8790
+          PROVA_ACCESS_CODE: codigo-ci
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm test

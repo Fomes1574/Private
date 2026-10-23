@@ -5,6 +5,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+// Use localhost, não 127.0.0.1: passkey (WebAuthn) não aceita IP como domínio.
 export const BASE = process.env.E2E_BASE || 'http://localhost:8091';
 
 export async function startServer() {

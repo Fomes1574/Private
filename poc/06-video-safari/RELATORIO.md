@@ -48,3 +48,10 @@ No iPhone a expectativa é bem maior (H.264 por hardware), mas **não medido**.
   continuar ao voltar. O relatório conta quantas vezes o app saiu.
 - **Bitrate e tamanho final (P-13):** os presets são pontos de partida. A escolha
   final depende do tempo e do tamanho medidos aqui e da cota do R2/DO (P-14).
+
+## Trusted Types
+A mediabunny cria Workers a partir de `blob:`. Como os arquivos dela não podem
+ser alterados (MPL + hash conferido), `web/tt.js` cria a política `default`
+que aceita **só** `blob:` da própria origem. Criar esse blob já exige executar
+código na origem, então não abre caminho novo para injeção; qualquer outra URL
+de script, HTML em texto ou script em texto continua bloqueado.

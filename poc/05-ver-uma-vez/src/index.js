@@ -41,6 +41,16 @@ async function issueToken(env, member, ttlSec = 3600) {
   return `${b64u(payload)}.${b64u(sig)}`;
 }
 
+// Comparação sem atalho por tempo: compara os hashes.
+async function sameSecret(a, b) {
+  const enc = new TextEncoder();
+  const [ha, hb] = await Promise.all([crypto.subtle.digest('SHA-256', enc.encode(a)), crypto.subtle.digest('SHA-256', enc.encode(b))]);
+  const x = new Uint8Array(ha), y = new Uint8Array(hb);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
+
 async function authMember(env, request) {
   const h = request.headers.get('authorization') || '';
   const m = /^Bearer ([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/.exec(h);
@@ -63,6 +73,10 @@ export default {
       if (request.method === 'POST' && url.pathname === '/v1/dev/token') {
         // Só existe na prova, com DEV_TOKENS=1. O app real não tem esta rota.
         if (env.DEV_TOKENS !== '1') return fail(404, 'not_found');
+        // Publicado na internet, a rota exige o código de acesso da prova.
+        if (env.PROVA_ACCESS_CODE && !(await sameSecret(request.headers.get('x-prova') || '', env.PROVA_ACCESS_CODE))) {
+          return fail(401, 'unauthorized');
+        }
         const { member } = await request.json();
         if (!ID_RE.test(member || '')) return fail(400, 'bad_member');
         return json(200, { token: await issueToken(env, member) });

@@ -1,0 +1,11 @@
+{
+  "name": "deploy-provas",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs && wrangler dev --local --port 8790",
+    "check": "node build.mjs && wrangler deploy --dry-run --outdir .wrangler/dry"
+  },
+  "devDependencies": { "wrangler": "4.149.0" }
+}

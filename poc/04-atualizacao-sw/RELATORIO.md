@@ -58,3 +58,8 @@ publicar um `sw.js` malicioso; ele entra quando todas as abas fecharem. Isto é
   manualmente cada release; ou segredo do GitHub Actions (aí a conta do GitHub
   vira a raiz de confiança). Decisão do proprietário.
 - Trocar a chave pública exige release assinada pela chave antiga.
+
+## Trusted Types
+Registrar o service worker também exige URL confiável. O `bootstrap.js` cria a
+política `mp-urls`, que só aceita o `sw.js` da própria origem. Sem isso, a PWA
+nem instalaria num iPhone com iOS 26 e a CSP do projeto.
