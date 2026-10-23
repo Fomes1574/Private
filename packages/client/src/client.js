@@ -332,6 +332,8 @@ export class MessengerClient {
         received.push(inner);
       } catch (err) {
         rejected.push({ msgId: e.msgId, sender: e.sender, reason: String(err.message || err) });
+        // Falha de decifra ou de autenticação nunca passa em silêncio.
+        this.warnings.push({ kind: 'message_rejected', userId: e.sender, roomId: e.room, at: this.api.clock.now() });
       }
     }
     await this.persistCrypto(); // estado salvo antes de confirmar

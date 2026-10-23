@@ -204,6 +204,7 @@ export function syncNow() {
         let more = true, rounds = 0;
         while (more && rounds++ < 10 && S.unlocked) {
           const r = await S.client.sync();
+          for (const x of r.rejected) console.warn('mensagem recusada', x.msgId, x.sender, x.reason);
           await handleExtras(r.received);
           more = r.more;
         }
@@ -334,6 +335,9 @@ function connectLive() {
   const url = CONFIG.api.replace(/^http/, 'ws') + '/v1/live';
   try {
     ws = new WebSocket(url, ['mp-v1', S.client.api.token]);
+    // Aviso que chegou antes de o WebSocket abrir se perderia: sincroniza
+    // ao abrir (inclusive em cada reconexão).
+    ws.onopen = () => syncNow().catch((e) => console.error('sincronização falhou', e?.message));
     ws.onmessage = () => syncNow().catch((e) => console.error('sincronização falhou', e?.message));
     ws.onclose = () => { if (S.unlocked) wsRetry = setTimeout(connectLive, 10_000); };
   } catch {}

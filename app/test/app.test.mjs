@@ -12,7 +12,7 @@ let api, appProc, ana, bia;
 
 before(async () => {
   api = await startApi(8793, { appOrigin: APP });
-  execFileSync(process.execPath, ['build.mjs'], { cwd: new URL('..', import.meta.url).pathname, env: { ...process.env, MP_MODE: 'plain', MP_API: api.base }, stdio: 'ignore' });
+  execFileSync(process.execPath, ['build.mjs'], { cwd: new URL('..', import.meta.url).pathname, env: { ...process.env, MP_MODE: 'plain', MP_API: api.base, MP_TEST_HOOKS: '1' }, stdio: 'ignore' });
   appProc = spawn(new URL('../node_modules/.bin/wrangler', import.meta.url).pathname, ['dev', '--local', '--port', String(APP_PORT), '--ip', '127.0.0.1'],
     { cwd: new URL('..', import.meta.url).pathname, stdio: 'ignore', detached: true, env: { ...process.env, WRANGLER_SEND_METRICS: 'false' } });
   for (let i = 0; i < 60; i++) { try { if ((await fetch(APP + '/')).ok) break; } catch {} await new Promise((r) => setTimeout(r, 500)); }
@@ -110,7 +110,7 @@ test('apagar para todos some do outro lado', async () => {
 
 test('foto de ver uma vez: segurar para ver, soltar esconde, uma vez só', async () => {
   const chooser = ana.page.waitForEvent('filechooser');
-  await ana.page.click('[aria-label="Anexar foto"]');
+  await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
   await ana.page.click('text=Foto de ver uma vez');
   await (await chooser).setFiles(new URL('../../poc/01-vodozemac-wasm/web/icon-512.png', import.meta.url).pathname);
   await ana.page.waitForSelector('text=Foto de ver uma vez (enviada)', { timeout: 30000 });
@@ -140,6 +140,59 @@ test('áudio: gravar, enviar cifrado e tocar do outro lado', async () => {
   const src = await bia.page.getAttribute('.audio-box audio', 'src');
   assert.match(src, /^blob:/, 'toca de blob local, sem URL do servidor');
   await bia.page.click('.audio-box >> text=Fechar');
+  assert.equal(await bia.page.$('.sheet'), null, 'fechar o player não abre o menu da mensagem');
+});
+
+// Vídeo de teste gerado no navegador (VP9: o Chromium dos testes não tem
+// H.264), com metadados que precisam sumir na recodificação.
+const makeVideo = (p) => p.page.evaluate(async () => {
+  const mb = await import('./video/vendor/mediabunny.min.mjs');
+  const target = new mb.BufferTarget();
+  const out = new mb.Output({ format: new mb.Mp4OutputFormat({ fastStart: 'in-memory' }), target });
+  const canvas = new OffscreenCanvas(640, 360);
+  const g = canvas.getContext('2d');
+  const src = new mb.CanvasSource(canvas, { codec: 'vp9', bitrate: 2_000_000 });
+  out.addVideoTrack(src, { frameRate: 10 });
+  out.setMetadataTags({ title: 'segredo', comment: 'local: -23.55,-46.63' });
+  await out.start();
+  for (let i = 0; i < 20; i++) { g.fillStyle = `hsl(${i * 17} 70% 50%)`; g.fillRect(0, 0, 640, 360); await src.add(i / 10, 0.1); }
+  await out.finalize();
+  let s = ''; for (const b of new Uint8Array(target.buffer)) s += String.fromCharCode(b);
+  return btoa(s);
+});
+
+test('vídeo: recodificado no aparelho, enviado cifrado, abre do outro lado; ver uma vez só segurando', async () => {
+  const video = Buffer.from(await makeVideo(ana), 'base64');
+  for (const once of [false, true]) {
+    const chooser = ana.page.waitForEvent('filechooser');
+    await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
+    await ana.page.click(once ? 'text=Vídeo de ver uma vez' : 'text=Vídeo (até 5 min)');
+    await (await chooser).setFiles({ name: 'praia.mp4', mimeType: 'video/mp4', buffer: video });
+    await ana.page.waitForSelector(once ? 'text=Vídeo de ver uma vez (enviado)' : '.msg.mine >> text=/Vídeo · 0:02/', { timeout: 60000 })
+      .catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} | aviso: ${await status(ana)}`); });
+  }
+  await bia.page.waitForSelector('.msg:not(.mine) >> text=/Vídeo · 0:02/', { timeout: 40000 });
+  await bia.page.click('.msg:not(.mine) >> text=/Vídeo · 0:02/');
+  await bia.page.waitForSelector('.viewer video[controls]', { timeout: 15000 });
+  const info = await bia.page.$eval('.viewer video', (v) => new Promise((ok) => {
+    const done = () => ok({ src: v.src, w: v.videoWidth, d: v.duration, dl: v.getAttribute('controlslist'), pip: v.disablePictureInPicture });
+    if (v.readyState >= 1) done(); else v.addEventListener('loadedmetadata', done, { once: true });
+  }));
+  assert.match(info.src, /^blob:/, 'toca de blob local');
+  assert.equal(info.w, 640);
+  assert.ok(Math.abs(info.d - 2) < 0.3, `duração ${info.d}`);
+  assert.match(info.dl, /nodownload/);
+  assert.equal(info.pip, true);
+  await bia.page.click('.viewer-close');
+
+  await bia.page.waitForSelector('.hold', { timeout: 40000 });
+  const box = await (await bia.page.$('.hold')).boundingBox();
+  await bia.page.mouse.move(box.x + 10, box.y + 10);
+  await bia.page.mouse.down();
+  await bia.page.waitForSelector('.viewer video:not([controls])', { timeout: 15000 });
+  await bia.page.mouse.up();
+  await bia.page.waitForSelector('.viewer', { state: 'detached' });
+  await bia.page.waitForSelector('text=Vídeo de ver uma vez (já visto)', { timeout: 15000 });
 });
 
 const dbDirs = (p) => p.page.evaluate(async () => {

@@ -52,3 +52,18 @@ test('anúncio de membros: líder precisa estar na lista; no máximo 10', () => 
   assert.throws(() => p.encodeInner({ ...base, kind: 'membership', body: { ...ok, leader: 'user_000009' } }), /membros/);
   assert.throws(() => p.encodeInner({ ...base, kind: 'membership', body: { members: Array.from({ length: 11 }, (_, i) => `user_00000${i}x`), leader: 'user_000001' } }), /membros/);
 });
+
+test('mídia: só formatos que o app gera (V7-016); ver uma vez só foto/vídeo', () => {
+  const media = (body) => ({ ...base, kind: 'media', body: { mediaId: 'media_0000001', key: 'k', mode: 'media', ...body } });
+  for (const mime of ['image/jpeg', 'image/webp', 'video/mp4', 'audio/webm;codecs=opus', 'audio/mp4', 'audio/aac', 'audio/ogg; codecs="opus"']) {
+    assert.ok(p.encodeInner(media({ mime })), mime);
+  }
+  for (const mime of ['image/svg+xml', 'text/html', 'image/png', 'video/quicktime', 'application/pdf', '', undefined, 'video/mp4\nx']) {
+    assert.throws(() => p.encodeInner(media({ mime })), /tipo de mídia/, String(mime));
+  }
+  assert.throws(() => p.encodeInner(media({ mime: 'audio/mp4', mode: 'once' })), /ver uma vez/);
+  assert.ok(p.encodeInner(media({ mime: 'video/mp4', mode: 'once', duration: 300000 })));
+  assert.throws(() => p.encodeInner(media({ mime: 'audio/mp4', duration: 4e6 })), /duração/);
+  assert.throws(() => p.encodeInner(media({ mime: 'audio/mp4', duration: -1 })), /duração/);
+  assert.ok(p.encodeInner(media({ mime: 'application/pdf', mode: 'doc' })), 'documento tem regra própria');
+});

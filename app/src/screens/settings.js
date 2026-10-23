@@ -10,7 +10,7 @@ export async function settingsScreen(go) {
   const me = (await S.client.api.get('/v1/directory')).members;
   const { isAdmin } = await S.client.api.get('/v1/me');
   const fp = await session.myFingerprint();
-  const warnings = S.client.warnings.map((w) => h('li', { class: 'warn', text: `${session.nameOf(w.userId)} trocou de chave (aparelho novo ou recuperação). Verifiquem os números pessoalmente.` }));
+  const warnings = S.client.warnings.map((w) => h('li', { class: 'warn', text: warningText(w) }));
 
   mount(h('div', {},
     header('Ajustes', { back: () => go('chats') }),
@@ -139,4 +139,14 @@ function updateSection() {
       offer.hidden = false;
     } }),
     offer);
+}
+
+function warningText(w) {
+  switch (w.kind) {
+    case 'key_changed': return `${session.nameOf(w.userId)} trocou de chave (aparelho novo ou recuperação). Verifiquem os números pessoalmente.`;
+    case 'message_rejected': return `Uma mensagem de ${session.nameOf(w.userId)} não passou na verificação e foi descartada sem abrir. Se repetir, verifiquem os números pessoalmente.`;
+    case 'unconfirmed_member': return 'O servidor indicou numa conversa alguém que a líder não anunciou. Nada foi enviado. Avisem a líder.';
+    case 'membership_rejected': return `Um anúncio de membros de ${session.nameOf(w.from)} não veio da líder confirmada e foi ignorado.`;
+    default: return 'Aviso de segurança. Verifiquem os números pessoalmente.';
+  }
 }

@@ -9,3 +9,16 @@ const policy = globalThis.trustedTypes?.createPolicy('mp-urls', {
   },
 });
 export const scriptURL = (u) => (policy ? policy.createScriptURL(u) : u);
+
+// A mediabunny (vídeo) cria Workers a partir de URLs blob: internamente e
+// seus arquivos não podem ser alterados (MPL + hash conferido). A política
+// "default" aceita SÓ blob: da própria origem: quem consegue criar esse blob
+// já executa código aqui, então não abre porta nova. HTML e script em texto
+// continuam bloqueados (a política não define createHTML/createScript).
+const origin = location.origin;
+globalThis.trustedTypes?.createPolicy('default', {
+  createScriptURL(u) {
+    if (typeof u === 'string' && u.startsWith(`blob:${origin}/`)) return u;
+    throw new TypeError('URL de script não permitida');
+  },
+});

@@ -38,14 +38,20 @@ for (const [from, to] of [
   ['packages/protocol/src', 'packages/protocol/src'],
   ['packages/client/src', 'packages/client/src'],
   ['poc/03-banco-local-cifrado/web/vendor/sqlite', 'vendor/sqlite'],
+  // Vídeo (Prova 6): mesmo código de compressão e a mediabunny conferida.
+  ['poc/06-video-safari/web/compress.js', 'video/compress.js'],
+  ['poc/06-video-safari/web/vendor', 'video/vendor'],
 ]) await cp(join(repo, from), join(stage, to), { recursive: true });
 for (const f of ['icon-180.png', 'icon-512.png']) await cp(join(repo, 'poc/01-vodozemac-wasm/web', f), join(stage, f));
 
 // Cópia de terceiros precisa bater com o SHA256SUMS conferido no CI.
-const sums = (await readFile(join(stage, 'vendor/sqlite/SHA256SUMS'), 'utf8')).split('\n').filter((l) => /^[0-9a-f]{64}/.test(l));
-for (const l of sums) {
-  const [h, name] = l.split(/\s+/);
-  if (sha(await readFile(join(stage, 'vendor/sqlite', name))) !== h) throw new Error(`SQLite alterado: ${name}`);
+for (const dir of ['vendor/sqlite', 'video/vendor']) {
+  const sums = (await readFile(join(stage, dir, 'SHA256SUMS'), 'utf8')).split('\n').filter((l) => /^[0-9a-f]{64}/.test(l));
+  if (!sums.length) throw new Error(`${dir}: SHA256SUMS vazio`);
+  for (const l of sums) {
+    const [h, name] = l.split(/\s+/);
+    if (sha(await readFile(join(stage, dir, name))) !== h) throw new Error(`${dir} alterado: ${name}`);
+  }
 }
 
 // 2) Assinatura.
@@ -73,9 +79,11 @@ export const CONFIG = Object.freeze(${JSON.stringify({ api, version, versionCode
 
 // 4) Saída.
 const connect = `'self' ${api} ${api.replace(/^http/, 'ws')}`;
-const csp = ["default-src 'none'", "script-src 'self' 'wasm-unsafe-eval'", "worker-src 'self'", `connect-src ${connect}`,
+// worker-src blob: e a política TT "default" existem só para os Workers
+// internos da mediabunny (ver src/tt.js).
+const csp = ["default-src 'none'", "script-src 'self' 'wasm-unsafe-eval'", "worker-src 'self' blob:", `connect-src ${connect}`,
   "style-src 'self'", "img-src 'self' blob:", "media-src 'self' blob:", "manifest-src 'self'", "base-uri 'none'", "form-action 'none'",
-  "frame-ancestors 'none'", "object-src 'none'", "require-trusted-types-for 'script'", 'trusted-types mp-urls'].join('; ');
+  "frame-ancestors 'none'", "object-src 'none'", "require-trusted-types-for 'script'", 'trusted-types mp-urls default'].join('; ');
 const headers = ['/*', `  Content-Security-Policy: ${csp}`, '  X-Content-Type-Options: nosniff', '  Referrer-Policy: no-referrer',
   '  Cross-Origin-Opener-Policy: same-origin', '  Cross-Origin-Embedder-Policy: require-corp', '  Cross-Origin-Resource-Policy: same-origin',
   '  Permissions-Policy: geolocation=(), microphone=(self), camera=(self), payment=(), usb=()',

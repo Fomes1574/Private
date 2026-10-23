@@ -73,6 +73,7 @@ test('mensagem falsificada (remetente trocado por dentro) é descartada', async 
   const r = await p.bia.sync();
   assert.equal(r.received.length, 0);
   assert.match(r.rejected[0].reason, /não conferem/);
+  assert.ok(p.bia.warnings.some((w) => w.kind === 'message_rejected' && w.userId === p.caio.userId), 'aviso de segurança registrado');
   assert.ok(!(await p.bia.store.getMessage(msgId)));
 });
 

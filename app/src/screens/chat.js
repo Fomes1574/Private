@@ -4,11 +4,14 @@ import { h, mount, header, toast, choiceSheet, confirmSheet } from '../ui.js';
 import * as session from '../session.js';
 import { formatTime, formatDateTime } from '../packages/protocol/src/time.js';
 import { preparePhoto } from '../media.js';
-import { openPhoto, holdButton, playAudio } from './viewer.js';
+import { openMedia, holdButton, playAudio } from './viewer.js';
+import { CONFIG } from '../config.js';
 import { startRecording, fmtDuration } from '../audio.js';
 import { roomMenu } from './room-menu.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+// Abaixo do limite do servidor (100 MiB) com folga para a cifra segmentada.
+const MAX_VIDEO_BYTES = 95 * 1024 * 1024;
 const EMOJIS = ['😀', '😂', '🥲', '😍', '😘', '😎', '🤔', '😴', '😢', '😡', '👍', '👎', '👏', '🙏', '💪', '❤️', '🔥', '✨', '🎉', '🌙', '☀️', '🌧️', '☕', '🍕'];
 
 export async function chatScreen(go, { roomId }) {
@@ -20,7 +23,9 @@ export async function chatScreen(go, { roomId }) {
   const input = h('textarea', { id: 'composer', rows: '1', maxlength: '4000', placeholder: 'Mensagem', autocomplete: 'off', autocorrect: 'off', spellcheck: 'false', 'aria-label': 'Mensagem' });
   const replyBar = h('div', { class: 'reply-bar', hidden: true });
   const fileIn = h('input', { type: 'file', accept: 'image/*', hidden: true });
-  let onceNext = false;
+  let pick = { video: false, once: false };
+  const progressBar = h('div', { class: 'progress', hidden: true });
+  let videoJob = null;
 
   const send = async () => {
     const text = input.value.trim();
@@ -42,19 +47,63 @@ export async function chatScreen(go, { roomId }) {
     const f = fileIn.files[0];
     fileIn.value = '';
     if (!f) return;
+    const { video, once } = pick;
+    if (video) return sendVideo(f, once);
     try {
       toast('Preparando a foto…');
       const p = await preparePhoto(f);
-      await S.client.sendMedia(roomId, p.bytes, { mode: onceNext ? 'once' : 'media', mime: p.mime });
+      await S.client.sendMedia(roomId, p.bytes, { mode: once ? 'once' : 'media', mime: p.mime });
       p.bytes.fill(0);
       await render();
     } catch (e) { toast(`Não enviou: ${e.message}`); }
   };
 
+  // Vídeo (§14, V7-016): sempre recodificado no aparelho (até 5 min, 1080p,
+  // sem metadados) antes de cifrar. Se ficar grande demais, tenta a
+  // qualidade econômica; se ainda não couber, não envia nada.
+  async function sendVideo(file, once) {
+    if (videoJob) return toast('Já há um vídeo sendo preparado.');
+    const ctl = new AbortController();
+    videoJob = ctl;
+    const bar = h('progress', { max: '1', value: '0' });
+    const label = h('span', { class: 'muted small', text: 'Preparando o vídeo…' });
+    progressBar.replaceChildren(label, bar, h('button', { class: 'secondary small', text: 'Cancelar', onclick: () => ctl.abort() }));
+    progressBar.hidden = false;
+    let bytes = null;
+    try {
+      const { compress, VideoRejected } = await import('../video/compress.js');
+      // Chromium dos testes não tem H.264; o app de verdade usa sempre H.264.
+      const videoCodec = CONFIG.testHooks ? 'vp9' : 'avc';
+      let r;
+      try {
+        for (const preset of ['padrao', 'economico']) {
+          label.textContent = preset === 'padrao' ? 'Preparando o vídeo…' : 'Ficou grande; reduzindo a qualidade…';
+          r = await compress(file, { preset, videoCodec, onProgress: (p) => { bar.value = p; }, signal: ctl.signal });
+          if (r.blob.size <= MAX_VIDEO_BYTES) break;
+          r = null;
+        }
+      } catch (e) {
+        if (ctl.signal.aborted) return toast('Cancelado. Nada foi enviado.');
+        throw e instanceof VideoRejected ? e : new Error(`não deu para preparar o vídeo (${e.message})`);
+      }
+      if (!r) throw new Error('vídeo grande demais mesmo comprimido. Nada foi enviado.');
+      if (ctl.signal.aborted) return toast('Cancelado. Nada foi enviado.');
+      label.textContent = 'Enviando cifrado…';
+      bar.removeAttribute('value');
+      bytes = new Uint8Array(await r.blob.arrayBuffer());
+      await S.client.sendMedia(roomId, bytes, { mode: once ? 'once' : 'media', mime: 'video/mp4', duration: Math.round(r.stats.out.duration * 1000) });
+      await render();
+    } catch (e) { toast(`Não enviou: ${e.message}`); }
+    finally { bytes?.fill(0); videoJob = null; progressBar.hidden = true; progressBar.replaceChildren(); }
+  }
+
   const attach = async () => {
-    const c = await choiceSheet('Enviar foto', [{ label: 'Foto', value: 'media' }, { label: 'Foto de ver uma vez', value: 'once' }]);
+    const c = await choiceSheet('Enviar', [
+      { label: 'Foto', value: 'photo' }, { label: 'Foto de ver uma vez', value: 'photo-once' },
+      { label: 'Vídeo (até 5 min)', value: 'video' }, { label: 'Vídeo de ver uma vez', value: 'video-once' }]);
     if (!c) return;
-    onceNext = c === 'once';
+    pick = { video: c.startsWith('video'), once: c.endsWith('-once') };
+    fileIn.accept = pick.video ? 'video/*' : 'image/*';
     fileIn.click();
   };
   // Microfone: tocar para gravar; enviar ou descartar. Até 1 hora.
@@ -85,9 +134,9 @@ export async function chatScreen(go, { roomId }) {
     h('div', { class: 'policy muted small', text: policyLine(view) }),
     log,
     view.closed ? h('p', { class: 'note center-text', text: 'Conversa encerrada. O que já existe continua só para leitura até vencer.' }) :
-      h('footer', { class: 'composer' }, replyBar, recBar, emojiPanel,
+      h('footer', { class: 'composer' }, replyBar, recBar, progressBar, emojiPanel,
         h('div', { class: 'row' },
-          h('button', { class: 'icon', 'aria-label': 'Anexar foto', text: '+', onclick: attach }),
+          h('button', { class: 'icon', 'aria-label': 'Anexar foto ou vídeo', text: '+', onclick: attach }),
           input,
           h('button', { class: 'icon', 'aria-label': 'Emojis', text: '☺', onclick: () => { emojiPanel.hidden = !emojiPanel.hidden; } }),
           h('button', { class: 'icon', 'aria-label': 'Gravar áudio', text: '🎙', onclick: mic }),
@@ -134,14 +183,16 @@ export async function chatScreen(go, { roomId }) {
     const reacts = Object.values(m.reactions ?? {});
     if (reacts.length) meta.push(h('span', { class: 'reacts', text: reacts.join('') }));
     parts.push(h('span', { class: 'meta' }, meta));
-    return h('li', { class: mine ? 'msg mine' : 'msg', onclick: (e) => { if (!e.target.closest('.hold, .open')) actions(m); } }, parts);
+    return h('li', { class: mine ? 'msg mine' : 'msg', onclick: (e) => { if (!e.target.closest('.hold, .open, .audio-box')) actions(m); } }, parts);
   }
 
   function mediaBlock(m, mine) {
     const load = () => S.client.openMedia(m);
+    const what = mediaName(m);
     if (m.body.mode === 'once') {
-      if (mine) return h('span', { class: 'media-tag', text: 'Foto de ver uma vez (enviada)' });
-      if (m.consumed || !m.body.key) return h('span', { class: 'media-tag', text: 'Foto de ver uma vez (já vista)' });
+      const a = what === 'Foto' ? 'a' : 'o';
+      if (mine) return h('span', { class: 'media-tag', text: `${what} de ver uma vez (enviad${a})` });
+      if (m.consumed || !m.body.key) return h('span', { class: 'media-tag', text: `${what} de ver uma vez (já vist${a})` });
       // O núcleo do cliente já apaga a chave depois da tentativa; aqui só redesenha.
       return holdButton('Segure para ver (uma vez)', load, m.body.mime, async (err) => {
         if (err && !/410|404/.test(err.message)) toast(`Não abriu: ${err.message}`);
@@ -152,7 +203,8 @@ export async function chatScreen(go, { roomId }) {
       const host = h('span', { class: 'audio-host' });
       return h('span', {}, h('button', { class: 'open media-tag', text: `Áudio · ${fmtDuration(m.body.duration ?? 0)} · tocar`, onclick: () => playAudio(load, m.body.mime, host).catch((e) => toast(`Não tocou: ${e.message}`)) }), host);
     }
-    return h('button', { class: 'open media-tag', text: 'Foto · tocar para ver', onclick: () => openPhoto(load, m.body.mime).catch((e) => toast(`Não abriu: ${e.message}`)) });
+    const label = what === 'Vídeo' ? `Vídeo · ${fmtDuration(m.body.duration ?? 0)} · tocar para ver` : 'Foto · tocar para ver';
+    return h('button', { class: 'open media-tag', text: label, onclick: () => openMedia(load, m.body.mime).catch((e) => toast(`Não abriu: ${e.message}`)) });
   }
 
   async function render() {
@@ -169,8 +221,13 @@ export async function chatScreen(go, { roomId }) {
   return () => { clearInterval(timer); off(); };
 }
 
+function mediaName(m) {
+  const mime = m.body?.mime ?? '';
+  return /^audio\//.test(mime) ? 'Áudio' : /^video\//.test(mime) ? 'Vídeo' : 'Foto';
+}
+
 function preview(m) {
-  if (m.kind === 'media') return m.body?.mode === 'once' ? 'Foto de ver uma vez' : /^audio\//.test(m.body?.mime ?? '') ? 'Áudio' : 'Foto';
+  if (m.kind === 'media') return m.body?.mode === 'once' ? `${mediaName(m)} de ver uma vez` : mediaName(m);
   return (m.text ?? '').slice(0, 60);
 }
 

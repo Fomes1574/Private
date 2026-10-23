@@ -31,6 +31,8 @@ export function unpad(padded) {
   return padded.subarray(4, 4 + len);
 }
 
+// Foto JPEG/WebP, vídeo MP4, áudio Opus (WebM/Ogg) ou AAC/MP4 do Safari.
+export const MEDIA_MIME = /^(image\/(jpeg|webp)|video\/mp4|audio\/(webm|ogg|mp4|aac))(;\s?codecs="?[a-z0-9.]+"?)?$/;
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
 
 // Valida a estrutura. Não decide permissão (isso é de policy.js).
@@ -51,7 +53,16 @@ export function validateInner(m) {
       if (!Array.isArray(m.body?.members) || m.body.members.length < 1 || m.body.members.length > 10 || !m.body.members.every((x) => ID.test(x)) || !ID.test(m.body.leader ?? '') || !m.body.members.includes(m.body.leader)) fail('membros');
       break;
     case 'room_profile': if (typeof m.body?.title !== 'string' || m.body.title.length > 60) fail('nome do grupo'); break;
-    case 'media': if (!ID.test(m.body?.mediaId ?? '') || typeof m.body.key !== 'string' || !['once', 'media', 'doc'].includes(m.body.mode)) fail('mídia'); break;
+    case 'media': {
+      const b = m.body;
+      if (!ID.test(b?.mediaId ?? '') || typeof b.key !== 'string' || !['once', 'media', 'doc'].includes(b.mode)) fail('mídia');
+      // V7-016: só formatos que o próprio app gera ao recodificar. Qualquer
+      // outro tipo é recusado antes de chegar perto de um decodificador.
+      if (b.mode !== 'doc' && !MEDIA_MIME.test(b.mime ?? '')) fail('tipo de mídia');
+      if (b.mode === 'once' && !/^(image|video)\//.test(b.mime)) fail('ver uma vez só para foto ou vídeo');
+      if (b.duration !== undefined && !(Number.isSafeInteger(b.duration) && b.duration >= 0 && b.duration <= 3_600_000 + 5_000)) fail('duração');
+      break;
+    }
     default: break;
   }
   if (m.replyTo !== undefined && !ID.test(m.replyTo)) fail('replyTo');

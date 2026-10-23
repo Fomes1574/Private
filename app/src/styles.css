@@ -72,7 +72,9 @@ fieldset { border: 1px solid var(--in); border-radius: 12px; padding: 8px 12px; 
 
 /* Visualizador sem nada sobreposto à imagem (§15, §2.1) */
 .viewer { position: fixed; inset: 0; background: #000; display: grid; place-items: center; z-index: 40; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-.viewer img { max-width: 100%; max-height: 100%; pointer-events: none; -webkit-user-drag: none; }
+.viewer img, .viewer video { max-width: 100%; max-height: 100%; -webkit-user-drag: none; }
+.viewer img, .viewer video:not([controls]) { pointer-events: none; }
+.progress { display: grid; gap: 6px; } .progress progress { width: 100%; }
 .viewer-close { position: absolute; top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); background: rgba(255,255,255,.15); color: #fff; }
 
 /* Capa ao sair do app: nada aparece no seletor de apps */
