@@ -47,3 +47,29 @@ export function holdButton(label, load, mime, onConsumed) {
   for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) btn.addEventListener(ev, close);
   return btn;
 }
+
+// Áudio: toca dentro do app, sem baixar nem compartilhar; 1×, 1,5× e 2×.
+let currentAudio = null;
+function stopAudio() {
+  if (!currentAudio) return;
+  currentAudio.el.pause();
+  currentAudio.el.removeAttribute('src');
+  URL.revokeObjectURL(currentAudio.url);
+  currentAudio.box.remove();
+  currentAudio = null;
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopAudio(); });
+addEventListener('pagehide', stopAudio);
+
+export async function playAudio(load, mime, host) {
+  stopAudio();
+  const bytes = await load();
+  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+  bytes.fill(0);
+  const el = h('audio', { src: url, controls: true, controlslist: 'nodownload noplaybackrate', preload: 'auto' });
+  const speeds = [1, 1.5, 2].map((r) => h('button', { class: 'secondary small', text: `${r.toLocaleString('pt-BR')}×`, onclick: () => { el.playbackRate = r; } }));
+  const box = h('div', { class: 'audio-box' }, el, h('div', { class: 'row' }, speeds, h('button', { class: 'secondary small', text: 'Fechar', onclick: stopAudio })));
+  host.append(box);
+  currentAudio = { el, url, box };
+  el.play().catch(() => {});
+}

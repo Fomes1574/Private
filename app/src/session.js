@@ -166,6 +166,10 @@ export async function lock(reason = 'manual') {
   S.unlocked = false;
   S.kek = null;
   clearTimeout(rotateTimer);
+  // Nada legível fica na memória da página depois de trancar.
+  S.nicknames = {};
+  S.rooms = {};
+  viewCache.clear();
   disconnectLive();
   S.client = null;
   await S.store?.lock();
@@ -173,6 +177,12 @@ export async function lock(reason = 'manual') {
 }
 
 export async function wipeEverything() {
+  // Antes de destruir as chaves: cancela notificações e encerra a sessão no servidor.
+  if (S.unlocked) {
+    try { await S.client.api.post('/v1/push', { endpoint: null }); } catch {}
+    try { await S.client.api.post('/v1/auth/logout'); } catch {}
+    try { const reg = await navigator.serviceWorker?.ready; await (await reg?.pushManager?.getSubscription())?.unsubscribe(); } catch {}
+  }
   await lock('wipe');
   await S.store?.wipe();
   await native.nativeDestroy();
@@ -181,21 +191,28 @@ export async function wipeEverything() {
 }
 
 // ---------- sincronização ----------
-let syncing = null;
+// Um pedido que chega durante uma sincronização em curso (ex.: aviso do
+// WebSocket) não pode se perder: marca `again` e o laço roda mais uma vez.
+let syncing = null, again = false;
 export function syncNow() {
   if (!S.unlocked) return Promise.resolve();
-  return (syncing ??= (async () => {
+  if (syncing) { again = true; return syncing; }
+  return (syncing = (async () => {
     try {
-      let more = true, rounds = 0;
-      while (more && rounds++ < 10) {
-        const r = await S.client.sync();
-        await handleExtras(r.received);
-        more = r.more;
-      }
-      if (S.clock.now() && (await S.store.purgeExpired(S.clock.now())) > 0) scheduleRotate();
-      await maybeAnnounce();
-      emit('synced');
-    } finally { syncing = null; }
+      do {
+        again = false;
+        let more = true, rounds = 0;
+        while (more && rounds++ < 10 && S.unlocked) {
+          const r = await S.client.sync();
+          await handleExtras(r.received);
+          more = r.more;
+        }
+        if (!S.unlocked) break;
+        if (S.clock.now() && (await S.store.purgeExpired(S.clock.now())) > 0) scheduleRotate();
+        await maybeAnnounce();
+        emit('synced');
+      } while (again && S.unlocked);
+    } finally { syncing = null; again = false; }
   })());
 }
 
@@ -317,10 +334,10 @@ function connectLive() {
   const url = CONFIG.api.replace(/^http/, 'ws') + '/v1/live';
   try {
     ws = new WebSocket(url, ['mp-v1', S.client.api.token]);
-    ws.onmessage = () => syncNow().catch(() => {});
+    ws.onmessage = () => syncNow().catch((e) => console.error('sincronização falhou', e?.message));
     ws.onclose = () => { if (S.unlocked) wsRetry = setTimeout(connectLive, 10_000); };
   } catch {}
-  pollTimer = setInterval(() => { if (!document.hidden) syncNow().catch(() => {}); }, 30_000);
+  pollTimer = setInterval(() => { if (!document.hidden) syncNow().catch((e) => console.error('sincronização falhou', e?.message)); }, 30_000);
 }
 function disconnectLive() {
   clearTimeout(wsRetry); clearInterval(pollTimer);

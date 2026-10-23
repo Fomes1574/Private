@@ -68,7 +68,7 @@ const files = (await walk(stage)).filter((f) => !f.endsWith('/config.js'));
 const contentHash = sha(Buffer.concat(await Promise.all(files.sort().map(async (f) => Buffer.from(relative(stage, f) + '\0' + sha(await readFile(f)))))));
 const versionCode = `${version}-${contentHash.slice(0, 8)}${devBuild ? '-dev' : ''}`;
 await writeFile(join(stage, 'config.js'), `// Gerado pelo build. Não editar.
-export const CONFIG = Object.freeze(${JSON.stringify({ api, version, versionCode, serviceWorker: mode === 'sw', devBuild })});
+export const CONFIG = Object.freeze(${JSON.stringify({ api, version, versionCode, serviceWorker: mode === 'sw', devBuild, testHooks: process.env.MP_TEST_HOOKS === '1' && mode === 'plain' })});
 `);
 
 // 4) Saída.

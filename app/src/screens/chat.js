@@ -4,7 +4,8 @@ import { h, mount, header, toast, choiceSheet, confirmSheet } from '../ui.js';
 import * as session from '../session.js';
 import { formatTime, formatDateTime } from '../packages/protocol/src/time.js';
 import { preparePhoto } from '../media.js';
-import { openPhoto, holdButton } from './viewer.js';
+import { openPhoto, holdButton, playAudio } from './viewer.js';
+import { startRecording, fmtDuration } from '../audio.js';
 import { roomMenu } from './room-menu.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
@@ -56,6 +57,27 @@ export async function chatScreen(go, { roomId }) {
     onceNext = c === 'once';
     fileIn.click();
   };
+  // Microfone: tocar para gravar; enviar ou descartar. Até 1 hora.
+  const recBar = h('div', { class: 'rec-bar', hidden: true });
+  let recording = null;
+  const mic = async () => {
+    if (recording) return;
+    try {
+      const timer = h('span', { class: 'code', text: '0:00' });
+      recording = await startRecording({ onTick: (ms) => { timer.textContent = fmtDuration(ms); }, onLimit: () => toast('Limite de 1 hora: gravação encerrada.') });
+      recBar.replaceChildren(h('span', { class: 'rec-dot', 'aria-hidden': 'true' }), h('span', { text: 'Gravando ' }), timer,
+        h('button', { class: 'secondary small', text: 'Descartar', onclick: () => { recording.cancel(); recording = null; recBar.hidden = true; } }),
+        h('button', { class: 'small', text: 'Enviar áudio', onclick: async () => {
+          const r = await recording.stop();
+          recording = null; recBar.hidden = true;
+          if (r.ms < 700) { r.bytes.fill(0); return toast('Áudio curto demais.'); }
+          try { await S.client.sendMedia(roomId, r.bytes, { mode: 'media', mime: r.mime, duration: r.ms }); await render(); }
+          catch (e) { toast(`Não enviou: ${e.message}`); } finally { r.bytes.fill(0); }
+        } }));
+      recBar.hidden = false;
+    } catch (e) { recording = null; toast(e.name === 'NotAllowedError' ? 'Microfone negado.' : `Não deu para gravar: ${e.message}`); }
+  };
+
   const emojiPanel = h('div', { class: 'emoji-panel', hidden: true }, EMOJIS.map((e) => h('button', { class: 'emoji', type: 'button', text: e, onclick: () => { input.value += e; input.focus(); } })));
 
   mount(h('div', { class: 'chat' },
@@ -63,11 +85,12 @@ export async function chatScreen(go, { roomId }) {
     h('div', { class: 'policy muted small', text: policyLine(view) }),
     log,
     view.closed ? h('p', { class: 'note center-text', text: 'Conversa encerrada. O que já existe continua só para leitura até vencer.' }) :
-      h('footer', { class: 'composer' }, replyBar, emojiPanel,
+      h('footer', { class: 'composer' }, replyBar, recBar, emojiPanel,
         h('div', { class: 'row' },
           h('button', { class: 'icon', 'aria-label': 'Anexar foto', text: '+', onclick: attach }),
           input,
           h('button', { class: 'icon', 'aria-label': 'Emojis', text: '☺', onclick: () => { emojiPanel.hidden = !emojiPanel.hidden; } }),
+          h('button', { class: 'icon', 'aria-label': 'Gravar áudio', text: '🎙', onclick: mic }),
           h('button', { class: 'send', 'aria-label': 'Enviar', text: '➤', onclick: send })),
         fileIn)));
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
@@ -125,6 +148,10 @@ export async function chatScreen(go, { roomId }) {
         setTimeout(() => render().catch(() => {}), 300);
       });
     }
+    if (/^audio\//.test(m.body.mime)) {
+      const host = h('span', { class: 'audio-host' });
+      return h('span', {}, h('button', { class: 'open media-tag', text: `Áudio · ${fmtDuration(m.body.duration ?? 0)} · tocar`, onclick: () => playAudio(load, m.body.mime, host).catch((e) => toast(`Não tocou: ${e.message}`)) }), host);
+    }
     return h('button', { class: 'open media-tag', text: 'Foto · tocar para ver', onclick: () => openPhoto(load, m.body.mime).catch((e) => toast(`Não abriu: ${e.message}`)) });
   }
 
@@ -143,7 +170,7 @@ export async function chatScreen(go, { roomId }) {
 }
 
 function preview(m) {
-  if (m.kind === 'media') return m.body?.mode === 'once' ? 'Foto de ver uma vez' : 'Foto';
+  if (m.kind === 'media') return m.body?.mode === 'once' ? 'Foto de ver uma vez' : /^audio\//.test(m.body?.mime ?? '') ? 'Áudio' : 'Foto';
   return (m.text ?? '').slice(0, 60);
 }
 

@@ -17,10 +17,12 @@ export async function startServer() {
   return () => proc.kill();
 }
 
-export async function browser() {
+export async function browser({ args = [] } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'e2e-'));
   const ctx = await chromium.launchPersistentContext(dir, {
     headless: true,
+    // Microfone e câmera simulados para os testes de áudio.
+    args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', ...args],
     executablePath: process.env.CHROMIUM_PATH || undefined,
   });
   return ctx;

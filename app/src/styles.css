@@ -81,3 +81,7 @@ fieldset { border: 1px solid var(--in); border-radius: 12px; padding: 8px 12px; 
 .covered #root, .covered .sheet, .covered .viewer { visibility: hidden; }
 
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+.rec-bar { display: flex; gap: 8px; align-items: center; }
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); }
+.audio-box { display: grid; gap: 6px; margin-top: 6px; } .audio-box audio { width: 100%; }
+button.small { padding: 6px 10px; min-height: 36px; font-size: 14px; }

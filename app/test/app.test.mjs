@@ -128,6 +128,20 @@ test('foto de ver uma vez: segurar para ver, soltar esconde, uma vez só', async
   await bia.page.waitForSelector('text=Foto de ver uma vez (já vista)', { timeout: 15000 });
 });
 
+test('áudio: gravar, enviar cifrado e tocar do outro lado', async () => {
+  await ana.page.click('[aria-label="Gravar áudio"]');
+  await ana.page.waitForSelector('.rec-bar:not([hidden])');
+  await ana.page.waitForTimeout(2200);
+  await ana.page.click('text=Enviar áudio');
+  await ana.page.waitForSelector('.msg.mine >> text=/Áudio · 0:0[2-3]/', { timeout: 20000 });
+  await bia.page.waitForSelector('.msg:not(.mine) >> text=/Áudio · 0:0[2-3]/', { timeout: 40000 });
+  await bia.page.click('.msg:not(.mine) >> text=/Áudio/');
+  await bia.page.waitForSelector('.audio-box audio', { timeout: 15000 });
+  const src = await bia.page.getAttribute('.audio-box audio', 'src');
+  assert.match(src, /^blob:/, 'toca de blob local, sem URL do servidor');
+  await bia.page.click('.audio-box >> text=Fechar');
+});
+
 const dbDirs = (p) => p.page.evaluate(async () => {
   const out = [];
   for await (const [name] of (await navigator.storage.getDirectory()).entries()) if (name.startsWith('.mp-')) out.push(name);

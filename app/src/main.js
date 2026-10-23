@@ -56,6 +56,8 @@ async function registerSW() {
 }
 
 async function start() {
+  // Só em build de teste (MP_TEST_HOOKS=1, modo plain): expõe a sessão.
+  if (CONFIG.testHooks) globalThis.__mpTest = session;
   setupPrivacy();
   await registerSW();
   try { await navigator.storage?.persist?.(); } catch {}
