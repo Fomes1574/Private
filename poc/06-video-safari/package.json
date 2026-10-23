@@ -1,0 +1,11 @@
+{
+  "name": "poc-06-video-safari",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "vendor": "node vendor.mjs",
+    "test": "node --test test/*.test.mjs",
+    "serve": "node ../../scripts/serve.mjs"
+  },
+  "devDependencies": { "mediabunny": "1.61.3" }
+}

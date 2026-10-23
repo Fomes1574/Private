@@ -11,7 +11,7 @@ se as partes mais arriscadas da arquitetura funcionam antes de escrever o app.
 | 3 | Banco local cifrado (SQLite/WASM) no app da Tela de Início | [`poc/03-banco-local-cifrado`](poc/03-banco-local-cifrado) | Funciona no Chromium; falta iPhone |
 | 4 | Atualização com versão travada e manifesto assinado | [`poc/04-atualizacao-sw`](poc/04-atualizacao-sw) | Funciona no Chromium; falta iPhone |
 | 5 | Ver uma vez com consumo atômico no Durable Object | [`poc/05-ver-uma-vez`](poc/05-ver-uma-vez) | Funciona no Worker local; falta Cloudflare e iPhone |
-| 6 | Comprimir vídeo no Safari | — | A fazer |
+| 6 | Comprimir vídeo no aparelho (WebCodecs) | [`poc/06-video-safari`](poc/06-video-safari) | Fluxo ok no Chromium (VP9); H.264 só no iPhone/Android |
 
 Cada pasta tem um `RELATORIO.md` com o que funcionou e o que não funcionou.
 

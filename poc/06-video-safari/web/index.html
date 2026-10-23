@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; worker-src 'self' blob:; connect-src 'self'; style-src 'self'; img-src 'self'; media-src 'self' blob:; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0B1220">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="style.css">
+<title>Prova 6 · Vídeo</title>
+</head>
+<body>
+<header>
+  <h1>Prova 6 · Comprimir vídeo no aparelho</h1>
+  <p id="status">Carregando…</p>
+</header>
+<main id="app" hidden>
+  <section class="person">
+    <label>Vídeo <input id="file" type="file" accept="video/*"></label>
+    <label>Qualidade
+      <select id="preset">
+        <option value="padrao">Padrão (até 1080p, 2,5 Mbit/s)</option>
+        <option value="economico">Econômico (até 720p, 1,2 Mbit/s)</option>
+      </select>
+    </label>
+    <button id="go">Comprimir</button>
+    <button id="cancel" class="secondary" hidden>Cancelar</button>
+    <progress id="bar" max="1" value="0" hidden></progress>
+  </section>
+  <section class="person" id="result" hidden>
+    <h2>Resultado (só neste aparelho)</h2>
+    <video id="preview" controls playsinline muted></video>
+  </section>
+  <section class="tools"><button id="copy" class="secondary">Copiar relatório</button></section>
+  <section><h2>Diagnóstico</h2><pre id="diag"></pre></section>
+  <details>
+    <summary>Como testar</summary>
+    <ol>
+      <li>Grave um vídeo 4K de uns 30 segundos com a câmera do iPhone (de preferência com localização ligada).</li>
+      <li>Escolha o vídeo, deixe “Padrão” e toque em “Comprimir”. Não saia do app durante a compressão.</li>
+      <li>Anote o tempo, o tamanho final e se o vídeo toca. “tagKeys” do resultado deve vir vazio.</li>
+      <li>Repita com um vídeo de 1 minuto e com um de mais de 5 minutos (deve ser recusado na hora).</li>
+      <li>Teste também saindo do app no meio da compressão e voltando.</li>
+      <li>Toque em “Copiar relatório” e me mande.</li>
+    </ol>
+  </details>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
