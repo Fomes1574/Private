@@ -17,7 +17,11 @@ FLAGS=$(echo "$DUMP" | grep -m1 ' flags=\[' || true)
 echo "flags: $FLAGS"
 echo "$FLAGS" | grep -q DEBUGGABLE && fail "pacote depurável"
 echo "$FLAGS" | grep -q ALLOW_BACKUP && fail "backup permitido"
-adb shell run-as "$PKG" ls 2>&1 | grep -qiE "not debuggable|unknown package|is not an application" || fail "run-as conseguiu entrar nos dados do app"
+# run-as só entra em app depurável. Reprova só se ele de fato rodou como o
+# app (a mensagem de recusa muda entre versões do Android).
+RUNAS=$(adb shell run-as "$PKG" id 2>&1 || true)
+echo "run-as: $RUNAS"
+echo "$RUNAS" | grep -q 'uid=' && fail "run-as conseguiu entrar nos dados do app"
 
 # 2) Permissões perigosas começam negadas (pedidas só na hora do uso).
 for p in CAMERA RECORD_AUDIO POST_NOTIFICATIONS; do
