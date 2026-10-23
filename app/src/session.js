@@ -49,13 +49,16 @@ export function scheduleRotate() {
 
 export function rotate() {
   if (!S.unlocked) return Promise.resolve(false);
-  if (!S.kek) return Promise.reject(new Error('sem chave de embrulho em memória: rotação impossível'));
+  // Guarde a referência ANTES do primeiro await: lock() pode zerar S.kek
+  // enquanto a leitura do registro está em andamento.
+  const kek = S.kek;
+  if (!kek) return Promise.reject(new Error('sem chave de embrulho em memória: rotação impossível'));
   return (rotating ??= (async () => {
     try {
       clearTimeout(rotateTimer);
       dirty = false;
       const rec = await vaultStore.load();
-      const { record, dek } = await vault.rotateDek(rec, S.kek);
+      const { record, dek } = await vault.rotateDek(rec, kek);
       const name = newPoolName();
       await S.store.rebuild(dek, name, S.clock?.now() ?? Date.now());
       await idbPutMany({ vault: record, activePool: name, lastRotate: Date.now() }); // troca atômica
@@ -190,6 +193,10 @@ async function afterUnlock({ loggedIn = false } = {}) {
 // Sair do app esconde na hora e, depois de um tempo, tranca de verdade (§20).
 export async function lock(reason = 'manual') {
   if (!S.unlocked) return;
+  // Se a rotação começou pelo temporizador, espere sua transação terminar
+  // antes de bloquear/apagar. Nunca deixe um rebuild continuar depois da
+  // limpeza do cofre; isso pode recriar arquivos que estavam sendo apagados.
+  if (rotating) await rotating.catch((e) => console.error('rotação em curso falhou', e?.message));
   // Algo foi apagado e a rotação ainda não rodou: roda antes de trancar.
   if (dirty && reason !== 'wipe') await rotate().catch((e) => console.error('rotação falhou', e?.message));
   S.unlocked = false;
