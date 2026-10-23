@@ -155,7 +155,7 @@ route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/messages/([A-Za-z0-9_-]{8,64})/de
 route('GET', '/v1/sync', async ({ env, me }) => {
   const now = Date.now();
   const [env_, tomb, rooms] = await env.DB.batch([
-    env.DB.prepare('SELECT room, msg_id AS msgId, accepted_at AS acceptedAt, expires_at AS expiresAt, ct FROM envelopes WHERE recipient = ? AND expires_at > ? ORDER BY accepted_at, msg_id LIMIT 201').bind(me.userId, now),
+    env.DB.prepare('SELECT room, msg_id AS msgId, sender, accepted_at AS acceptedAt, expires_at AS expiresAt, ct FROM envelopes WHERE recipient = ? AND expires_at > ? ORDER BY accepted_at, msg_id LIMIT 201').bind(me.userId, now),
     env.DB.prepare('SELECT room, msg_id AS msgId FROM tombstones WHERE recipient = ? LIMIT 500').bind(me.userId),
     env.DB.prepare('SELECT room FROM room_members WHERE user_id = ?').bind(me.userId),
   ]);

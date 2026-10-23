@@ -1,0 +1,9 @@
+{
+  "name": "@mp/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Núcleo do cliente sem interface: cifra, sincroniza e aplica as regras",
+  "exports": { ".": "./src/index.js", "./*": "./src/*.js" },
+  "scripts": { "test": "node --test --test-concurrency=1 test/*.test.mjs" }
+}

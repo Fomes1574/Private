@@ -48,6 +48,7 @@ jobs:
     strategy:
       matrix:
         prova: [01-vodozemac-wasm, 02-passkey-prf-pin]
+    # (o pacote de cripto do app tem job próprio: cripto-app)
     defaults: { run: { working-directory: "poc/${{ matrix.prova }}" } }
     steps:
       - uses: actions/checkout@v7
@@ -96,6 +97,36 @@ jobs:
       - run: npm test
       - name: Mesmo resultado em outro fuso horário
         env: { TZ: "Asia/Tokyo" }
+        run: npm test
+
+  cripto-app:
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: packages/crypto } }
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v7
+        with: { node-version: "22" }
+      - run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
+      - name: Build reproduzível (o WASM no repositório tem que bater)
+        run: |
+          ./build.sh
+          git diff --exit-code -- pkg || { echo "WASM publicado difere do build"; exit 1; }
+      - run: npm test
+
+  cliente:
+    runs-on: ubuntu-24.04
+    needs: [cripto-app]
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v7
+        with: { node-version: "22" }
+      - run: npm ci
+        working-directory: server
+      - name: Três pessoas contra o servidor local
+        working-directory: packages/client
+        env: { WRANGLER_SEND_METRICS: "false" }
         run: npm test
 
   servidor:

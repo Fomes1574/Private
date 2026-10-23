@@ -128,7 +128,7 @@ export class Room extends DurableObject {
     const stmts = [db.prepare('INSERT INTO messages(room, msg_id, sender, accepted_at, expires_at) VALUES (?, ?, ?, ?, ?)').bind(s.roomId, msgId, actor, acceptedAt, expiresAt)];
     for (const [rcpt, ct] of Object.entries(envelopes)) {
       const bytes = Uint8Array.from(atob(ct), (c) => c.charCodeAt(0));
-      stmts.push(db.prepare('INSERT INTO envelopes(recipient, room, msg_id, accepted_at, expires_at, ct) VALUES (?, ?, ?, ?, ?, ?)').bind(rcpt, s.roomId, msgId, acceptedAt, expiresAt, bytes));
+      stmts.push(db.prepare('INSERT INTO envelopes(recipient, room, msg_id, sender, accepted_at, expires_at, ct) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(rcpt, s.roomId, msgId, actor, acceptedAt, expiresAt, bytes));
     }
     await db.batch(stmts); // tudo ou nada
     return { acceptedAt, expiresAt, recipients: to };

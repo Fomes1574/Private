@@ -15,10 +15,13 @@ CREATE INDEX messages_exp ON messages(expires_at);
 
 -- Um envelope cifrado por destinatário (fan-out). Apagado ao ser confirmado
 -- pelo aparelho, ao vencer ou ao ser apagado para todos.
+-- `sender` é quem o servidor autenticou; o cliente confere com o remetente
+-- declarado dentro da mensagem cifrada (anti-falsificação).
 CREATE TABLE envelopes (
   recipient TEXT NOT NULL,
   room TEXT NOT NULL,
   msg_id TEXT NOT NULL,
+  sender TEXT NOT NULL,
   accepted_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,
   ct BLOB NOT NULL,

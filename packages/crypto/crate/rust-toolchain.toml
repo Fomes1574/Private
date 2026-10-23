@@ -1,0 +1,5 @@
+# Toolchain fixa: o mesmo compilador gera o mesmo WASM (hash conferido no CI).
+[toolchain]
+channel = "1.97.0"
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"
