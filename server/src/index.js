@@ -19,9 +19,14 @@ const media = (env, id) => env.MEDIA_BOX.get(env.MEDIA_BOX.idFromName(id));
 const quota = (env, userId) => env.DOC_QUOTA.get(env.DOC_QUOTA.idFromName(userId));
 const live = (env, userId) => env.LIVE.get(env.LIVE.idFromName(userId));
 
+// O APK Android Capacitor 8 roda em https://localhost (androidScheme=https).
+// É uma origem local de WebView, distinta do endereço público da PWA.
+// Autorizamos APENAS estas duas origens; nunca usamos wildcard/reflexão irrestrita.
+// CORS não substitui autenticação: sessões exigem token e assinatura do aparelho.
+const ANDROID_APP_ORIGIN = 'https://localhost';
 function cors(env, request) {
   const origin = request.headers.get('origin');
-  if (!origin || origin !== env.APP_ORIGIN) return {};
+  if (!origin || (origin !== env.APP_ORIGIN && origin !== ANDROID_APP_ORIGIN)) return {};
   return {
     'access-control-allow-origin': origin,
     'access-control-allow-methods': 'GET, POST',

@@ -70,3 +70,9 @@ jobs:
             node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("/tmp/v.json")).pub)' | npx wrangler secret put VAPID_PUBLIC
             shred -u /tmp/v.json
           fi
+
+      - name: Verificar acesso PWA e Android na API PUBLICADA
+        env:
+          API_ORIGIN: ${{ vars.MP_API_ORIGIN }}
+          APP_ORIGIN: ${{ vars.MP_APP_ORIGIN }}
+        run: node scripts/check-deployed-cors.mjs
