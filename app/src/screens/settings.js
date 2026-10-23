@@ -182,6 +182,7 @@ function warningText(w) {
     case 'key_changed': return `${session.nameOf(w.userId)} trocou de chave (aparelho novo ou recuperação). Verifiquem os números pessoalmente.`;
     case 'message_rejected': return `Uma mensagem de ${session.nameOf(w.userId)} não passou na verificação e foi descartada sem abrir. Se repetir, verifiquem os números pessoalmente.`;
     case 'unconfirmed_member': return 'O servidor indicou numa conversa alguém que a líder não anunciou. Nada foi enviado. Avisem a líder.';
+    case 'ttl_clamped': return 'O servidor tentou dar a uma mensagem um prazo maior que o combinado. O aparelho manteve o prazo certo.';
     case 'membership_rejected': return `Um anúncio de membros de ${session.nameOf(w.from)} não veio da líder confirmada e foi ignorado.`;
     default: return 'Aviso de segurança. Verifiquem os números pessoalmente.';
   }

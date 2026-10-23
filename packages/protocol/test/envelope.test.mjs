@@ -102,3 +102,8 @@ test('story: só foto ou vídeo (até 5 min), legenda opcional', () => {
   for (const mime of ['audio/mp4', 'text/plain;charset=utf-8', 'image/svg+xml']) assert.throws(() => p.encodeInner(st({ mime })), /story/);
   assert.throws(() => p.encodeInner(st({ mime: 'video/mp4', duration: 400000 })), /duração/);
 });
+
+test('prazo dentro do envelope: só valores da faixa 12 h–15 d', () => {
+  assert.ok(p.encodeInner({ ...base, kind: 'text', ttl: 86400, body: { text: 'a' } }));
+  for (const ttl of [0, 60, 16 * 86400, 1.5, '86400']) assert.throws(() => p.encodeInner({ ...base, kind: 'text', ttl, body: { text: 'a' } }), /prazo/);
+});

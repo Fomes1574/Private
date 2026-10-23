@@ -1,5 +1,7 @@
 // Conteúdo interno das mensagens (ADR 0003, V7-003, V7-018, V7-021).
 // Tudo vai dentro do envelope autenticado; o servidor não vê o tipo.
+import { isValidTtl } from './ttl.js';
+
 export const INNER_VERSION = 1;
 
 export const KINDS = new Set([
@@ -52,6 +54,9 @@ export function validateInner(m) {
   if (!KINDS.has(m.kind)) fail(`tipo ${m.kind}`);
   for (const k of ['msgId', 'room', 'sender']) if (!ID.test(m[k] ?? '')) fail(k);
   if (!Number.isSafeInteger(m.policyRev) || m.policyRev < 0) fail('policyRev');
+  // Prazo que quem enviou espera (segundos). Vai cifrado: o servidor não
+  // consegue esticar a vida da mensagem no aparelho de quem recebe.
+  if (m.ttl !== undefined && !isValidTtl(m.ttl)) fail('prazo');
   switch (m.kind) {
     case 'text': if (typeof m.body?.text !== 'string' || m.body.text.length === 0) fail('texto vazio'); break;
     case 'reaction': if (!ID.test(m.body?.target ?? '') || typeof m.body.emoji !== 'string' || [...m.body.emoji].length > 8) fail('reação'); break;

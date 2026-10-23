@@ -11,6 +11,7 @@ import { OlmAccount, OlmSession, sealOuter, parseOuter, b64, unb64 } from '../..
 import { encodeInner, decodeInner, INNER_VERSION } from '../../protocol/src/envelope.js';
 import { reconcile, applyEdit } from '../../protocol/src/reconcile.js';
 import { CIRCLE_ROOM_ID } from '../../protocol/src/room.js';
+import { isValidTtl, MAX_TTL } from '../../protocol/src/ttl.js';
 import { encryptMedia, decryptMedia, newMediaKey } from './media-crypto.js';
 
 const OTK_BATCH = 20;
@@ -194,6 +195,8 @@ export class MessengerClient {
     else if (to.some((u) => !this.trusted[roomId]?.members.includes(u))) throw new Error('anúncio para quem não está confirmado: recusado');
     const msgId = newMsgId();
     const inner = { v: INNER_VERSION, kind, msgId, room: roomId, sender: this.userId, policyRev: room.policyRev, body };
+    const expect = ttl ?? (msgKind === 'media' ? room.mediaTtl : room.textTtl);
+    if (isValidTtl(expect)) inner.ttl = expect;
     if (replyTo) inner.replyTo = replyTo;
     const bytes = encodeInner(inner);
     const envelopes = {};
@@ -372,7 +375,7 @@ export class MessengerClient {
     }
     await this.destroy(res.tombstones.map((t) => t.msgId));
     const received = [], rejected = [];
-    for (const e of res.envelopes) {
+    for (let e of res.envelopes) {
       acks.envelopes.push([e.room, e.msgId]);
       if (this.tombs.has(e.msgId)) continue;
       if (!this.known[e.sender]) await this.refreshDirectory();
@@ -382,6 +385,14 @@ export class MessengerClient {
         // Anti-falsificação: o que está dentro tem que bater com o que o
         // servidor autenticou (remetente, conversa e id).
         if (inner.sender !== e.sender || inner.room !== e.room || inner.msgId !== e.msgId) throw new Error('remetente ou conversa não conferem');
+        // O prazo nunca passa do que quem enviou pediu, nem de 15 dias a
+        // partir de agora, mesmo que o servidor diga outra coisa.
+        const now = this.api.clock.now() ?? e.acceptedAt;
+        const limit = Math.min(inner.ttl ? e.acceptedAt + inner.ttl * 1000 : Infinity, now + MAX_TTL * 1000);
+        if (e.expiresAt > limit) {
+          this.warnings.push({ kind: 'ttl_clamped', roomId: e.room, at: now });
+          e = { ...e, expiresAt: limit };
+        }
         await this.apply(inner, e);
         received.push(inner);
       } catch (err) {

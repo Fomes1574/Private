@@ -160,6 +160,24 @@ test('story: só a audiência recebe e abre; apagar antes de vencer some para el
   await assert.rejects(p.bia.openMedia(bs[0]), /404/);
 });
 
+test('servidor malicioso: não estica o prazo nem reentrega mensagem já recebida', async () => {
+  const m = await p.ana.sendText(room, 'prazo curto');
+  // Servidor adulterado: soma 10 dias ao prazo do envelope da Bia.
+  d1(api.persist, `UPDATE envelopes SET expires_at = expires_at + ${10 * 86400_000} WHERE msg_id = '${m.msgId}' AND recipient = '${p.bia.userId}'`);
+  const row = JSON.parse(d1(api.persist, `SELECT hex(ct) AS h, accepted_at AS a, expires_at AS x FROM envelopes WHERE msg_id = '${m.msgId}' AND recipient = '${p.bia.userId}'`))[0].results[0];
+  await p.bia.sync();
+  const got = await p.bia.store.getMessage(m.msgId);
+  assert.equal(got.expiresAt, m.expiresAt, 'vale o prazo que a Ana pediu (dentro do envelope cifrado)');
+  assert.ok(p.bia.warnings.some((w) => w.kind === 'ttl_clamped'));
+  // Reentrega do mesmo envelope (replay) com prazo novo: recusada pela cripto.
+  d1(api.persist, `INSERT INTO envelopes(recipient, room, msg_id, sender, accepted_at, expires_at, ct) VALUES ('${p.bia.userId}', '${room}', '${m.msgId}', '${p.ana.userId}', ${row.a}, ${row.x}, X'${row.h}')`);
+  const r = await p.bia.sync();
+  assert.equal(r.received.length, 0);
+  assert.equal(r.rejected.length, 1, 'mensagem repetida não passa');
+  assert.equal((await p.bia.store.getMessage(m.msgId)).expiresAt, m.expiresAt);
+  await p.caio.sync();
+});
+
 test('fechar e reabrir o app: mesma identidade e sessões continuam', async () => {
   const store = p.bia.store, key = p.bia.pickleKey;
   const again = newClient(store, key);
