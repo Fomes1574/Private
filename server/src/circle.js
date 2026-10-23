@@ -3,6 +3,7 @@
 // recuperação. Um só objeto = decisões atômicas (limite de 10, convite usado
 // uma vez, troca de aparelho) sem corrida.
 import { DurableObject } from 'cloudflare:workers';
+import { FCM_TOKEN_RE } from './fcm.js';
 import { randomId, sha256b64, unb64 } from './http.js';
 
 export const MAX_IDENTITIES = 10; // V6-001
@@ -11,6 +12,13 @@ const INVITE_TTL = DAY; // convite de uso único, expiração curta (§5)
 const SESSION_TTL = 12 * 3600_000;
 const CHALLENGE_TTL = 2 * 60_000;
 const PAIRING_TTL = 5 * 60_000;
+// Aparelho novo aprovado mas ainda não confirmado: tem até 7 dias para
+// confirmar. Até lá, o aparelho antigo continua valendo (se ainda tiver o
+// app novo; um app antigo se apaga ao aprovar, e o novo precisa terminar).
+const PENDING_TTL = 7 * DAY;
+// Cofre do aparelho novo criado já no pedido de troca, antes da aprovação:
+// fica preso ao pedido até ser aprovado (device_id = "p:<pedido>").
+const pairVault = (pairingId) => `p:${pairingId}`;
 export const RECOVERY_WAIT = DAY; // V7-012: 24 h obrigatórias
 const MAX_OTKS = 100;
 
@@ -39,6 +47,9 @@ CREATE TABLE IF NOT EXISTS vaults (vault_id TEXT PRIMARY KEY, user_id TEXT NOT N
 CREATE TABLE IF NOT EXISTS kill_codes (user_id TEXT PRIMARY KEY, code_hash TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS visuals (owner TEXT NOT NULL, slot TEXT NOT NULL, media_id TEXT NOT NULL, PRIMARY KEY (owner, slot));`;
 
+// Serviços de Web Push dos navegadores (Apple, Google, Mozilla, Microsoft).
+// O servidor só faz POST para eles; nunca para um endereço qualquer.
+const PUSH_HOSTS = ['push.apple.com', 'fcm.googleapis.com', 'push.services.mozilla.com', 'notify.windows.com'];
 const B64_32 = /^[A-Za-z0-9+/]{43}=$/;
 const DEAD_DAYS = [0, 1, 3, 7, 15, 30]; // 0 = desligado
 const VAULT_MAX_FAILURES = 5;
@@ -68,6 +79,12 @@ export class Circle extends DurableObject {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.sql.exec(SCHEMA);
+    // push_subs ganhou `kind` (webpush no iPhone/navegador, fcm no APK).
+    // Assinaturas antigas continuam valendo como webpush.
+    if (!this.q("SELECT 1 FROM meta WHERE k = 'push_kind'").length) {
+      if (!this.q('PRAGMA table_info(push_subs)').some((c) => c.name === 'kind')) this.sql.exec("ALTER TABLE push_subs ADD COLUMN kind TEXT NOT NULL DEFAULT 'webpush'");
+      this.sql.exec("INSERT INTO meta(k, v) VALUES ('push_kind', '1')");
+    }
   }
 
   q(query, ...args) { return this.sql.exec(query, ...args).toArray(); }
@@ -88,6 +105,9 @@ export class Circle extends DurableObject {
     this.sql.exec('DELETE FROM sessions WHERE expires_at <= ?', now);
     this.sql.exec('DELETE FROM challenges WHERE expires_at <= ?', now);
     this.sql.exec('DELETE FROM pairings WHERE expires_at <= ?', now);
+    // Cofre de pedido que venceu sem aprovação some junto.
+    this.sql.exec("DELETE FROM vaults WHERE device_id LIKE 'p:%' AND substr(device_id, 3) NOT IN (SELECT pairing_id FROM pairings)");
+    this.expirePending();
     // Interruptor do homem morto: aparelho sumido há mais que o combinado
     // perde a parte do servidor; o banco dele vira ruído para sempre.
     this.sql.exec('DELETE FROM vaults WHERE dead_days > 0 AND last_seen + dead_days * ? < ?', this.vaultDay(), now);
@@ -104,26 +124,36 @@ export class Circle extends DurableObject {
     return { userId, deviceId };
   }
 
-  addDevice(userId, device) {
+  addDevice(userId, device, state = 'active') {
     const deviceId = randomId(12);
-    this.sql.exec("INSERT INTO devices(device_id, user_id, auth_pub, curve, ed, state, created_at) VALUES (?, ?, ?, ?, ?, 'active', ?)",
-      deviceId, userId, device.authPub, device.curve, device.ed, this.now());
+    this.sql.exec('INSERT INTO devices(device_id, user_id, auth_pub, curve, ed, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      deviceId, userId, device.authPub, device.curve, device.ed, state, this.now());
     if (device.otks) this.storeOtks(deviceId, device.otks);
     if (device.fallback) this.storeFallback(deviceId, device.fallback);
     return deviceId;
   }
 
   // Revoga aparelho e todas as sessões dele (V6-002: um aparelho por pessoa).
-  revokeDevicesOf(userId, exceptDeviceId = null) {
-    const devs = this.q("SELECT device_id FROM devices WHERE user_id = ? AND state = 'active'", userId).filter((d) => d.device_id !== exceptDeviceId);
+  // Inclui aparelho novo ainda pendente (recuperação, código de emergência,
+  // cofre apagado: nada fica meio aprovado).
+  revokeDevicesOf(userId, exceptDeviceId = null, { states = ['active', 'pending'] } = {}) {
+    const devs = this.q(`SELECT device_id FROM devices WHERE user_id = ? AND state IN (${states.map(() => '?').join(',')})`, userId, ...states).filter((d) => d.device_id !== exceptDeviceId);
     for (const d of devs) {
       this.sql.exec("UPDATE devices SET state = 'revoked', revoked_at = ? WHERE device_id = ?", this.now(), d.device_id);
       this.sql.exec('DELETE FROM sessions WHERE device_id = ?', d.device_id);
       this.sql.exec('DELETE FROM otks WHERE device_id = ?', d.device_id);
       this.sql.exec('DELETE FROM fallback_keys WHERE device_id = ?', d.device_id);
       this.sql.exec('DELETE FROM push_subs WHERE device_id = ?', d.device_id);
+      this.sql.exec('DELETE FROM vaults WHERE device_id = ?', d.device_id);
     }
     return devs.length;
+  }
+
+  // Pendente que não confirmou a tempo perde a vaga (o antigo nunca caiu).
+  expirePending() {
+    for (const d of this.q("SELECT user_id FROM devices WHERE state = 'pending' AND created_at <= ?", this.now() - PENDING_TTL)) {
+      this.revokeDevicesOf(d.user_id, null, { states: ['pending'] });
+    }
   }
 
   // ---------- primeira pessoa (administradora) ----------
@@ -179,7 +209,8 @@ export class Circle extends DurableObject {
 
   // ---------- sessão por desafio assinado pela chave do aparelho ----------
   challenge(deviceId) {
-    const dev = this.one("SELECT * FROM devices WHERE device_id = ? AND state = 'active'", deviceId);
+    this.expirePending();
+    const dev = this.one("SELECT * FROM devices WHERE device_id = ? AND state IN ('active', 'pending')", deviceId);
     // Mesmo formato de resposta para aparelho inexistente: não revela quem existe.
     const nonce = randomId(32);
     if (dev) this.sql.exec('INSERT INTO challenges(nonce, device_id, expires_at) VALUES (?, ?, ?)', nonce, deviceId, this.now() + CHALLENGE_TTL);
@@ -192,7 +223,7 @@ export class Circle extends DurableObject {
     if (!ch) return { error: 'unauthorized' };
     this.sql.exec('DELETE FROM challenges WHERE nonce = ?', nonce); // uso único
     if (ch.expires_at <= this.now()) return { error: 'unauthorized' };
-    const dev = this.one("SELECT * FROM devices WHERE device_id = ? AND state = 'active'", deviceId);
+    const dev = this.one("SELECT * FROM devices WHERE device_id = ? AND state IN ('active', 'pending')", deviceId);
     if (!dev) return { error: 'unauthorized' };
     const ident = this.identity(dev.user_id);
     if (ident.state === 'frozen') return { error: 'frozen' };
@@ -212,8 +243,9 @@ export class Circle extends DurableObject {
     if (!s || s.expires_at <= this.now()) return null;
     const ident = this.identity(s.user_id);
     const dev = this.one('SELECT state FROM devices WHERE device_id = ?', s.device_id);
-    if (!ident || ident.state !== 'active' || dev?.state !== 'active') return null;
-    return { userId: s.user_id, deviceId: s.device_id, isAdmin: !!ident.is_admin };
+    if (!ident || ident.state !== 'active' || !['active', 'pending'].includes(dev?.state)) return null;
+    // Pendente: só guarda o cofre e confirma a troca (index.js limita as rotas).
+    return { userId: s.user_id, deviceId: s.device_id, isAdmin: !!ident.is_admin, pending: dev.state === 'pending' };
   }
 
   logout(token) { return sha256b64(token).then((h) => { this.sql.exec('DELETE FROM sessions WHERE token_hash = ?', h); return { ok: true }; }); }
@@ -261,16 +293,28 @@ export class Circle extends DurableObject {
   // ---------- troca de aparelho só por QR (V7-015) ----------
   // O aparelho NOVO inicia e mostra o QR; o ANTIGO, autenticado, aprova.
   // Não existe link que adicione aparelho.
-  async pairStart({ device }) {
+  // `vault` (opcional): o aparelho novo já registra o cofre aqui, antes de
+  // mostrar o código, e guarda tudo cifrado no aparelho. Se o app fechar no
+  // meio da troca, ao abrir ele continua de onde parou.
+  async pairStart({ device, vault = null }) {
     if (!checkDevice(device)) return { error: 'bad_device' };
-    this.sql.exec('DELETE FROM pairings WHERE expires_at <= ?', this.now());
+    if (vault && (!B64_32.test(vault.verifier ?? '') || !DEAD_DAYS.includes(vault.deadDays))) return { error: 'bad_request' };
+    this.prune();
     if (this.one('SELECT count(*) AS n FROM pairings').n > 20) return { error: 'rate_limited' };
     const pairingId = randomId(12);
     const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 100_000_000).padStart(8, '0');
     this.sql.exec('INSERT INTO pairings(pairing_id, code_hash, auth_pub, curve, ed, keys_json, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       pairingId, await sha256b64(code), device.authPub, device.curve, device.ed,
       JSON.stringify({ otks: device.otks ?? {}, fallback: device.fallback ?? null }).slice(0, 16_000), this.now() + PAIRING_TTL);
-    return { pairingId, code, expiresAt: this.now() + PAIRING_TTL };
+    let reg = null;
+    if (vault) {
+      const vaultId = randomId(18);
+      const share = b64(crypto.getRandomValues(new Uint8Array(32)));
+      this.sql.exec('INSERT INTO vaults(vault_id, user_id, device_id, verifier_hash, duress_hash, share, attempts, last_seen, dead_days) VALUES (?, ?, ?, ?, NULL, ?, 0, ?, ?)',
+        vaultId, '', pairVault(pairingId), await sha(vault.verifier), share, this.now(), vault.deadDays);
+      reg = { vaultId, share };
+    }
+    return { pairingId, code, expiresAt: this.now() + PAIRING_TTL, vault: reg };
   }
 
   async pairApprove(actor, { pairingId, code }) {
@@ -282,20 +326,36 @@ export class Circle extends DurableObject {
       return { error: 'unauthorized' };
     }
     this.sql.exec('DELETE FROM pairings WHERE pairing_id = ?', pairingId);
-    // Atômico: novo ativo e antigo revogado na mesma operação (§25.5).
-    this.revokeDevicesOf(actor.userId);
+    // Duas fases: aqui o novo fica PENDENTE e o antigo continua valendo. Só
+    // quando o novo prova que guardou as chaves (login com a chave dele +
+    // cofre registrado) é que ele confirma e o antigo cai (pairCommit). Se o
+    // celular novo travar ou o app for fechado no meio, ninguém perde a conta.
+    this.revokeDevicesOf(actor.userId, null, { states: ['pending'] });
     let keys = {};
     try { keys = JSON.parse(p.keys_json); } catch {}
-    const deviceId = this.addDevice(actor.userId, { authPub: p.auth_pub, curve: p.curve, ed: p.ed, ...keys });
-    this.event('device_changed', actor.userId);
-    return { userId: actor.userId, deviceId };
+    const deviceId = this.addDevice(actor.userId, { authPub: p.auth_pub, curve: p.curve, ed: p.ed, ...keys }, 'pending');
+    this.sql.exec('UPDATE vaults SET device_id = ?, user_id = ? WHERE device_id = ?', deviceId, actor.userId, pairVault(pairingId));
+    return { userId: actor.userId, deviceId, pending: true };
+  }
+
+  // O aparelho novo confirma: atômico, ele vira o único ativo (§25.5).
+  pairCommit(me) {
+    const dev = this.one('SELECT state FROM devices WHERE device_id = ?', me.deviceId);
+    if (dev?.state === 'active') return { ok: true };
+    if (dev?.state !== 'pending') return { error: 'not_found' };
+    if (!this.one('SELECT 1 FROM vaults WHERE device_id = ?', me.deviceId)) return { error: 'vault_required' };
+    this.revokeDevicesOf(me.userId, me.deviceId);
+    this.sql.exec("UPDATE devices SET state = 'active' WHERE device_id = ?", me.deviceId);
+    this.event('device_changed', me.userId);
+    return { ok: true };
   }
 
   // O aparelho novo consulta se já foi aprovado (pelo id que só ele conhece).
   pairStatus(pairingId, authPub) {
     const pending = this.one('SELECT 1 FROM pairings WHERE pairing_id = ?', pairingId);
     if (pending) return { state: 'pending' };
-    const dev = this.one("SELECT device_id, user_id FROM devices WHERE auth_pub = ? AND state = 'active'", authPub);
+    this.expirePending();
+    const dev = this.one("SELECT device_id, user_id FROM devices WHERE auth_pub = ? AND state IN ('active', 'pending')", authPub);
     return dev ? { state: 'approved', deviceId: dev.device_id, userId: dev.user_id } : { state: 'expired' };
   }
 
@@ -398,6 +458,7 @@ export class Circle extends DurableObject {
   }
   vaultKill(v) {
     this.sql.exec('DELETE FROM vaults WHERE vault_id = ?', v.vault_id);
+    if (!v.user_id) { this.sql.exec('DELETE FROM pairings WHERE pairing_id = ?', String(v.device_id).slice(2)); return; } // cofre de pedido ainda não aprovado
     this.revokeDevicesOf(v.user_id); // sessão do aparelho cai junto
     this.event('vault_destroyed', v.user_id);
   }
@@ -456,29 +517,32 @@ export class Circle extends DurableObject {
   }
 
   // ---------- push ----------
-  setPush(deviceId, endpoint) {
-    if (endpoint === null) { this.sql.exec('DELETE FROM push_subs WHERE device_id = ?', deviceId); return { ok: true }; }
+  // Um destino por aparelho: Web Push (endpoint https de um serviço de push
+  // conhecido) ou FCM (token do APK). O tipo só existe aqui no servidor;
+  // ninguém do círculo vê qual aparelho os outros usam.
+  setPush(deviceId, { endpoint, fcm } = {}) {
+    if (endpoint == null && fcm == null) { this.sql.exec('DELETE FROM push_subs WHERE device_id = ?', deviceId); return { ok: true }; }
+    if (fcm != null) {
+      if (typeof fcm !== 'string' || !FCM_TOKEN_RE.test(fcm)) return { error: 'bad_endpoint' };
+      this.sql.exec("INSERT OR REPLACE INTO push_subs(device_id, endpoint, kind) VALUES (?, ?, 'fcm')", deviceId, fcm);
+      return { ok: true };
+    }
     let u;
     try { u = new URL(endpoint); } catch { return { error: 'bad_endpoint' }; }
-    if (u.protocol !== 'https:') return { error: 'bad_endpoint' };
-    this.sql.exec('INSERT OR REPLACE INTO push_subs(device_id, endpoint) VALUES (?, ?)', deviceId, endpoint);
+    if (u.protocol !== 'https:' || u.username || u.password || u.port || !PUSH_HOSTS.some((h) => u.hostname === h || u.hostname.endsWith(`.${h}`))) return { error: 'bad_endpoint' };
+    this.sql.exec("INSERT OR REPLACE INTO push_subs(device_id, endpoint, kind) VALUES (?, ?, 'webpush')", deviceId, u.href);
     return { ok: true };
   }
   pushTargetsByUser(userIds) {
     const out = {};
     if (!userIds.length) return out;
-    const rows = this.q(`SELECT d.user_id, p.endpoint FROM push_subs p JOIN devices d ON d.device_id = p.device_id
+    const rows = this.q(`SELECT d.user_id, p.endpoint, p.kind FROM push_subs p JOIN devices d ON d.device_id = p.device_id
       WHERE d.state = 'active' AND d.user_id IN (${userIds.map(() => '?').join(',')})`, ...userIds);
-    for (const r of rows) (out[r.user_id] ??= []).push(r.endpoint);
+    for (const r of rows) (out[r.user_id] ??= []).push({ kind: r.kind, endpoint: r.endpoint });
     return out;
   }
   dropPushEndpoints(endpoints) {
     for (const e of endpoints) this.sql.exec('DELETE FROM push_subs WHERE endpoint = ?', e);
     return { ok: true };
-  }
-  pushTargets(userIds) {
-    if (!userIds.length) return [];
-    return this.q(`SELECT p.endpoint FROM push_subs p JOIN devices d ON d.device_id = p.device_id
-      WHERE d.state = 'active' AND d.user_id IN (${userIds.map(() => '?').join(',')})`, ...userIds).map((r) => r.endpoint);
   }
 }

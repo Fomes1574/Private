@@ -70,6 +70,18 @@ jobs:
             node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("/tmp/v.json")).pub)' | npx wrangler secret put VAPID_PUBLIC
             shred -u /tmp/v.json
           fi
+      - name: Notificações do APK Android (FCM), se configurado
+        env:
+          FCM: ${{ secrets.FCM_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FCM" ]; then echo "::warning::Sem FCM_SERVICE_ACCOUNT: o APK Android não recebe notificações (iPhone continua por Web Push)."; exit 0; fi
+          # Confere o formato sem imprimir nada do conteúdo.
+          printf '%s' "$FCM" | node -e '
+            const j = JSON.parse(require("fs").readFileSync(0, "utf8"));
+            if (j.type !== "service_account" || !j.client_email || !j.private_key || !/^[a-z0-9-]{4,40}$/.test(j.project_id || "")) { console.error("FCM_SERVICE_ACCOUNT não parece uma conta de serviço do Google"); process.exit(1); }
+            if (j.token_uri && j.token_uri !== "https://oauth2.googleapis.com/token") { console.error("token_uri inesperado"); process.exit(1); }
+          '
+          printf '%s' "$FCM" | npx wrangler secret put FCM_SERVICE_ACCOUNT
 
       - name: Verificar acesso PWA e Android na API PUBLICADA
         env:

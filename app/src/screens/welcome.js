@@ -66,28 +66,35 @@ function tokenScreen(go, how, lock) {
 async function pairScreen(go, lock) {
   let info;
   try { info = await session.pairStart(lock); } catch (e) { toast(`Não deu: ${e.message}`); return welcome(go); }
-  const code = info.start.code.replace(/(\d{4})(\d{4})/, '$1 $2');
-  const status = h('p', { class: 'muted', text: 'Esperando a aprovação no celular antigo…' });
+  return pairWaitScreen(go, info);
+}
+
+// Também é a tela de volta quando o app fechou no meio da troca (o pedido
+// já está guardado; ao desbloquear, o app continua daqui).
+export function pairWaitScreen(go, info) {
+  const code = String(info.code).replace(/(\d{4})(\d{4})/, '$1 $2');
+  const status = h('p', { class: 'muted', role: 'status', text: 'Esperando a aprovação no celular antigo… Pode trocar de app; não feche este.' });
   mount(h('main', {},
     h('h1', { text: 'Trocar de celular' }),
     h('p', { text: 'No celular antigo: Ajustes → Trocar de celular. Digite lá o pedido e o código abaixo e confira se a impressão digital é a mesma.' }),
     h('dl', { class: 'kv' },
-      h('dt', { text: 'Pedido' }), h('dd', { class: 'code', text: info.start.pairingId }),
+      h('dt', { text: 'Pedido' }), h('dd', { class: 'code', text: info.pairingId }),
       h('dt', { text: 'Código' }), h('dd', { class: 'code big', text: code }),
       h('dt', { text: 'Impressão digital' }), h('dd', { class: 'code', text: info.fp })),
-    h('p', { class: 'note', text: 'Faça isso com os dois celulares na mão. Ninguém de fora consegue adicionar um aparelho: não existe link para isso.' }),
+    h('p', { class: 'note', text: 'O código vale 5 minutos. Faça isso com os dois celulares na mão. Ninguém de fora consegue adicionar um aparelho: não existe link para isso.' }),
     status));
-  const until = Date.now() + 5 * 60_000;
+  let stop = false;
   const tick = async () => {
-    if (Date.now() > until) { status.textContent = 'O código venceu. Volte e comece de novo.'; return; }
+    if (stop) return;
     try {
       const st = await session.pairPoll(info);
-      if (st === 'approved') { toast('Pronto. O celular antigo foi desconectado.'); return go('chats'); }
-      if (st === 'expired') { status.textContent = 'O pedido venceu ou foi recusado.'; return; }
+      if (st === 'approved') { toast('Pronto. O celular antigo vai ser desconectado.'); return go('chats'); }
+      if (st === 'expired') { stop = true; await session.wipeEverything(); toast('O pedido venceu ou foi recusado. Comece de novo.'); return welcome(go); }
     } catch {}
     setTimeout(tick, 3000);
   };
   setTimeout(tick, 3000);
+  return () => { stop = true; };
 }
 
 // Código de emergência (ADR 0014): de qualquer aparelho, sem conta.

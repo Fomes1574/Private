@@ -12,6 +12,7 @@ import { idbGet, idbPut, idbPutMany, idbDestroy } from './idb.js';
 import * as vault from './vault/vault.js';
 import * as passkey from './vault/passkey.js';
 import * as native from './vault/native.js';
+import * as push from './push.js';
 
 const REANNOUNCE_MS = 7 * 86_400_000;
 const listeners = new Set();
@@ -134,26 +135,59 @@ export async function enroll({ lock, how, token, setupCode }) {
 }
 
 // Troca de aparelho (V7-015): o aparelho novo mostra código; o antigo aprova.
+// Durável desde o começo: o cofre do aparelho novo é registrado já no pedido
+// e tudo (chaves, pedido) fica guardado cifrado ANTES de mostrar o código. Se
+// o app fechar em qualquer ponto, ao abrir com o PIN ele continua de onde
+// parou. Isso importa porque um app antigo se apaga logo depois de aprovar.
 export async function pairStart(lock) {
   lock.pool = await openStore(lock.dek, { fresh: true });
   const pickleKey = vault.random(32);
   await S.store.put('pickleKey', vault.b64(pickleKey));
   S.client = makeClient(pickleKey);
   const device = await S.client.createDevice();
-  const start = await S.client.api.post('/v1/devices/pair/start', { device });
-  const fp = await fingerprint(device.curve);
-  return { start, device, fp, lock };
+  const start = await S.client.api.post('/v1/devices/pair/start', { device, vault: { verifier: lock.verifier, deadDays: DEFAULT_DEAD_DAYS } });
+  if (!start.vault) throw new Error('servidor sem troca durável; atualize a API antes');
+  const { record, kek } = await lock.finish(start.vault);
+  S.kek = kek;
+  const info = { pairingId: start.pairingId, code: start.code, expiresAt: start.expiresAt, authPub: device.authPub, fp: await fingerprint(device.curve) };
+  await S.client.saveDevice();
+  await S.store.put('pairing', info);
+  await idbPutMany({ vault: record, activePool: lock.pool, lastRotate: Date.now(), pairPending: true });
+  return info;
 }
-export async function pairPoll({ start, device, lock }) {
-  const st = await S.client.api.post('/v1/devices/pair/status', { pairingId: start.pairingId, authPub: device.authPub });
-  if (st.state !== 'approved') return st.state;
+export async function pairPoll(info) {
+  const st = await S.client.api.post('/v1/devices/pair/status', { pairingId: info.pairingId, authPub: info.authPub });
+  if (st.state === 'approved') await finishPairing(st);
+  return st.state;
+}
+// Aprovado: entra (o servidor aceita o aparelho pendente só para isto) e
+// confirma; só então o celular antigo cai. Confirmar de novo não quebra.
+async function finishPairing(st) {
   Object.assign(S.client, { userId: st.userId, deviceId: st.deviceId });
   await S.client.saveDevice();
   await S.client.login();
-  const record = await registerVault(lock);
-  await idbPutMany({ vault: record, activePool: lock.pool, lastRotate: Date.now() });
+  await S.client.api.post('/v1/devices/pair/commit');
+  await S.store.put('pairing', null);
+  await idbPut('pairPending', false);
   await afterUnlock({ loggedIn: true });
-  return 'approved';
+}
+// Pedido que venceu sem aprovação: este aparelho não tem nada de valor.
+export class PairingExpiredError extends Error {
+  constructor() { super('O pedido de troca venceu ou foi recusado. Comece de novo.'); }
+}
+
+// Celular antigo depois de aprovar: continua valendo até o novo confirmar.
+// Quando a sessão cair (o novo confirmou), apaga tudo deste aparelho.
+export function waitReplaced({ onReplaced, until = Date.now() + 60 * 60_000 } = {}) {
+  const tick = async () => {
+    if (!S.unlocked || Date.now() > until) return;
+    try { await S.client.api.get('/v1/me'); }
+    catch (e) {
+      if (e.status === 401) { await wipeEverything(); onReplaced?.(); return; }
+    }
+    setTimeout(tick, 3000);
+  };
+  setTimeout(tick, 3000);
 }
 
 // ---------- desbloquear ----------
@@ -176,9 +210,19 @@ export async function unlock(secret) {
   const pickleKey = vault.unb64(await S.store.get('pickleKey'));
   S.client = makeClient(pickleKey);
   await S.client.open();
+  // Troca de aparelho em andamento (app fechado no meio): continua.
+  if (await idbGet('pairPending')) {
+    const info = await S.store.get('pairing');
+    const st = await pairPoll(info);
+    if (st === 'approved') return {};
+    if (st === 'pending') return { pairing: info };
+    await wipeEverything();
+    throw new PairingExpiredError();
+  }
   await S.client.login();
   if (opened.upgrade) await upgradeVault(opened);
   await afterUnlock({ loggedIn: true });
+  return {};
 }
 
 // Cofre antigo (v1) passa a ter a parte do servidor, sem perder nada: a
@@ -206,6 +250,9 @@ async function afterUnlock({ loggedIn = false } = {}) {
   await S.client.refreshDirectory();
   await syncNow();
   connectLive();
+  // Token novo ou permissão retirada nas configurações: acerta no servidor.
+  if (pushEnabled()) push.refreshPush(S.client.api, true).catch(() => {});
+  else S.client.api.post('/v1/push', { endpoint: null }).catch(() => {});
   emit('unlocked');
 }
 
@@ -235,10 +282,10 @@ export async function lock(reason = 'manual') {
 
 export async function wipeEverything() {
   // Antes de destruir as chaves: cancela notificações e encerra a sessão no servidor.
+  // Mesmo trancado (PIN de coação), o token/assinatura do aparelho some.
+  try { await push.disablePush(S.unlocked ? S.client.api : null); } catch {}
   if (S.unlocked) {
-    try { await S.client.api.post('/v1/push', { endpoint: null }); } catch {}
     try { await S.client.api.post('/v1/auth/logout'); } catch {}
-    try { const reg = await navigator.serviceWorker?.ready; await (await reg?.pushManager?.getSubscription())?.unsubscribe(); } catch {}
   }
   await lock('wipe');
   await S.store?.wipe();
@@ -558,13 +605,14 @@ function disconnectLive() {
   if (ws) { ws.onclose = null; try { ws.close(); } catch {} ws = null; }
 }
 
-export async function enablePush() {
-  const reg = await navigator.serviceWorker?.ready;
-  if (!reg?.pushManager) throw new Error('Este aparelho não oferece notificações aqui. No iPhone, só no app instalado na Tela de Início.');
-  const perm = await Notification.requestPermission();
-  if (perm !== 'granted') throw new Error('Permissão de notificação negada.');
-  const { key } = await S.client.api.get('/v1/push/key');
-  if (!key) throw new Error('Servidor sem chave de notificação.');
-  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vault.unb64(key.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((key.length + 3) % 4)) });
-  await S.client.api.post('/v1/push', { endpoint: sub.endpoint });
+export const pushEnabled = () => S.prefs.push === true;
+export const pushState = () => push.pushState(pushEnabled());
+export async function setPush(on, opts) {
+  if (on) {
+    await push.enablePush(S.client.api, opts);
+    await setPrefs({ push: true });
+    return;
+  }
+  await setPrefs({ push: false });
+  await push.disablePush(S.client.api);
 }

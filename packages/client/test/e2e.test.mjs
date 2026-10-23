@@ -196,7 +196,11 @@ test('troca de chave de alguém vira aviso de segurança', async () => {
   const start = await novo.api.post('/v1/devices/pair/start', { device: dev });
   const ok = await p.caio.api.post('/v1/devices/pair/approve', { pairingId: start.pairingId, code: start.code });
   Object.assign(novo, { userId: ok.userId, deviceId: ok.deviceId });
-  await novo.saveDevice(); await novo.login(); await novo.refreshDirectory();
+  await novo.saveDevice(); await novo.login();
+  // Duas fases: guarda o cofre e confirma; só então o antigo cai.
+  await novo.api.post('/v1/vault/register', { verifier: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64'), deadDays: 15 });
+  await novo.api.post('/v1/devices/pair/commit');
+  await novo.refreshDirectory();
   await p.ana.refreshDirectory();
   assert.ok(p.ana.warnings.some((w) => w.kind === 'key_changed' && w.userId === novo.userId));
   await p.ana.sendText(room, 'para o aparelho novo');

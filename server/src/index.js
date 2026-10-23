@@ -51,7 +51,8 @@ async function nudge(env, ctx, userIds, { silent = [] } = {}) {
   if (!userIds?.length) return;
   const targets = await circle(env).pushTargetsByUser(userIds);
   ctx.waitUntil(Promise.all(userIds.map(async (u) => {
-    const push = env.VAPID_PRIVATE_JWK && !silent.includes(u) ? targets[u] ?? [] : [];
+    const usable = (t) => (t.kind === 'fcm' ? !!env.FCM_SERVICE_ACCOUNT : !!env.VAPID_PRIVATE_JWK);
+    const push = silent.includes(u) ? [] : (targets[u] ?? []).filter(usable);
     const r = await live(env, u).nudge(push).catch(() => null);
     if (r?.gone?.length) await circle(env).dropPushEndpoints(r.gone);
   })));
@@ -70,6 +71,7 @@ async function reserveBytes(env, mediaId, bytes, expiresAt) {
 }
 
 const routes = [];
+const PENDING_ROUTES = new Set(['/v1/vault/register', '/v1/devices/pair/commit', '/v1/me', '/v1/auth/logout']);
 const route = (method, pattern, handler, { open = false } = {}) => routes.push({ method, re: new RegExp(`^${pattern}$`), handler, open });
 
 // ---------- públicas ----------
@@ -104,7 +106,11 @@ route('POST', '/v1/auth/session', async ({ env, request }) => {
   return json(200, unwrap(await circle(env).session({ deviceId: assertId(b.deviceId), nonce: String(b.nonce), signature: String(b.signature) })));
 }, { open: true });
 
-route('POST', '/v1/devices/pair/start', async ({ env, request }) => json(201, unwrap(await circle(env).pairStart({ device: (await readJson(request)).device }))), { open: true });
+route('POST', '/v1/devices/pair/start', async ({ env, request }) => {
+  const b = await readJson(request);
+  const vault = b.vault ? { verifier: b.vault.verifier, deadDays: Number(b.vault.deadDays ?? 15) } : null;
+  return json(201, unwrap(await circle(env).pairStart({ device: b.device, vault })));
+}, { open: true });
 route('POST', '/v1/devices/pair/status', async ({ env, request }) => {
   const b = await readJson(request);
   return json(200, await circle(env).pairStatus(assertId(b.pairingId), String(b.authPub)));
@@ -115,7 +121,7 @@ route('POST', '/v1/auth/logout', async ({ env, request }) => {
   await circle(env).logout(request.headers.get('authorization').slice(7));
   return json(200, { ok: true });
 });
-route('GET', '/v1/me', async ({ me }) => json(200, { userId: me.userId, deviceId: me.deviceId, isAdmin: me.isAdmin }));
+route('GET', '/v1/me', async ({ me }) => json(200, { userId: me.userId, deviceId: me.deviceId, isAdmin: me.isAdmin, pending: !!me.pending }));
 route('GET', '/v1/directory', async ({ env }) => json(200, { members: await circle(env).directory() }));
 route('POST', '/v1/keys', async ({ env, request, me }) => json(200, await circle(env).uploadKeys(me.deviceId, await readJson(request))));
 route('POST', '/v1/keys/claim', async ({ env, request }) => json(200, unwrap(await circle(env).claimKey(assertId((await readJson(request)).userId)))));
@@ -127,6 +133,7 @@ route('POST', '/v1/devices/pair/approve', async ({ env, request, me }) => {
   const b = await readJson(request);
   return json(200, unwrap(await circle(env).pairApprove(me, { pairingId: assertId(b.pairingId), code: String(b.code) })));
 });
+route('POST', '/v1/devices/pair/commit', async ({ env, me }) => json(200, unwrap(await circle(env).pairCommit(me))));
 route('POST', '/v1/me/guardian', async ({ env, request, me }) => json(200, unwrap(await circle(env).setGuardian(me, assertId((await readJson(request)).userId)))));
 route('POST', '/v1/recovery/approve', async ({ env, request, me }) => json(200, unwrap(await circle(env).recoveryApprove(me, assertId((await readJson(request)).userId)))));
 route('POST', '/v1/recovery/cancel', async ({ env, me }) => json(200, unwrap(await circle(env).recoveryCancel(me))));
@@ -148,7 +155,10 @@ route('POST', '/v1/admin/remove', async ({ env, ctx, request, me }) => {
 });
 route('GET', '/v1/security-events', async ({ env, url }) => json(200, { events: await circle(env).securityEvents(Number(url.searchParams.get('after')) || 0) }));
 route('GET', '/v1/push/key', async ({ env }) => json(200, { key: env.VAPID_PUBLIC ?? null }));
-route('POST', '/v1/push', async ({ env, request, me }) => json(200, unwrap(await circle(env).setPush(me.deviceId, (await readJson(request)).endpoint ?? null))));
+route('POST', '/v1/push', async ({ env, request, me }) => {
+  const b = await readJson(request, 8192);
+  return json(200, unwrap(await circle(env).setPush(me.deviceId, { endpoint: b.endpoint ?? null, fcm: b.fcm ?? null })));
+});
 
 // Conversas
 route('POST', '/v1/rooms', async ({ env, request, me }) => {
@@ -418,12 +428,15 @@ export default {
         const protos = (request.headers.get('sec-websocket-protocol') || '').split(',').map((s) => s.trim());
         if (protos[0] !== 'mp-v1' || !protos[1]) throw new HttpError(401, 'unauthorized');
         const who = await circle(env).authenticate(protos[1]);
-        if (!who) throw new HttpError(401, 'unauthorized');
+        if (!who || who.pending) throw new HttpError(401, 'unauthorized');
         return live(env, who.userId).fetch(request);
       }
       const r = routes.find((x) => x.method === request.method && x.re.test(url.pathname));
       if (!r) throw new HttpError(404, 'not_found');
       const me = r.open ? null : await auth(env, request);
+      // Aparelho novo ainda pendente (troca em duas fases): só guarda o cofre
+      // e confirma. Nada de mensagens, diretório ou mídia antes disso.
+      if (me?.pending && !PENDING_ROUTES.has(url.pathname)) throw new HttpError(403, 'pending_device');
       // Limite de tráfego por pessoa (§8): escritas em rajada viram 429.
       if (me && request.method === 'POST' && env.WRITE_LIMIT && !(await env.WRITE_LIMIT.limit({ key: me.userId })).success) throw new HttpError(429, 'rate_limited');
       res = await r.handler({ env, ctx, request, url, me, p: r.re.exec(url.pathname) });

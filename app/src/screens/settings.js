@@ -61,7 +61,7 @@ export async function settingsScreen(go) {
       h('section', { class: 'card' },
         h('h2', { text: 'Notificações' }),
         h('p', { class: 'muted small', text: 'O aviso diz só "novas mensagens". Sem nome, grupo, quantidade ou prévia. A Apple ou o Google ainda veem que houve um aviso e quando.' }),
-        h('button', { class: 'secondary', text: 'Ativar notificações', onclick: () => session.enablePush().then(() => toast('Notificações ativadas.')).catch((e) => toast(e.message)) })),
+        notificationsBox()),
       emergencySection(),
       h('section', { class: 'card' },
         h('h2', { text: 'Privacidade máxima' }),
@@ -83,19 +83,56 @@ export async function settingsScreen(go) {
         } })))));
 }
 
+// Estado sempre visível: aguardando permissão, ativado, recusado ou erro.
+// Nunca fica calado: toda tentativa termina num desses estados.
+const PUSH_TEXT = {
+  checking: 'Conferindo…',
+  off: 'Desativadas.',
+  waiting: 'Aguardando permissão… responda à pergunta do sistema.',
+  on: 'Ativadas neste aparelho.',
+  denied: 'Recusadas. Para ativar, libere as notificações do app nas configurações do sistema e toque em "Tentar de novo".',
+};
+function notificationsBox() {
+  const status = h('p', { id: 'push-state', class: 'small', role: 'status', 'aria-live': 'polite' });
+  const btn = h('button', { id: 'push-btn', class: 'secondary' });
+  const show = (state, detail) => {
+    status.dataset.state = state;
+    status.textContent = PUSH_TEXT[state] ?? `Erro: ${detail ?? 'não deu para ativar.'}`;
+    btn.disabled = state === 'waiting' || state === 'checking';
+    btn.textContent = state === 'on' ? 'Desativar notificações' : state === 'denied' || state === 'error' || state === 'unavailable' ? 'Tentar de novo' : 'Ativar notificações';
+  };
+  btn.onclick = async () => {
+    const turningOff = status.dataset.state === 'on';
+    show('checking');
+    try {
+      await session.setPush(!turningOff, { onWaiting: () => show('waiting') });
+      show(turningOff ? 'off' : 'on');
+      toast(turningOff ? 'Notificações desativadas.' : 'Notificações ativadas.');
+    } catch (e) {
+      show(e.state ?? 'error', e.message);
+    }
+  };
+  show('checking');
+  session.pushState().then(({ state, detail }) => show(state, detail));
+  return h('div', {}, status, btn);
+}
+
 function pairForm() {
   const id = h('input', { 'aria-label': 'Pedido', placeholder: 'Pedido', autocomplete: 'off', autocapitalize: 'off' });
   const code = h('input', { 'aria-label': 'Código', placeholder: 'Código de 8 números', inputmode: 'numeric', autocomplete: 'off' });
+  const waiting = h('p', { id: 'pair-wait', class: 'muted small', role: 'status' });
   return h('form', { onsubmit: async (e) => {
     e.preventDefault();
-    if (!await confirmSheet('Aprovar o celular novo? Este aqui vai ser desconectado na hora.', 'Aprovar')) return;
+    if (!await confirmSheet('Aprovar o celular novo? Quando ele terminar de guardar as chaves, este aqui será desconectado e apagado.', 'Aprovar')) return;
     try {
       await session.S.client.api.post('/v1/devices/pair/approve', { pairingId: id.value.trim(), code: code.value.replace(/\D/g, '') });
-      toast('Celular novo aprovado. Este foi desconectado.');
-      await session.wipeEverything();
-      location.reload();
+      // Duas fases: este continua valendo até o novo confirmar. Se o novo der
+      // problema no meio, nada se perde.
+      waiting.textContent = 'Aprovado. Esperando o celular novo terminar… Este aqui continua funcionando até lá. Se o novo der problema, é só começar de novo.';
+      toast('Celular novo aprovado. Termine no celular novo.');
+      session.waitReplaced({ onReplaced: () => location.reload() });
     } catch (err) { toast(err.status === 401 ? 'Código errado.' : 'Pedido não encontrado ou vencido.'); }
-  } }, id, code, h('button', { class: 'secondary', text: 'Aprovar celular novo' }));
+  } }, id, code, h('button', { class: 'secondary', text: 'Aprovar celular novo' }), waiting);
 }
 
 async function chooseGuardian(members) {

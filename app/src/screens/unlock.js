@@ -25,13 +25,16 @@ export async function unlockScreen(go, { again = false } = {}) {
       const secret = input.value;
       input.value = '';
       try {
-        await session.unlock(secret);
+        const r = await session.unlock(secret);
+        // Troca de celular que ficou no meio: volta para a espera.
+        if (r?.pairing) return go('pairWait', r.pairing);
         go('chats');
       } catch (err) {
         btn.disabled = false;
         // Destruído (erros, coação, emergência ou prazo): já foi apagado em
         // silêncio; aparece só o app novo, sem aviso.
         if (err instanceof VaultWipedError) return go('welcome');
+        if (err instanceof session.PairingExpiredError) { toast(err.message); return go('welcome'); }
         if (err instanceof WrongSecretError) { toast(err.left ? `PIN errado. Restam ${err.left} tentativa${err.left > 1 ? 's' : ''}.` : 'PIN errado.'); return unlockScreen(go, { again: true }); }
         if (err instanceof OfflineError) { toast('Sem internet: o app só abre com conexão (protege contra cópia do aparelho).'); return; }
         toast(err.name === 'NotAllowedError' ? 'Face ID cancelado.' : err.status === 401 ? 'Este aparelho foi desconectado (troca de celular ou bloqueio).' : `Não deu: ${err.message}`);

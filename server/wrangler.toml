@@ -19,7 +19,8 @@ BLOB_BACKEND = "r2"
 # Origem do app (CORS). Trocar pelo endereço definitivo antes do uso real (P-07).
 APP_ORIGIN = "http://localhost:8792"
 VAPID_SUBJECT = "http://localhost:8792"
-# Segredos (wrangler secret put): SETUP_CODE, VAPID_PRIVATE_JWK, VAPID_PUBLIC.
+# Segredos (wrangler secret put): SETUP_CODE, VAPID_PRIVATE_JWK, VAPID_PUBLIC e,
+# para o APK Android, FCM_SERVICE_ACCOUNT (JSON da conta de serviço do Firebase).
 
 # Limite de tráfego por pessoa (§8): até 300 escritas por minuto (uso humano
 # fica muito abaixo; um cliente em laço ou alguém abusando é cortado).

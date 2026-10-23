@@ -3,6 +3,7 @@
 // contagem (V6-021, V6-022).
 import { DurableObject } from 'cloudflare:workers';
 import { sendPush } from './push.js';
+import { sendFcm } from './fcm.js';
 
 const PUSH_MIN_INTERVAL = 60_000; // no máximo um push por minuto por pessoa
 
@@ -16,19 +17,26 @@ export class Live extends DurableObject {
   webSocketMessage(ws, msg) { if (msg === 'ping') ws.send('pong'); }
   webSocketClose(ws, code) { try { ws.close(code, ''); } catch {} }
 
-  async nudge(endpoints = []) {
+  // targets: [{ kind: 'webpush' | 'fcm', endpoint }] dos aparelhos da pessoa.
+  async nudge(targets = []) {
     const sockets = this.ctx.getWebSockets();
     for (const ws of sockets) { try { ws.send('{"t":"sync"}'); } catch {} }
-    if (sockets.length || !endpoints.length) return { sockets: sockets.length, pushed: 0 };
+    if (sockets.length || !targets.length) return { sockets: sockets.length, pushed: 0 };
     const last = (await this.ctx.storage.get('lastPush')) ?? 0;
     if (Date.now() - last < PUSH_MIN_INTERVAL) return { sockets: 0, pushed: 0 };
     await this.ctx.storage.put('lastPush', Date.now());
     let pushed = 0;
     const gone = [];
-    for (const ep of endpoints) {
-      const r = await sendPush(this.env, ep).catch(() => null);
+    for (const { kind, endpoint } of targets) {
+      if (kind === 'fcm') {
+        const r = await sendFcm(this.env, endpoint).catch(() => null);
+        if (r?.ok) pushed++;
+        else if (r?.gone) gone.push(endpoint);
+        continue;
+      }
+      const r = await sendPush(this.env, endpoint).catch(() => null);
       if (r?.ok) pushed++;
-      else if (r && [404, 410].includes(r.status)) gone.push(ep);
+      else if (r && [404, 410].includes(r.status)) gone.push(endpoint);
     }
     return { sockets: 0, pushed, gone };
   }

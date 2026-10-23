@@ -1,5 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomBytes, webcrypto } from 'node:crypto';
 import { startApi, d1, newDevice, Client, SETUP, fakeCt, msgId } from './helpers.mjs';
 
 let api;
@@ -183,7 +184,7 @@ test('documentos: o 4º revoga o mais antigo e manda tombstone', async () => {
   assert.ok((await people.admin.get('/v1/sync')).data.tombstones.some((t) => t.msgId === docs[0].msgId));
 });
 
-test('troca de aparelho só por QR: novo inicia, antigo aprova, antigo cai', async () => {
+test('troca de aparelho em duas fases: antigo aprova, novo guarda as chaves e confirma, só então o antigo cai', async () => {
   const newDev = await newDevice();
   const fresh = new Client(api.base);
   const start = await fresh.post('/v1/devices/pair/start', { device: newDev.public });
@@ -192,12 +193,67 @@ test('troca de aparelho só por QR: novo inicia, antigo aprova, antigo cai', asy
   const ok = await people.bia.post('/v1/devices/pair/approve', { pairingId: start.data.pairingId, code: start.data.code });
   assert.equal(ok.status, 200);
   assert.equal(ok.data.userId, people.bia.userId, 'mesma identidade');
-  assert.equal((await people.bia.get('/v1/sync')).status, 401, 'sessão do aparelho antigo revogada');
+  assert.equal(ok.data.pending, true);
+  // O celular novo ainda não confirmou: o antigo continua valendo (se o novo
+  // travar agora, ninguém perde a conta).
+  assert.equal((await people.bia.get('/v1/sync')).status, 200, 'antigo ainda ativo antes da confirmação');
   const st = await fresh.post('/v1/devices/pair/status', { pairingId: start.data.pairingId, authPub: newDev.public.authPub });
   assert.equal(st.data.state, 'approved');
   await fresh.login(newDev, ok.data.deviceId);
   assert.equal(fresh.userId, people.bia.userId);
+  // Pendente: só cofre e confirmação.
+  assert.equal((await fresh.get('/v1/me')).data.pending, true);
+  assert.equal((await fresh.get('/v1/sync')).status, 403, 'pendente não lê mensagens');
+  assert.equal((await fresh.get('/v1/directory')).status, 403);
+  assert.ok(!(await people.admin.get('/v1/directory')).data.members.some((m) => m.deviceId === ok.data.deviceId), 'pendente fora do diretório');
+  assert.equal((await fresh.post('/v1/devices/pair/commit')).status, 409, 'confirmar exige cofre guardado');
+  assert.equal((await fresh.post('/v1/vault/register', { verifier: Buffer.from(randomBytes(32)).toString('base64'), deadDays: 15 })).status, 201);
+  assert.equal((await fresh.post('/v1/devices/pair/commit')).status, 200);
+  assert.equal((await fresh.post('/v1/devices/pair/commit')).status, 200, 'confirmar de novo não quebra');
+  assert.equal((await people.bia.get('/v1/sync')).status, 401, 'só agora a sessão do aparelho antigo cai');
+  assert.equal((await fresh.get('/v1/me')).data.pending, false);
+  assert.equal((await fresh.get('/v1/sync')).status, 200);
   people.bia = fresh;
+});
+
+test('troca durável: cofre registrado já no pedido; aprovado, vale para o aparelho novo sem novo registro', async () => {
+  const dev = await newDevice();
+  const fresh = new Client(api.base);
+  const verifier = Buffer.from(randomBytes(32)).toString('base64');
+  const start = await fresh.post('/v1/devices/pair/start', { device: dev.public, vault: { verifier, deadDays: 15 } });
+  assert.equal(start.status, 201);
+  assert.ok(start.data.vault.vaultId && start.data.vault.share, 'cofre já existe antes da aprovação');
+  // O app fechou e abriu de novo antes da aprovação: o cofre abre com o PIN certo.
+  const rel = await fresh.post('/v1/vault/release', { vaultId: start.data.vault.vaultId, verifier });
+  assert.equal(rel.data.share, start.data.vault.share);
+  const ok = await people.bia.post('/v1/devices/pair/approve', { pairingId: start.data.pairingId, code: start.data.code });
+  assert.equal(ok.status, 200);
+  await fresh.login(dev, ok.data.deviceId);
+  assert.equal((await fresh.post('/v1/devices/pair/commit')).status, 200, 'cofre do pedido passou para o aparelho novo');
+  assert.equal((await people.bia.get('/v1/sync')).status, 401);
+  assert.equal((await fresh.post('/v1/vault/release', { vaultId: start.data.vault.vaultId, verifier })).data.share, start.data.vault.share, 'cofre segue valendo depois da troca');
+  people.bia = fresh;
+});
+
+test('troca de aparelho: novo que some no meio não derruba ninguém; aprovar de novo substitui o pendente', async () => {
+  const lost = await newDevice();
+  const a = new Client(api.base);
+  const s1 = await a.post('/v1/devices/pair/start', { device: lost.public });
+  const ok1 = await people.caio.post('/v1/devices/pair/approve', { pairingId: s1.data.pairingId, code: s1.data.code });
+  assert.equal(ok1.status, 200);
+  // O celular novo "morreu" aqui. Caio tenta de novo com outro.
+  const again = await newDevice();
+  const b = new Client(api.base);
+  const s2 = await b.post('/v1/devices/pair/start', { device: again.public });
+  const ok2 = await people.caio.post('/v1/devices/pair/approve', { pairingId: s2.data.pairingId, code: s2.data.code });
+  assert.equal(ok2.status, 200);
+  assert.equal((await people.caio.get('/v1/sync')).status, 200, 'antigo segue funcionando');
+  // O primeiro pendente perdeu a vaga.
+  const { data: { nonce } } = await a.post('/v1/auth/challenge', { deviceId: ok1.data.deviceId });
+  const sig = await webcrypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, lost.kp.privateKey, new TextEncoder().encode(`mp-auth-v1:${nonce}:${ok1.data.deviceId}`));
+  assert.equal((await a.post('/v1/auth/session', { deviceId: ok1.data.deviceId, nonce, signature: Buffer.from(sig).toString('base64') })).status, 401);
+  // Desiste do segundo também: Caio continua no aparelho antigo.
+  assert.equal((await people.caio.get('/v1/sync')).status, 200);
 });
 
 test('recuperação: administradora + guardião, 24 h de espera, aparelho antigo cancela', async () => {

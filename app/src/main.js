@@ -9,7 +9,7 @@ import { h, mount, toast, clearOverlays } from './ui.js';
 import { CONFIG } from './config.js';
 import { scriptURL } from './tt.js';
 import * as session from './session.js';
-import { welcome } from './screens/welcome.js';
+import { welcome, pairWaitScreen } from './screens/welcome.js';
 import { unlockScreen } from './screens/unlock.js';
 import { chatsScreen } from './screens/chats.js';
 import { chatScreen } from './screens/chat.js';
@@ -21,8 +21,8 @@ import { storiesScreen } from './screens/stories.js';
 // Tranca de verdade (chaves saem da memória) ao sair do app: na hora por
 // padrão; em Ajustes dá para escolher 1 ou 5 minutos.
 const lockAfter = () => session.S.prefs?.lockAfter ?? 0;
-const routes = { welcome, unlock: unlockScreen, chats: chatsScreen, chat: chatScreen, newGroup: newGroupScreen, nickname: nicknameScreen, settings: settingsScreen, stories: storiesScreen };
-const open = new Set(['welcome', 'unlock']);
+const routes = { welcome, pairWait: pairWaitScreen, unlock: unlockScreen, chats: chatsScreen, chat: chatScreen, newGroup: newGroupScreen, nickname: nicknameScreen, settings: settingsScreen, stories: storiesScreen };
+const open = new Set(['welcome', 'unlock', 'pairWait']);
 let cleanup = null;
 
 export async function go(name, params = {}) {
