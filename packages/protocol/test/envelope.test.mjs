@@ -85,3 +85,12 @@ test('foto de perfil, foto e fundo de grupo: referência cifrada bem formada ou 
     assert.throws(() => p.encodeInner({ ...base, kind: 'room_profile', body: { title: 'x', background: bad } }), /fundo/);
   }
 });
+
+test('legenda cifrada (não em ver uma vez) e recado de perfil com limite', () => {
+  const media = (body) => ({ ...base, kind: 'media', body: { mediaId: 'media_0000001', key: 'k', mode: 'media', mime: 'image/jpeg', ...body } });
+  assert.ok(p.encodeInner(media({ caption: 'praia 🌊' })));
+  assert.throws(() => p.encodeInner(media({ caption: 'x'.repeat(1001) })), /legenda/);
+  assert.throws(() => p.encodeInner(media({ caption: 'oi', mode: 'once' })), /legenda/, 'legenda ficaria visível sem segurar');
+  assert.ok(p.encodeInner({ ...base, kind: 'nickname_change', body: { nickname: 'Ana', about: 'de férias' } }));
+  assert.throws(() => p.encodeInner({ ...base, kind: 'nickname_change', body: { nickname: 'Ana', about: 'x'.repeat(141) } }), /recado/);
+});

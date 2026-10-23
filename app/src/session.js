@@ -223,7 +223,7 @@ async function handleExtras(received) {
   for (const m of received) {
     if (m.kind === 'nickname_change' && m.room === CIRCLE_ROOM_ID && !validNickname(m.body.nickname)) {
       const prev = S.nicknames[m.sender];
-      S.nicknames[m.sender] = { nickname: m.body.nickname.trim(), at: Date.now(), photo: 'photo' in m.body ? m.body.photo : prev?.photo ?? null };
+      S.nicknames[m.sender] = { nickname: m.body.nickname.trim(), at: Date.now(), photo: 'photo' in m.body ? m.body.photo : prev?.photo ?? null, about: 'about' in m.body ? m.body.about : prev?.about ?? null };
       if (prev?.photo && prev.photo.mediaId !== S.nicknames[m.sender].photo?.mediaId) forgetVisual(prev.photo);
       changed = true;
     }
@@ -260,7 +260,7 @@ async function announce() {
   const nick = myNickname();
   if (!nick) return;
   const view = await roomView(CIRCLE_ROOM_ID, true);
-  if (view && view.members.filter((m) => m.active).length > 1) await S.client.sendInner(CIRCLE_ROOM_ID, 'nickname_change', { nickname: nick, photo: S.nicknames[S.client.userId]?.photo ?? null });
+  if (view && view.members.filter((m) => m.active).length > 1) await S.client.sendInner(CIRCLE_ROOM_ID, 'nickname_change', { nickname: nick, photo: S.nicknames[S.client.userId]?.photo ?? null, about: S.nicknames[S.client.userId]?.about ?? null });
   await S.store.put('lastAnnounce', { at: Date.now(), members: view?.members.filter((m) => m.active).length ?? 0 });
 }
 
@@ -383,6 +383,16 @@ export function roomPhoto(view) {
   if (view.kind === 'direct') return photoOf(view.members.find((m) => m.userId !== S.client.userId)?.userId);
   return S.rooms[view.roomId]?.photo ?? null;
 }
+
+// Recado (§18): frase curta, cifrada, só para o círculo.
+export async function setAbout(text) {
+  const me = S.client.userId;
+  const about = (text ?? '').trim().slice(0, 140) || null;
+  S.nicknames[me] = { ...(S.nicknames[me] ?? {}), about };
+  await S.store.put('nicknames', S.nicknames);
+  await announce();
+}
+export const aboutOf = (userId) => S.nicknames[userId]?.about ?? null;
 
 export async function setProfilePhoto(bytes) {
   const me = S.client.userId;

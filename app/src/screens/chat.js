@@ -64,11 +64,22 @@ export async function chatScreen(go, { roomId }) {
     try {
       toast('Preparando a foto…');
       const p = await preparePhoto(f);
-      await S.client.sendMedia(roomId, p.bytes, { mode: once ? 'once' : 'media', mime: p.mime });
+      const caption = takeCaption(once);
+      await S.client.sendMedia(roomId, p.bytes, { mode: once ? 'once' : 'media', mime: p.mime, caption });
       p.bytes.fill(0);
       await render();
     } catch (e) { toast(`Não enviou: ${e.message}`); }
   };
+
+  // Legenda (V6-025): o que estiver escrito na caixa vai junto, cifrado.
+  // Ver uma vez não leva legenda (ela ficaria visível sem segurar).
+  function takeCaption(once) {
+    const t = input.value.trim().slice(0, 1000);
+    if (once || !t) return undefined;
+    input.value = '';
+    session.setDraft(roomId, '').catch(() => {});
+    return t;
+  }
 
   // Vídeo (§14, V7-016): sempre recodificado no aparelho (até 5 min, 1080p,
   // sem metadados) antes de cifrar. Se ficar grande demais, tenta a
@@ -103,7 +114,7 @@ export async function chatScreen(go, { roomId }) {
       label.textContent = 'Enviando cifrado…';
       bar.removeAttribute('value');
       bytes = new Uint8Array(await r.blob.arrayBuffer());
-      await S.client.sendMedia(roomId, bytes, { mode: once ? 'once' : 'media', mime: 'video/mp4', duration: Math.round(r.stats.out.duration * 1000) });
+      await S.client.sendMedia(roomId, bytes, { mode: once ? 'once' : 'media', mime: 'video/mp4', duration: Math.round(r.stats.out.duration * 1000), caption: takeCaption(once) });
       await render();
     } catch (e) { toast(`Não enviou: ${e.message}`); }
     finally { bytes?.fill(0); videoJob = null; progressBar.hidden = true; progressBar.replaceChildren(); }
@@ -218,7 +229,10 @@ export async function chatScreen(go, { roomId }) {
     const parts = [];
     if (view.kind !== 'direct' && !mine) parts.push(h('span', { class: 'who', text: session.nameOf(m.sender) }));
     if (m.replyTo) parts.push(h('span', { class: 'quote', text: byId.get(m.replyTo) ? preview(byId.get(m.replyTo)) : 'Mensagem que não existe mais' }));
-    if (m.kind === 'media') parts.push(mediaBlock(m, mine));
+    if (m.kind === 'media') {
+      parts.push(mediaBlock(m, mine));
+      if (m.body?.caption) parts.push(h('span', { class: 'text caption', text: m.body.caption }));
+    }
     else parts.push(h('span', { class: 'text', text: m.text }));
     const meta = [h('time', { text: formatTime(m.acceptedAt) })];
     if (m.edited) meta.push(h('span', { text: '*editado' }));

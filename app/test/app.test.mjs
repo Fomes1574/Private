@@ -337,6 +337,32 @@ test('menu da conversa: buscar, silenciar, fixar, arquivar e apagar conversa só
   }
 });
 
+test('legenda vai cifrada com a foto; recado aparece para o círculo', async () => {
+  await ana.page.fill('#composer', 'pôr do sol 🌅');
+  const chooser = ana.page.waitForEvent('filechooser');
+  await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
+  await ana.page.click('.sheet >> text=Foto');
+  await (await chooser).setFiles(new URL('../../poc/01-vodozemac-wasm/web/icon-180.png', import.meta.url).pathname);
+  await ana.page.waitForSelector('.msg.mine .caption >> text=pôr do sol 🌅', { timeout: 30000 });
+  assert.equal(await ana.page.inputValue('#composer'), '', 'texto virou legenda');
+  await bia.page.waitForSelector('.msg:not(.mine) .caption >> text=pôr do sol 🌅', { timeout: 40000 });
+
+  await ana.page.click('[aria-label=Voltar]');
+  await ana.page.click('[aria-label=Ajustes]');
+  await ana.page.click('button:text-is("Recado")');
+  await ana.page.fill('#sheet-text', 'de férias até sexta');
+  await ana.page.click('.sheet >> text=Salvar');
+  await ana.page.waitForSelector('#about >> text=de férias até sexta');
+  await bia.page.waitForFunction(() => Object.values(globalThis.__mpTest.S.nicknames).some((n) => n.about === 'de férias até sexta'), null, { timeout: 40000 });
+  await bia.page.click('[aria-label="Menu da conversa"]');
+  await bia.page.click('.sheet >> text=Participantes e verificação');
+  await bia.page.waitForSelector('.sheet >> text=de férias até sexta');
+  await bia.page.click('.sheet >> text=Fechar');
+  await ana.page.click('[aria-label=Voltar]');
+  await ana.page.click('.row-btn:has-text("Bia")');
+  await ana.page.waitForSelector('#composer');
+});
+
 const dbDirs = (p) => p.page.evaluate(async () => {
   const out = [];
   for await (const [name] of (await navigator.storage.getDirectory()).entries()) if (name.startsWith('.mp-')) out.push(name);

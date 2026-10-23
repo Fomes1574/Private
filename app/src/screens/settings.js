@@ -27,6 +27,7 @@ export async function settingsScreen(go) {
   const me = (await S.client.api.get('/v1/directory')).members;
   const { isAdmin } = await S.client.api.get('/v1/me');
   const fp = await session.myFingerprint();
+  const aboutText = h('span', { id: 'about', text: session.aboutOf(S.client.userId) ?? '—' });
   const meAvatar = h('span', {}, avatar(session.myNickname(), session.photoOf(S.client.userId), { big: true }));
   const warnings = S.client.warnings.map((w) => h('li', { class: 'warn', text: warningText(w) }));
 
@@ -37,7 +38,13 @@ export async function settingsScreen(go) {
         h('h2', { text: 'Você' }),
         h('div', { class: 'row' }, meAvatar,
           h('p', {}, 'Apelido: ', h('strong', { text: session.myNickname() ?? '—' }))),
+        h('p', { class: 'muted small' }, 'Recado: ', aboutText),
         h('button', { class: 'secondary', text: 'Mudar apelido', onclick: () => go('nickname', { back: 'settings' }) }),
+        h('button', { class: 'secondary', text: 'Recado', onclick: async () => {
+          const t = await textSheet('Recado (até 140 letras, só o círculo vê, cifrado)', session.aboutOf(S.client.userId) ?? '', 140);
+          if (t === null) return;
+          try { await session.setAbout(t); aboutText.textContent = session.aboutOf(S.client.userId) ?? '—'; toast('Recado salvo.'); } catch (e) { toast(`Não deu: ${e.message}`); }
+        } }),
         h('button', { class: 'secondary', text: 'Foto de perfil', onclick: async () => {
           const has = !!session.photoOf(S.client.userId);
           const c = has ? await choiceSheet('Foto de perfil (só o círculo vê, cifrada)', [{ label: 'Trocar foto', value: 'set' }, { label: 'Remover foto', value: 'rm', danger: true }]) : 'set';
@@ -178,4 +185,17 @@ function warningText(w) {
     case 'membership_rejected': return `Um anúncio de membros de ${session.nameOf(w.from)} não veio da líder confirmada e foi ignorado.`;
     default: return 'Aviso de segurança. Verifiquem os números pessoalmente.';
   }
+}
+
+// Caixa de texto em folha (sem prompt() do navegador).
+function textSheet(label, value, max) {
+  return new Promise((resolve) => {
+    const input = h('input', { id: 'sheet-text', value, maxlength: String(max), autocomplete: 'off', 'aria-label': label });
+    const close = (v) => { sheet.remove(); resolve(v); };
+    const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' }, h('form', { class: 'sheet-box', onsubmit: (e) => { e.preventDefault(); close(input.value); } },
+      h('p', { class: 'muted', text: label }), input,
+      h('button', { class: 'block', text: 'Salvar' }), h('button', { type: 'button', class: 'secondary block', text: 'Cancelar', onclick: () => close(null) })));
+    document.body.append(sheet);
+    input.focus();
+  });
 }

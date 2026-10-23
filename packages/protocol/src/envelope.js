@@ -60,6 +60,7 @@ export function validateInner(m) {
     case 'nickname_change':
       if (typeof m.body?.nickname !== 'string' || m.body.nickname.trim().length < 2 || m.body.nickname.length > 24) fail('apelido');
       if (!visualRef(m.body.photo)) fail('foto de perfil');
+      if (m.body.about !== undefined && m.body.about !== null && (typeof m.body.about !== 'string' || m.body.about.length > 140)) fail('recado');
       break;
     case 'membership':
       if (!Array.isArray(m.body?.members) || m.body.members.length < 1 || m.body.members.length > 10 || !m.body.members.every((x) => ID.test(x)) || !ID.test(m.body.leader ?? '') || !m.body.members.includes(m.body.leader)) fail('membros');
@@ -76,6 +77,7 @@ export function validateInner(m) {
       if (!(b.mode === 'doc' ? DOC_MIME : MEDIA_MIME).test(b.mime ?? '')) fail('tipo de mídia');
       if (b.name !== undefined && (b.mode !== 'doc' || !validDocName(b.name))) fail('nome do documento');
       if (b.mode === 'once' && !/^(image|video)\//.test(b.mime)) fail('ver uma vez só para foto ou vídeo');
+      if (b.caption !== undefined && (typeof b.caption !== 'string' || b.caption.length > 1000 || b.mode === 'once')) fail('legenda');
       if (b.duration !== undefined && !(Number.isSafeInteger(b.duration) && b.duration >= 0 && b.duration <= 3_600_000 + 5_000)) fail('duração');
       break;
     }

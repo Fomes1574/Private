@@ -128,6 +128,7 @@ async function membersSheet(v) {
     const k = S.client.known[m.userId];
     const fp = k ? await session.fingerprint(k.curve) : '—';
     rows.push(h('li', {}, h('strong', { text: session.nameOf(m.userId) + (m.userId === v.leader ? ' · líder' : '') + (m.userId === S.client.userId ? ' (você)' : '') }),
+      session.aboutOf(m.userId) ? h('span', { class: 'muted small', text: session.aboutOf(m.userId) }) : null,
       h('span', { class: 'code small', text: fp })));
   }
   const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'sheet-box' },
