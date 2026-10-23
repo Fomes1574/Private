@@ -5,7 +5,8 @@ export class ApiError extends Error {
 }
 
 export class Api {
-  constructor(base, clock, { fetchImpl = globalThis.fetch } = {}) {
+  // `fetch` precisa ser chamado com this = janela no navegador.
+  constructor(base, clock, { fetchImpl = (...a) => globalThis.fetch(...a) } = {}) {
     this.base = base.replace(/\/$/, '');
     this.clock = clock;
     this.fetch = fetchImpl;

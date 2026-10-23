@@ -1,0 +1,12 @@
+{
+  "name": "mp-android",
+  "private": true,
+  "type": "module",
+  "description": "App Android: o mesmo app web dentro de um APK assinado (ADR 0007, V7-020)",
+  "scripts": {
+    "web": "cd ../app && MP_MODE=plain MP_CSP_META=1 node build.mjs",
+    "sync": "npm run web && cap sync android"
+  },
+  "dependencies": { "@capacitor/core": "8.5.3", "@capacitor/android": "8.5.3" },
+  "devDependencies": { "@capacitor/cli": "8.5.3" }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "mp-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+  },
+  "devDependencies": { "wrangler": "4.149.0" }
+}

@@ -63,10 +63,13 @@ route('POST', '/v1/bootstrap', async ({ env, request }) => {
   return json(201, { ...r, circleRoom: CIRCLE_ROOM_ID });
 }, { open: true });
 
-route('POST', '/v1/invites/redeem', async ({ env, request }) => {
+route('POST', '/v1/invites/redeem', async ({ env, ctx, request }) => {
   const body = await readJson(request);
   const r = unwrap(await circle(env).redeem({ token: body.token, device: body.device }));
   await room(env, CIRCLE_ROOM_ID).systemJoin(r.userId);
+  // Quem já está no círculo sincroniza e reanuncia o apelido para a pessoa nova.
+  const view = await room(env, CIRCLE_ROOM_ID).get(r.userId);
+  if (view?.members) await nudge(env, ctx, view.members.filter((m) => m.active && m.userId !== r.userId).map((m) => m.userId));
   return json(201, { ...r, circleRoom: CIRCLE_ROOM_ID });
 }, { open: true });
 
@@ -91,6 +94,7 @@ route('POST', '/v1/auth/logout', async ({ env, request }) => {
   await circle(env).logout(request.headers.get('authorization').slice(7));
   return json(200, { ok: true });
 });
+route('GET', '/v1/me', async ({ me }) => json(200, { userId: me.userId, deviceId: me.deviceId, isAdmin: me.isAdmin }));
 route('GET', '/v1/directory', async ({ env }) => json(200, { members: await circle(env).directory() }));
 route('POST', '/v1/keys', async ({ env, request, me }) => json(200, await circle(env).uploadKeys(me.deviceId, await readJson(request))));
 route('POST', '/v1/keys/claim', async ({ env, request }) => json(200, unwrap(await circle(env).claimKey(assertId((await readJson(request)).userId)))));
@@ -131,6 +135,10 @@ route('POST', '/v1/rooms', async ({ env, request, me }) => {
   if (!(await circle(env).activeUsers([me.userId, ...members]))) throw new HttpError(400, 'bad_members');
   const roomId = randomId(16); // conversa nova sempre com id novo (V7-008)
   return json(201, unwrap(await room(env, roomId).init(me.userId, { roomId, kind: b.kind, members, textTtl: b.textTtl, mediaTtl: b.mediaTtl })));
+});
+route('GET', '/v1/rooms', async ({ env, me }) => {
+  const { results } = await env.DB.prepare('SELECT room FROM room_members WHERE user_id = ?').bind(me.userId).all();
+  return json(200, { rooms: results.map((r) => r.room) });
 });
 route('GET', '/v1/rooms/([A-Za-z0-9_-]{8,64})', async ({ env, me, p }) => json(200, unwrap(await room(env, p[1]).get(me.userId))));
 route('GET', '/v1/rooms/([A-Za-z0-9_-]{8,64})/events', async ({ env, me, p, url }) => json(200, { events: unwrap(await room(env, p[1]).events(me.userId, Number(url.searchParams.get('after')) || 0)) }));

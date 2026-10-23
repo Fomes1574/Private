@@ -1,0 +1,12 @@
+# App (PWA): só arquivos estáticos, origem separada da API (ADR 0004).
+name = "mp-app"
+compatibility_date = "2026-09-01"
+workers_dev = true
+preview_urls = false
+
+[observability]
+enabled = false
+
+[assets]
+directory = "./dist"
+not_found_handling = "none"

@@ -22,3 +22,4 @@ Estados usados: **Aceito** (decisão do proprietário), **Aceito como direção*
 | [0008](0008-sem-telemetria-logs-minimos.md) | Sem telemetria e logs mínimos | Aceito | §1.1, V7-018 |
 | [0009](0009-gate-online-criptografico.md) | Gate online criptográfico | Bloqueado até revisão | V7-011, P-24 |
 | [0010](0010-banco-local-cifrado.md) | Banco local cifrado | Aceito como direção | P-04 |
+| [0011](0011-interface-sem-framework.md) | Interface em JavaScript puro, sem framework | Provisório | D-074 |

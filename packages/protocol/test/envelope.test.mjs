@@ -37,3 +37,11 @@ test('versão, tipo e campos são validados', () => {
 test('conteúdo acima do maior degrau é recusado', () => {
   assert.throws(() => p.encodeInner({ ...base, kind: 'text', body: { text: 'x'.repeat(70000) } }), /grande/);
 });
+
+test('apelido, nome de grupo e mídia têm formato conferido', () => {
+  assert.throws(() => p.encodeInner({ ...base, kind: 'nickname_change', body: { nickname: 'x' } }), /apelido/);
+  assert.ok(p.encodeInner({ ...base, kind: 'nickname_change', body: { nickname: 'Lua' } }));
+  assert.throws(() => p.encodeInner({ ...base, kind: 'room_profile', body: { title: 'x'.repeat(61) } }), /grupo/);
+  assert.throws(() => p.encodeInner({ ...base, kind: 'media', body: { mediaId: 'curto', key: 'k', mode: 'once' } }), /mídia/);
+  assert.throws(() => p.encodeInner({ ...base, kind: 'media', body: { mediaId: 'abcdefghij', key: 'k', mode: 'html' } }), /mídia/);
+});

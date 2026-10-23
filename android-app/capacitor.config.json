@@ -1,0 +1,14 @@
+{
+  "appId": "com.mensageiro.privado",
+  "appName": "Mensageiro",
+  "webDir": "../app/dist",
+  "loggingBehavior": "none",
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": false,
+    "webContentsDebuggingEnabled": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

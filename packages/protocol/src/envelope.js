@@ -4,7 +4,7 @@ export const INNER_VERSION = 1;
 
 export const KINDS = new Set([
   'text', 'reaction', 'edit', 'delete_for_all', 'media', 'policy', 'leader_transfer',
-  'nickname_change', 'membership', 'unlink',
+  'nickname_change', 'membership', 'unlink', 'room_profile',
 ]);
 
 // Escada de tamanhos: o texto cifrado só revela em qual degrau o conteúdo cai.
@@ -46,6 +46,9 @@ export function validateInner(m) {
     case 'reaction': if (!ID.test(m.body?.target ?? '') || typeof m.body.emoji !== 'string' || [...m.body.emoji].length > 8) fail('reação'); break;
     case 'edit': if (!ID.test(m.body?.target ?? '') || typeof m.body.text !== 'string' || !Number.isSafeInteger(m.body.version) || m.body.version < 1) fail('edição'); break;
     case 'delete_for_all': if (!ID.test(m.body?.target ?? '')) fail('apagar'); break;
+    case 'nickname_change': if (typeof m.body?.nickname !== 'string' || m.body.nickname.trim().length < 2 || m.body.nickname.length > 24) fail('apelido'); break;
+    case 'room_profile': if (typeof m.body?.title !== 'string' || m.body.title.length > 60) fail('nome do grupo'); break;
+    case 'media': if (!ID.test(m.body?.mediaId ?? '') || typeof m.body.key !== 'string' || !['once', 'media', 'doc'].includes(m.body.mode)) fail('mídia'); break;
     default: break;
   }
   if (m.replyTo !== undefined && !ID.test(m.replyTo)) fail('replyTo');
