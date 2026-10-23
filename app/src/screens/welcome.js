@@ -17,6 +17,9 @@ export function welcome(go) {
         h('button', { class: 'block', text: 'Tenho um convite', onclick: () => withLock(go, 'invite') }),
         h('button', { class: 'block secondary', text: 'Já uso em outro celular', onclick: () => withLock(go, 'pair') }),
         h('button', { class: 'link', text: 'Perdi meu celular (código de emergência)', onclick: () => emergency(go) }),
+        // Também disponível no APK nativo, que não é aberto com #instalar.
+        // O servidor exige SETUP_CODE e permite o bootstrap somente antes do primeiro membro.
+        h('button', { class: 'link', text: 'Primeira instalação (administradora)', onclick: () => withLock(go, 'bootstrap') }),
       ],
     installHint()));
 }
