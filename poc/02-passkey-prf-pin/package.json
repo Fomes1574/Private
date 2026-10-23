@@ -1,0 +1,10 @@
+{
+  "name": "poc-02-passkey-prf-pin",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "./build.sh",
+    "test": "node --test test/*.test.mjs",
+    "serve": "node ../../scripts/serve.mjs"
+  }
+}

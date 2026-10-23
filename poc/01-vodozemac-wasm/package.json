@@ -5,6 +5,6 @@
   "scripts": {
     "build": "./build.sh",
     "test": "node --test test/*.test.mjs",
-    "serve": "node serve.mjs"
+    "serve": "node ../../scripts/serve.mjs"
   }
 }

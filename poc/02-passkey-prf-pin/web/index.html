@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; style-src 'self'; img-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0B1220">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="style.css">
+<title>Prova 2 · Face ID e PIN</title>
+</head>
+<body>
+<header>
+  <h1>Prova 2 · Face ID + PIN</h1>
+  <p id="status">Carregando…</p>
+</header>
+
+<main id="app" hidden>
+  <section id="setup" class="person" hidden>
+    <h2>Criar cofre</h2>
+    <p class="muted">A chave do banco é sorteada no aparelho e guardada embrulhada. Para abrir, precisa do Face ID <b>e</b> do PIN.</p>
+    <form id="setupForm">
+      <label>Modo
+        <select id="mode">
+          <option value="passkey">Face ID (passkey) + PIN</option>
+          <option value="passphrase">Só frase-senha (aparelho sem PRF)</option>
+        </select>
+      </label>
+      <label><span id="secretLabel">PIN (6 a 12 números)</span>
+        <input id="secret1" type="password" inputmode="numeric" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </label>
+      <label>Repita
+        <input id="secret2" type="password" inputmode="numeric" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </label>
+      <button id="createBtn">Criar cofre</button>
+    </form>
+  </section>
+
+  <section id="locked" class="person" hidden>
+    <h2>Bloqueado</h2>
+    <form id="unlockForm">
+      <label><span id="unlockLabel">PIN</span>
+        <input id="unlockSecret" type="password" inputmode="numeric" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </label>
+      <button>Desbloquear</button>
+    </form>
+    <p id="attempts" class="muted"></p>
+  </section>
+
+  <section id="unlocked" class="person" hidden>
+    <h2>Desbloqueado</h2>
+    <p class="muted">Nota cifrada com a chave do banco. Só aparece depois do desbloqueio.</p>
+    <form id="noteForm">
+      <input id="note" autocomplete="off" maxlength="200" placeholder="Escreva algo e salve">
+      <button>Salvar</button>
+    </form>
+    <p>Nota salva: <b id="noteShown"></b></p>
+    <button id="lockBtn" class="secondary">Bloquear agora</button>
+  </section>
+
+  <section class="tools">
+    <button id="copy" class="secondary">Copiar relatório</button>
+    <button id="reset" class="danger">Apagar cofre e recomeçar</button>
+  </section>
+
+  <section>
+    <h2>Diagnóstico</h2>
+    <pre id="diag"></pre>
+  </section>
+
+  <details>
+    <summary>Como testar</summary>
+    <ol>
+      <li>Crie o cofre no modo Face ID + PIN. O iPhone pede para salvar uma passkey: aceite.</li>
+      <li>Salve uma nota. Toque em “Bloquear agora” e desbloqueie com o PIN certo (o Face ID aparece).</li>
+      <li>Saia do app e volte: ele deve estar bloqueado.</li>
+      <li>Feche o app de verdade e abra de novo: a nota volta depois do desbloqueio.</li>
+      <li>Erre o PIN duas vezes e acerte na terceira: o contador zera.</li>
+      <li>Cancele o Face ID uma vez e veja a mensagem.</li>
+      <li>No fim, erre o PIN 5 vezes: o cofre deve ser destruído e nem o PIN certo abre.</li>
+      <li>Repita instalado na Tela de Início. Toque em “Copiar relatório” e me mande.</li>
+    </ol>
+  </details>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

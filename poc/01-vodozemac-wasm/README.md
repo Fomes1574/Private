@@ -15,7 +15,7 @@ continuam a conversa depois de fechar e reabrir o app.
 ```sh
 ./build.sh          # recompila o WASM (precisa de Rust + wasm-bindgen-cli 0.2.129)
 npm test            # testes em Node sobre o WASM compilado
-npm run serve       # http://localhost:8080
+npm run serve       # http://localhost:8080/poc1/
 node make-icons.mjs # regenera os ícones provisórios
 ```
 

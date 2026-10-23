@@ -7,7 +7,7 @@ se as partes mais arriscadas da arquitetura funcionam antes de escrever o app.
 | # | Prova | Pasta | Estado |
 |---|---|---|---|
 | 1 | vodozemac em WASM: troca cifrada, estado salvo, fechar e reabrir | [`poc/01-vodozemac-wasm`](poc/01-vodozemac-wasm) | Funciona no Chromium; falta aparelho real |
-| 2 | Face ID por passkey (PRF) + PIN liberando a chave do banco | — | A fazer |
+| 2 | Face ID por passkey (PRF) + PIN liberando a chave do banco | [`poc/02-passkey-prf-pin`](poc/02-passkey-prf-pin) | Funciona no Chromium (autenticador virtual); falta iPhone |
 | 3 | Banco local cifrado (SQLite/WASM) no app da Tela de Início | — | A fazer |
 | 4 | Atualização com versão travada no service worker | — | A fazer |
 | 5 | Ver uma vez com consumo atômico no Durable Object | — | A fazer |

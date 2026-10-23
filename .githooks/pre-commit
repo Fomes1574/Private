@@ -5,8 +5,11 @@ if command -v gitleaks >/dev/null 2>&1; then
   gitleaks git --staged --redact --no-banner .
 else
   # Sem gitleaks: checagem simples dos padrões mais comuns.
-  if git diff --cached -U0 | grep -E '^\+' | grep -Ei \
-     '(BEGIN [A-Z ]*PRIVATE KEY|api[_-]?token|secret[_-]?key|CLOUDFLARE_API_TOKEN *= *[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,})'; then
+  # Valor longo atribuído a nome de segredo, chave privada PEM ou token do GitHub.
+  if git diff --cached -U0 -- . ':(exclude).githooks' | grep -E '^\+' | grep -Ei \
+     -e '-----BEGIN [A-Z ]*PRIVATE KEY-----' \
+     -e '(token|secret|password|senha)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9_/+=-]{24,}' \
+     -e 'gh[pousr]_[A-Za-z0-9]{30,}'; then
     echo "Possível segredo no commit. Instale o gitleaks ou remova a linha." >&2
     exit 1
   fi

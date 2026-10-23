@@ -43,9 +43,12 @@ jobs:
             echo "== $lock"; cargo audit --file "$lock"
           done
 
-  prova-01:
+  provas-wasm:
     runs-on: ubuntu-24.04
-    defaults: { run: { working-directory: poc/01-vodozemac-wasm } }
+    strategy:
+      matrix:
+        prova: [01-vodozemac-wasm, 02-passkey-prf-pin]
+    defaults: { run: { working-directory: "poc/${{ matrix.prova }}" } }
     steps:
       - uses: actions/checkout@v4
         with: { persist-credentials: false }
@@ -57,4 +60,17 @@ jobs:
         run: |
           ./build.sh
           git diff --exit-code -- web/pkg || { echo "WASM publicado difere do build"; exit 1; }
+      - run: npm test
+
+  navegador:
+    runs-on: ubuntu-24.04
+    needs: provas-wasm
+    defaults: { run: { working-directory: e2e } }
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
       - run: npm test

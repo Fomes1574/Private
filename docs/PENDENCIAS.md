@@ -6,7 +6,7 @@ Atualizado a cada prova. "Feito" significa código com teste automatizado;
 | ID | Assunto | Estado no repositório |
 |---|---|---|
 | P-01 | Biblioteca E2EE em WASM | Prova 1: feito; aparelho pendente |
-| P-02 | Face ID (PRF) + PIN | Prova 2 |
+| P-02 | Face ID (PRF) + PIN | Prova 2: feito; aparelho pendente |
 | P-03 | Atualização com versão travada | Prova 4 |
 | P-04 | Banco local cifrado | Prova 3 |
 | P-05 | Ver uma vez, consumo atômico | Prova 5 |
