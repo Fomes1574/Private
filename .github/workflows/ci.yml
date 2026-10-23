@@ -16,10 +16,10 @@ jobs:
   segredos:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0, persist-credentials: false }
-      - uses: actions/setup-go@v5
-        with: { go-version: "1.24", cache: false }
+      - uses: actions/setup-go@v7
+        with: { go-version: "1.27", cache: false }
       - name: gitleaks (histórico inteiro)
         run: |
           go install github.com/zricethezav/gitleaks/v8@v8.30.1
@@ -28,10 +28,10 @@ jobs:
   dependencias:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { persist-credentials: false }
-      - uses: actions/setup-go@v5
-        with: { go-version: "1.24", cache: false }
+      - uses: actions/setup-go@v7
+        with: { go-version: "1.27", cache: false }
       - name: osv-scanner (todas as lockfiles)
         run: |
           go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.6.0
@@ -50,9 +50,9 @@ jobs:
         prova: [01-vodozemac-wasm, 02-passkey-prf-pin]
     defaults: { run: { working-directory: "poc/${{ matrix.prova }}" } }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { persist-credentials: false }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: "22" }
       - name: Ferramentas Rust travadas
         run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
@@ -62,14 +62,27 @@ jobs:
           git diff --exit-code -- web/pkg || { echo "WASM publicado difere do build"; exit 1; }
       - run: npm test
 
+  prova-03:
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: poc/03-banco-local-cifrado } }
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v7
+        with: { node-version: "22" }
+      - run: npm ci
+      - name: Cópia do SQLite confere com o pacote travado
+        run: node vendor.mjs --check
+      - run: npm test
+
   navegador:
     runs-on: ubuntu-24.04
-    needs: provas-wasm
+    needs: [provas-wasm, prova-03]
     defaults: { run: { working-directory: e2e } }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { persist-credentials: false }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: "22" }
       - run: npm ci
       - run: npx playwright install --with-deps chromium

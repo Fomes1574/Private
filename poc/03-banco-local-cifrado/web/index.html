@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0B1220">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="style.css">
+<title>Prova 3 · Banco cifrado</title>
+</head>
+<body>
+<header>
+  <h1>Prova 3 · Banco local cifrado</h1>
+  <p id="status">Carregando…</p>
+</header>
+<main id="app" hidden>
+  <section class="tools">
+    <button id="fill">Gravar 1.000</button>
+    <button id="fill10" class="secondary">Gravar 10.000</button>
+    <button id="short" class="secondary">Gravar 5 que vencem em 30 s</button>
+    <button id="reload" class="secondary">Reler</button>
+  </section>
+  <section class="person">
+    <h2>20 mensagens mais novas (decifradas agora)</h2>
+    <ol id="list" class="log"></ol>
+  </section>
+  <section class="tools">
+    <button id="shred" class="danger">Destruir a chave</button>
+    <button id="wipe" class="danger">Apagar o banco</button>
+    <button id="copy" class="secondary">Copiar relatório</button>
+  </section>
+  <section>
+    <h2>Diagnóstico</h2>
+    <pre id="diag"></pre>
+  </section>
+  <details>
+    <summary>Como testar</summary>
+    <ol>
+      <li>Toque em “Gravar 10.000”. Anote o tempo no diagnóstico.</li>
+      <li>Feche o app de verdade e abra de novo: “count” deve continuar igual e as mensagens aparecem.</li>
+      <li>Toque em “Gravar 5 que vencem em 30 s”, feche o app, espere 1 minuto e abra: elas não podem aparecer nem por um instante (“purgedBeforeRender” mostra quantas saíram).</li>
+      <li>Toque em “Destruir a chave”: tudo que estava gravado vira ilegível.</li>
+      <li>Repita instalado na Tela de Início. Deixe o app sem abrir por alguns dias e veja se os dados continuam.</li>
+      <li>Toque em “Copiar relatório” e me mande.</li>
+    </ol>
+  </details>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

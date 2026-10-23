@@ -8,7 +8,7 @@ Atualizado a cada prova. "Feito" significa código com teste automatizado;
 | P-01 | Biblioteca E2EE em WASM | Prova 1: feito; aparelho pendente |
 | P-02 | Face ID (PRF) + PIN | Prova 2: feito; aparelho pendente |
 | P-03 | Atualização com versão travada | Prova 4 |
-| P-04 | Banco local cifrado | Prova 3 |
+| P-04 | Banco local cifrado | Prova 3: feito; aparelho pendente |
 | P-05 | Ver uma vez, consumo atômico | Prova 5 |
 | P-24 | Gate online de texto | **Bloqueado**: precisa de revisão independente (ADR 0009) |
 | P-06 | Android com Capacitor e FLAG_SECURE | Depende de máquina com Android SDK; ver ACOES_DO_PROPRIETARIO |
