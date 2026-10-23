@@ -89,7 +89,11 @@ echo "janela: $(echo "$WIN" | grep -m1 -E '^[[:space:]]*fl=|[[:space:]]fl=' | tr
 echo "$WIN" | grep -q 'SECURE' || fail "janela da MainActivity sem FLAG_SECURE"
 
 # 5) Sem porta de depuração do WebView aberta.
-SOCKS=$(adb shell cat /proc/net/unix | grep -o '@\?webview_devtools_remote_[0-9]*' | sort -u | tr '\n' ' ')
+# Primeiro prova que a lista de sockets é legível (senão "nenhum" não vale).
+UNIX=$(adb shell cat /proc/net/unix 2>&1 || true)
+NLINES=$(echo "$UNIX" | grep -c '^[0-9a-f]*:' || true)
+[ "$NLINES" -gt 5 ] || fail "não deu para ler /proc/net/unix ($NLINES linhas): o teste de depuração não vale"
+SOCKS=$(echo "$UNIX" | grep -o '@\?webview_devtools_remote_[0-9]*' | sort -u | tr '\n' ' ' || true)
 echo "sockets de depuração de WebView: ${SOCKS:-nenhum} (app pid $pidof_app)"
 echo "$SOCKS" | grep -qw "webview_devtools_remote_$pidof_app" && fail "depuração do WebView ligada"
 
