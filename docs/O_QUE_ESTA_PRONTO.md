@@ -131,6 +131,8 @@ Garantias de que os dados morrem:
   - e, para a líder: prazos, nome, foto e fundo do grupo, adicionar e remover pessoas.
 
 **Mídia**
+- **Câmera e microfone dentro do app.** Foto e vídeo nascem na memória e só saem cifrados: nada vai para a galeria, para a nuvem ou para pasta temporária. A câmera desliga na hora se o app sai da tela.
+- **Modo máximo, ligado por padrão:** foto e vídeo só pela câmera do app, inclusive em stories e fotos de perfil/grupo. Desligar em Ajustes traz a galeria de volta.
 - Foto com editor no aparelho: girar, recortar (original, quadrado, 4:5, 16:9), desenhar, escrever, desfazer.
 - Vídeo até 5 min, recodificado no aparelho (1080p); cai para qualidade econômica se ficar grande.
 - Áudio até 1 h, com velocidades 1×, 1,5× e 2×.
@@ -161,6 +163,12 @@ Garantias de que os dados morrem:
 
 ---
 
+## 5.1 Rede lenta (Tor/VPN)
+- Medido com rede simulada (`scripts/medir-rede.mjs`): no Tor, enviar texto ~1,6 s e receber ~2,0 s; em VPN, abaixo de 0,4 s.
+- Otimizações sem tirar segurança: pedidos que saíam um depois do outro agora saem juntos, e o app parou de consultar o círculo a cada sincronização.
+- A mensagem enviada aparece na hora ("enviando…").
+- Guia: `docs/REDE_TOR_VPN.md` (Orbot no Android e no iPhone, VPN, Retransmissão Privada; o que cada um esconde).
+
 ## 6. Android (`android-app/`)
 - Capacitor com `appId` `com.mensageiro.privado`.
 - `FLAG_SECURE` em todas as telas e sem miniatura no seletor de apps; WebView endurecido.
@@ -178,7 +186,7 @@ Garantias de que os dados morrem:
 | Criptografia (`packages/crypto`) | 5 |
 | Cliente (`packages/client`) | 17 — três pessoas contra o servidor local, inclusive "servidor malicioso" |
 | Servidor (`server`) | 30 com R2 e 29 com a alternativa DO — API inteira, cota, limite de tráfego, WebSocket e push |
-| App (`app`) | 18 — duas pessoas usando o app pela interface, no Chromium, mais o teste da release assinada sem internet |
+| App (`app`) | 19 — duas pessoas usando o app pela interface, no Chromium, mais o teste da release assinada sem internet |
 | Provas no navegador (`e2e`) | 7 |
 | Provas (testes de cada pasta) | Provas 1–6 |
 
@@ -223,6 +231,7 @@ token da Cloudflare fica só nos Secrets do GitHub.
 - `docs/PENDENCIAS.md` — estado de cada pendência P-xx.
 - `docs/CRITERIOS.md` — cada critério de aceite (§26) e onde está testado.
 - `docs/adr/` — por que cada decisão foi tomada.
+- `docs/REDE_TOR_VPN.md` — Tor, VPN e Retransmissão Privada: o que escondem e como ligar.
 - `tools/gerar-chave-de-assinatura.html` — gera, no seu computador, a chave de assinatura e os códigos secretos.
 
 ---

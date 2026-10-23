@@ -40,13 +40,19 @@ export async function chatScreen(go, { roomId }) {
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
+    // Aparece na hora como "enviando…" (em rede lenta, como Tor, a ida e volta
+    // demora); some ao confirmar ou volta para a caixa se falhar.
+    const pending = h('li', { class: 'msg mine pending' }, h('span', { class: 'text', text }), h('span', { class: 'meta' }, h('span', { text: 'enviando…' })));
+    log.querySelector('li.note')?.remove();
+    log.append(pending);
+    pending.scrollIntoView({ block: 'end' });
     try {
       await S.client.sendText(roomId, text, replyTo ? { replyTo } : {});
       clearTimeout(draftTimer);
       await session.setDraft(roomId, '');
       setReply(null);
       await render();
-    } catch (e) { input.value = text; toast(e.code === 'gone' ? 'Conversa encerrada.' : `Não enviou: ${errText(e)}`); }
+    } catch (e) { pending.remove(); input.value = text; toast(e.code === 'gone' ? 'Conversa encerrada.' : `Não enviou: ${errText(e)}`); }
   };
   const setReply = (m) => {
     replyTo = m?.msgId ?? null;

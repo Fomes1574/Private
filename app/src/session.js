@@ -147,6 +147,7 @@ export async function unlock(secret) {
 }
 
 async function afterUnlock() {
+  announceCheck = true;
   await S.client.login();
   S.unlocked = true;
   if (Date.now() - ((await idbGet('lastRotate')) ?? 0) > ROTATE_EVERY) scheduleRotate();
@@ -207,6 +208,7 @@ export function syncNow() {
         let more = true, rounds = 0;
         while (more && rounds++ < 10 && S.unlocked) {
           const r = await S.client.sync();
+          if (r.security?.some((e) => e.kind === 'joined' || e.kind === 'recovered' || e.kind === 'device_changed')) announceCheck = true;
           for (const x of r.rejected) console.warn('mensagem recusada', x.msgId, x.sender, x.reason);
           await handleExtras(r.received);
           more = r.more;
@@ -266,13 +268,20 @@ async function announce() {
   await S.store.put('lastAnnounce', { at: Date.now(), members: view?.members.filter((m) => m.active).length ?? 0 });
 }
 
-// Reanuncia quando entra alguém novo ou a cada 7 dias (o prazo máximo é 15).
+// Reanuncia quando entra alguém novo (ou troca de aparelho) e a cada 7 dias
+// (o prazo máximo é 15). Só consulta os membros do círculo quando há motivo:
+// em rede lenta (Tor) cada ida e volta conta. A marca só sai depois de o
+// anúncio dar certo (se a pessoa nova ainda não tinha chaves, tenta de novo).
+let announceCheck = true;
 async function maybeAnnounce() {
   if (!myNickname()) return;
   const last = (await S.store.get('lastAnnounce')) ?? { at: 0, members: 0 };
+  const due = Date.now() - last.at > REANNOUNCE_MS;
+  if (!announceCheck && !due) return;
   const view = await roomView(CIRCLE_ROOM_ID, true);
   const n = view?.members.filter((m) => m.active).length ?? 0;
-  if (n > last.members || Date.now() - last.at > REANNOUNCE_MS) await announce();
+  if (n > last.members || due) await announce();
+  announceCheck = false;
 }
 
 export function searchPeople(term) {

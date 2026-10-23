@@ -183,8 +183,12 @@ export class MessengerClient {
 
   // Envia qualquer tipo de conteúdo interno a todos os membros ativos.
   async sendInner(roomId, kind, body, { replyTo, msgKind = 'text', view = null, audience = null, ttl } = {}) {
-    await this.checkSecurityEvents(); // nunca cifrar para uma chave que já foi trocada
-    const room = view ?? await this.room(roomId);
+    // Os dois pedidos vão juntos (menos idas e voltas em rede lenta, ex.: Tor);
+    // a conferência de segurança termina antes de qualquer cifra.
+    const [, room] = await Promise.all([
+      this.checkSecurityEvents(), // nunca cifrar para uma chave que já foi trocada
+      view ?? this.room(roomId),
+    ]);
     let to = room.members.filter((m) => m.active && m.userId !== this.userId).map((m) => m.userId);
     if (audience) {
       // Story: só para quem a pessoa escolheu, e só gente do círculo.
@@ -365,8 +369,9 @@ export class MessengerClient {
   }
 
   async sync() {
-    await this.checkSecurityEvents();
-    const res = await this.api.get('/v1/sync');
+    // Juntos: avisos de segurança e caixa de entrada. Os avisos são
+    // aplicados (diretório relido) antes de decifrar qualquer envelope.
+    const [security, res] = await Promise.all([this.checkSecurityEvents(), this.api.get('/v1/sync')]);
     const acks = { envelopes: [], tombstones: [] };
     // 1) tombstones primeiro: nada apagado chega a aparecer (§12).
     for (const t of res.tombstones) {
@@ -404,7 +409,7 @@ export class MessengerClient {
     await this.persistCrypto(); // estado salvo antes de confirmar
     await this.saveMarks();
     if (acks.envelopes.length || acks.tombstones.length) await this.api.post('/v1/ack', acks);
-    return { received, rejected, tombstones: res.tombstones.length, more: res.more };
+    return { received, rejected, tombstones: res.tombstones.length, more: res.more, security };
   }
 
   async apply(inner, e) {
