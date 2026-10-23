@@ -15,6 +15,24 @@ se as partes mais arriscadas da arquitetura funcionam antes de escrever o app.
 
 Cada pasta tem um `RELATORIO.md` com o que funcionou e o que não funcionou.
 
+## O app
+
+| Parte | Pasta | Testes |
+|---|---|---|
+| Regras e formatos (prazos, Brasília, envelopes, documentos) | `packages/protocol` | `npm test` |
+| Cripto (vodozemac em WASM, build reproduzível) | `packages/crypto` | `npm test` |
+| Núcleo do cliente (Olm por pessoa, fan-out, mídia segmentada) | `packages/client` | `npm test` (contra o Worker local) |
+| Servidor (Workers, Durable Objects, D1) | `server` | `npm test` (workerd local) |
+| App (PWA e base do APK) | `app` | `npm test` (duas pessoas pelo Chromium) |
+| Android (Capacitor, FLAG_SECURE) | `android-app` | APK no CI |
+
+Já funciona, com teste: convite, apelido, conversa 1:1 e grupo, responder,
+reagir, editar, apagar para mim/para todos, foto (com editor), vídeo, áudio,
+ver uma vez, documento de texto, legenda, rascunho, busca local, silenciar,
+fixar, arquivar, apagar conversa, foto de perfil/grupo, fundo, recado,
+stories, notificação "novas mensagens", bloqueio com passkey+PIN, troca de
+aparelho por código, recuperação com guardião e atualização assinada.
+
 ## Onde está cada coisa
 
 - [`docs/especificacao/`](docs/especificacao/) especificação normativa v7 (fonte da verdade).

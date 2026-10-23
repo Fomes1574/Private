@@ -34,7 +34,7 @@ teste no iPhone/Android real · **pendente** = não implementado ainda · **limi
 | Offline não exibe sem autorização válida ao voltar | ok (cliente honesto) | sem tempo confiável nada aparece; gate criptográfico bloqueado (ADR 0009) |
 | PWA fechada não mostra vencidas ao reabrir | ok / aparelho | Prova 3 e `view()`; falta iPhone |
 | D1/R2 limpam vencidos | ok | cron + alarme do DO |
-| Foto de perfil/grupo/fundo até troca | pendente | só apelido e nome do grupo feitos |
+| Foto de perfil/grupo/fundo até troca, sem versão antiga acessível | ok | `server/test/api.test.mjs` (só a versão atual), cliente e app (perfil e grupo) |
 
 ## D. Visto único
 | Critério | Estado | Onde |
@@ -51,14 +51,14 @@ teste no iPhone/Android real · **pendente** = não implementado ainda · **limi
 |---|---|---|
 | 20 MB, 3 globais, 4º revoga o mais antigo | ok | protocolo + API |
 | 4º falho mantém os três | ok (por desenho) | só conta depois de publicar |
-| Arquivos perigosos não executam; sem exportação | pendente | interface de documentos não feita (P-12) |
-| Vídeo 5 min, áudio 1 h, fotos compactadas | parcial | foto recodificada (sem EXIF); vídeo na Prova 6; áudio pendente |
+| Arquivos perigosos não executam; sem exportação | ok (lista positiva) | só texto UTF-8, mostrado como texto puro; HTML no documento não vira página (teste do app). PDF e outros esperam P-12 |
+| Vídeo 5 min, áudio 1 h, fotos compactadas | ok / aparelho | foto recodificada e editor; vídeo recodificado (Prova 6) no chat e nas stories; áudio até 1 h. H.264 só no aparelho |
 | EXIF/GPS não vão ao servidor | ok | foto recodificada no canvas; vídeo com `tags: {}` |
 
 ## F. Plataformas, UI e manutenção
 | Critério | Estado | Onde |
 |---|---|---|
-| Android bloqueia capturas em todas as telas | pendente | projeto Capacitor + FLAG_SECURE (precisa compilar no CI) |
+| Android bloqueia capturas em todas as telas | ok (build) / aparelho | APK compila no CI com FLAG_SECURE e sem miniatura em recentes; falta testar no aparelho |
 | iPhone informa limite real de print | ok | Ajustes → "O que este app não promete" |
 | Notificação só "novas mensagens" | ok | push sem payload; SW mostra texto fixo |
 | Sem online/visto/entregue/digitando | ok | teste do app procura essas palavras |
@@ -66,3 +66,15 @@ teste no iPhone/Android real · **pendente** = não implementado ainda · **limi
 | Banco migra transacionalmente | ok | Prova 3 |
 | Bateria, memória, vídeo, armazenamento esgotado no iPhone | aparelho | — |
 | Testes de cliente adulterado, PWA comprometida, servidor malicioso (V7-022) | parcial | falsificação de remetente, release adulterada, troca de chave; falta suíte dedicada |
+
+## G. Recursos de conversa (§17, §18, §22)
+| Critério | Estado | Onde |
+|---|---|---|
+| Legenda cifrada; ver uma vez sem legenda | ok | protocolo e app |
+| Rascunho só no aparelho, cifrado, some ao enviar | ok | app |
+| Buscar só no que ainda vale, sem índice salvo | ok | app (menu da conversa) |
+| Silenciar só suprime push; prazos e entrega iguais; quem envia não sabe | ok | API e app |
+| Apagar conversa só para mim; os outros continuam vendo | ok | app |
+| Stories: audiência escolhida, prazo próprio, sem contagem de quem viu | ok | API, cliente e app |
+| Editor de foto local, sem sobreposição automática | ok | app (girar, desenhar, escrever; cancelar não envia) |
+| Mensagem que falha na verificação vira aviso visível | ok | cliente (`message_rejected`) |
