@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self' blob:; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0B1220">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="viewer.css">
+<title>Prova 5 · Ver uma vez</title>
+</head>
+<body>
+<header>
+  <h1>Prova 5 · Ver uma vez</h1>
+  <p id="status">Carregando…</p>
+</header>
+<main id="app" hidden>
+  <section class="person">
+    <h2>Ana envia</h2>
+    <label>Foto <input id="file" type="file" accept="image/jpeg,image/png,image/webp"></label>
+    <label>Prazo
+      <select id="ttl">
+        <option value="43200">12 horas</option>
+        <option value="86400">24 horas</option>
+        <option value="432000" selected>5 dias</option>
+        <option value="1296000">15 dias</option>
+      </select>
+    </label>
+    <button id="send">Enviar para Bia e Caio (ver uma vez)</button>
+    <button id="revoke" class="danger" hidden>Apagar para todos</button>
+  </section>
+
+  <section class="people">
+    <article class="person" data-who="bia">
+      <h2>Bia</h2>
+      <button class="hold" disabled>Segurar para ver</button>
+      <p class="muted state"></p>
+    </article>
+    <article class="person" data-who="caio">
+      <h2>Caio</h2>
+      <button class="hold" disabled>Segurar para ver</button>
+      <p class="muted state"></p>
+    </article>
+    <article class="person" data-who="ana">
+      <h2>Ana tenta reabrir</h2>
+      <button class="hold" disabled>Segurar para ver</button>
+      <p class="muted state"></p>
+    </article>
+  </section>
+
+  <section class="tools"><button id="copy" class="secondary">Copiar relatório</button></section>
+  <section><h2>Diagnóstico</h2><pre id="diag"></pre></section>
+  <details>
+    <summary>Como testar</summary>
+    <ol>
+      <li>Escolha uma foto e toque em “Enviar”. A foto é cifrada aqui; o servidor só recebe bytes cifrados.</li>
+      <li>Em Bia, segure o botão: a foto aparece só enquanto o dedo estiver na tela.</li>
+      <li>Solte e segure de novo: “já vista”. Caio ainda consegue ver uma vez.</li>
+      <li>Ana (quem enviou) não consegue abrir.</li>
+      <li>Durante a visualização, puxe a Central de Controle ou troque de app: a foto deve sumir na hora.</li>
+      <li>Tire um print enquanto segura e veja o que aparece. No iPhone o print <b>não</b> é bloqueado; anote o resultado.</li>
+      <li>Toque em “Copiar relatório” e me mande.</li>
+    </ol>
+  </details>
+</main>
+<div id="viewer" hidden><img id="viewImg" alt="Foto de visualização única"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

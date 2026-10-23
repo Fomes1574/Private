@@ -1,0 +1,36 @@
+# Prova 5 · ver uma vez. Um Durable Object por mídia guarda os direitos de
+# cada destinatário e, no modo "do", também os pedaços cifrados.
+name = "mp-poc5-ver-uma-vez"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+# Sem logs de requisição (ADR 0008).
+[observability]
+enabled = false
+
+[assets]
+directory = "./web"
+binding = "ASSETS"
+run_worker_first = ["/v1/*"]
+
+[vars]
+# "do": pedaços cifrados no SQLite do Durable Object (grátis, sem cartão).
+# "r2": objeto cifrado no R2 (precisa ativar o R2; ver ACOES_DO_PROPRIETARIO).
+BLOB_BACKEND = "do"
+
+[[durable_objects.bindings]]
+name = "MEDIA_BOX"
+class_name = "MediaBox"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MediaBox"]
+
+# Ambiente opcional com R2: `wrangler deploy --env r2`. Fica separado para o
+# deploy padrão não exigir o R2 ativado na conta.
+[env.r2]
+name = "mp-poc5-ver-uma-vez-r2"
+vars = { BLOB_BACKEND = "r2" }
+durable_objects.bindings = [{ name = "MEDIA_BOX", class_name = "MediaBox" }]
+r2_buckets = [{ binding = "MEDIA", bucket_name = "mp-poc5-media" }]

@@ -1,0 +1,10 @@
+{
+  "name": "poc-05-ver-uma-vez",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8787",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+  },
+  "devDependencies": { "wrangler": "4.149.0" }
+}
