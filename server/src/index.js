@@ -3,6 +3,7 @@
 import { json, fail, readJson, HttpError, unwrap, randomId, assertId, sameBytes, SECURITY_HEADERS } from './http.js';
 import { CHUNK } from './media.js';
 import { MAX_DOC_BYTES } from '../../packages/protocol/src/documents.js';
+import { CIRCLE_ROOM_ID } from '../../packages/protocol/src/room.js';
 
 export { Circle } from './circle.js';
 export { Room } from './room.js';
@@ -57,12 +58,16 @@ route('POST', '/v1/bootstrap', async ({ env, request }) => {
   const body = await readJson(request);
   // SETUP_CODE é um segredo de uso único criado pelo proprietário.
   if (!env.SETUP_CODE || env.SETUP_CODE.length < 16 || typeof body.setupCode !== 'string' || !sameBytes(body.setupCode, env.SETUP_CODE)) throw new HttpError(401, 'unauthorized');
-  return json(201, unwrap(await circle(env).bootstrap({ device: body.device })));
+  const r = unwrap(await circle(env).bootstrap({ device: body.device }));
+  await room(env, CIRCLE_ROOM_ID).systemJoin(r.userId);
+  return json(201, { ...r, circleRoom: CIRCLE_ROOM_ID });
 }, { open: true });
 
 route('POST', '/v1/invites/redeem', async ({ env, request }) => {
   const body = await readJson(request);
-  return json(201, unwrap(await circle(env).redeem({ token: body.token, device: body.device })));
+  const r = unwrap(await circle(env).redeem({ token: body.token, device: body.device }));
+  await room(env, CIRCLE_ROOM_ID).systemJoin(r.userId);
+  return json(201, { ...r, circleRoom: CIRCLE_ROOM_ID });
 }, { open: true });
 
 route('POST', '/v1/auth/challenge', async ({ env, request }) => {

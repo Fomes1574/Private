@@ -69,3 +69,16 @@ test('estado anterior não é alterado (eventos puros)', () => {
   p.apply(s, { type: 'leave', actor: 'bia' });
   assert.equal(p.isMember(s, 'bia'), true);
 });
+
+test('conversa do círculo: prazo máximo, ninguém mexe, servidor põe e tira gente', () => {
+  let s = p.createRoom({ roomId: p.CIRCLE_ROOM_ID, kind: 'circle', creator: 'ana', members: [] });
+  assert.equal(s.textTtl, 15 * 86400);
+  s = p.systemJoin(s, 'bia');
+  s = p.systemJoin(s, 'bia');
+  assert.equal([...s.members.values()].filter((m) => m.active).length, 2);
+  assert.throws(() => p.apply(s, { type: 'set_policy', actor: 'ana', rev: 2, textTtl: 86400 }), /servidor/);
+  assert.throws(() => p.apply(s, { type: 'leave', actor: 'bia' }), /servidor/);
+  s = p.systemLeave(s, 'ana');
+  assert.equal(s.leader, 'bia');
+  assert.throws(() => p.systemJoin(p.createRoom({ roomId: 'r', kind: 'group', creator: 'a', members: ['b'] }), 'c'), /círculo/);
+});

@@ -265,3 +265,17 @@ test('remover do círculo tira a pessoa das conversas', async () => {
   const r = await people.admin.post(`/v1/rooms/${g.data.roomId}/messages`, { msgId: msgId(), kind: 'text', envelopes: { [people.bia.userId]: fakeCt() } });
   assert.equal(r.status, 201);
 });
+
+test('conversa do círculo: todos entram sozinhos; ninguém mexe nela', async () => {
+  const circleId = 'circulo-0000000000';
+  const v = await people.admin.get(`/v1/rooms/${circleId}`);
+  assert.equal(v.status, 200);
+  assert.equal(v.data.kind, 'circle');
+  assert.ok(v.data.members.filter((m) => m.active).length >= 3);
+  assert.equal((await people.admin.post(`/v1/rooms/${circleId}/events`, { type: 'set_policy', rev: 2, textTtl: 86400 })).status, 403);
+  const active = v.data.members.filter((m) => m.active && m.userId !== people.bia.userId).map((m) => m.userId);
+  const envs = Object.fromEntries(active.map((u) => [u, fakeCt()]));
+  const r = await people.bia.post(`/v1/rooms/${circleId}/messages`, { msgId: msgId(), kind: 'text', envelopes: envs });
+  assert.equal(r.status, 201);
+  assert.equal(r.data.expiresAt - r.data.acceptedAt, 15 * 86400 * 1000, 'anúncios de perfil com o prazo máximo');
+});

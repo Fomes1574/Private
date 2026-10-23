@@ -3,7 +3,12 @@
 // V6-010 (prazos separados, só para o futuro), V6-023 (sucessão pelo membro
 // ativo mais antigo), V7-008 (desfazer vínculo), V7-010 (líder não apaga
 // conteúdo alheio: não há evento para isso).
-import { assertTtl, DEFAULT_TTL } from './ttl.js';
+import { assertTtl, DEFAULT_TTL, MAX_TTL } from './ttl.js';
+
+// Conversa do círculo: todos os membros ativos, mantida pelo servidor. Só
+// transporta anúncios cifrados de perfil (apelido, V7-006), reenviados quando
+// alguém entra. Ninguém altera política, liderança ou membros dela.
+export const CIRCLE_ROOM_ID = 'circulo-0000000000';
 
 export class RoomError extends Error {}
 const no = (why) => { throw new RoomError(why); };
@@ -24,7 +29,8 @@ export function successor(s, excluding) {
 }
 
 export function createRoom({ roomId, kind, creator, members, textTtl = DEFAULT_TTL, mediaTtl = DEFAULT_TTL }) {
-  if (!['direct', 'group'].includes(kind)) no('tipo de conversa');
+  if (!['direct', 'group', 'circle'].includes(kind)) no('tipo de conversa');
+  if (kind === 'circle') { textTtl = MAX_TTL; mediaTtl = MAX_TTL; }
   const others = [...new Set(members)].filter((m) => m !== creator);
   if (kind === 'direct' && others.length !== 1) no('conversa 1:1 tem exatamente duas pessoas');
   if (others.length + 1 > MAX_MEMBERS) no('mais de 10 pessoas');
@@ -46,6 +52,7 @@ export function apply(state, ev) {
   const actorIsMember = isMember(s, ev.actor);
   if (!actorIsMember) no('quem age não é membro ativo');
   const leaderOnly = () => { if (ev.actor !== s.leader) no('só a líder pode'); };
+  if (s.kind === 'circle') no('a conversa do círculo é mantida pelo servidor');
 
   switch (ev.type) {
     case 'set_policy': {
@@ -104,4 +111,21 @@ export function apply(state, ev) {
 export function ttlFor(s, kind) {
   if (s.closed) no('conversa encerrada não recebe mensagens');
   return kind === 'media' ? s.mediaTtl : s.textTtl;
+}
+
+// Entrada e saída na conversa do círculo, feitas pelo servidor (não por pessoas).
+export function systemJoin(state, userId) {
+  if (state.kind !== 'circle') throw new RoomError('só na conversa do círculo');
+  if (isMember(state, userId)) return state;
+  const s = clone(state);
+  s.members.set(userId, { joinSeq: s.nextJoinSeq++, active: true });
+  return s;
+}
+
+export function systemLeave(state, userId) {
+  if (!isMember(state, userId)) return state;
+  const s = clone(state);
+  s.members.get(userId).active = false;
+  if (s.leader === userId) s.leader = successor(s, userId);
+  return s;
 }

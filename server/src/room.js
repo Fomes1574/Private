@@ -2,7 +2,7 @@
 // @mp/protocol), carimba o prazo no aceite e grava o fan-out no D1.
 // O servidor nunca vê o conteúdo: só envelopes cifrados por destinatário.
 import { DurableObject } from 'cloudflare:workers';
-import { createRoom, apply, ttlFor, isMember, RoomError } from '../../packages/protocol/src/room.js';
+import { createRoom, apply, ttlFor, isMember, RoomError, systemJoin, systemLeave, CIRCLE_ROOM_ID } from '../../packages/protocol/src/room.js';
 
 const MAX_CT_B64 = 128 * 1024; // degrau máximo do envelope + sobra do Olm, em base64
 const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -136,11 +136,24 @@ export class Room extends DurableObject {
 
   // Identidade removida do círculo sai de todas as conversas (sem precisar
   // da líder). Se era a líder, a sucessão segue a regra de sempre.
+  // Conversa do círculo: o servidor põe cada identidade nova (V7-006).
+  async systemJoin(userId) {
+    let s = this.load();
+    const before = s;
+    if (!s) s = createRoom({ roomId: CIRCLE_ROOM_ID, kind: 'circle', creator: userId, members: [] });
+    else s = systemJoin(s, userId);
+    this.save(s);
+    await this.syncMembership(before, s);
+    return { ok: true };
+  }
+
   async systemRemove(userId) {
     const s = this.load();
     if (!s || !isMember(s, userId)) return { ok: true };
     let next;
-    if (s.kind === 'direct') {
+    if (s.kind === 'circle') {
+      next = systemLeave(s, userId);
+    } else if (s.kind === 'direct') {
       // 1:1 com alguém removido do círculo: encerra (como desfazer vínculo).
       next = { ...s, closed: true, closedBy: userId, members: new Map(s.members) };
       next.members.set(userId, { ...s.members.get(userId), active: false });
