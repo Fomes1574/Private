@@ -6,7 +6,7 @@ import { formatTime, formatDateTime } from '../packages/protocol/src/time.js';
 import { preparePhoto } from '../media.js';
 import { editPhoto } from '../editor.js';
 import { openCamera } from '../camera.js';
-import { openMedia, holdButton, playAudio, openText } from './viewer.js';
+import { openMedia, holdButton, playAudio, openDoc, isPdf } from './viewer.js';
 import { MAX_DOC_BYTES } from '../packages/protocol/src/documents.js';
 import { validDocName } from '../packages/protocol/src/envelope.js';
 import { prepareVideo } from '../video-prep.js';
@@ -128,21 +128,26 @@ export async function chatScreen(go, { roomId }) {
     finally { bytes?.fill(0); videoJob = null; progressBar.hidden = true; progressBar.replaceChildren(); }
   }
 
-  // Documento (§16, P-12): por enquanto só texto UTF-8, mostrado como texto
-  // puro dentro do app. Três ativos por pessoa no app inteiro; o quarto
+  // Documento (§16, P-12): lista positiva, texto UTF-8 ou PDF, os dois
+  // mostrados dentro do app (nunca em outro app). O tipo é conferido pelo
+  // conteúdo, não pelo nome. Três ativos por pessoa no app inteiro; o quarto
   // revoga o mais antigo para todos, então avisa antes.
   async function sendDoc(file) {
     let bytes = null;
     try {
       if (file.size > MAX_DOC_BYTES) throw new Error('documento acima de 20 MB.');
       bytes = new Uint8Array(await file.arrayBuffer());
-      try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { throw new Error('só documentos de texto (UTF-8) por enquanto.'); }
-      if (bytes.includes(0)) throw new Error('arquivo binário: só documentos de texto por enquanto.');
+      let mime = 'application/pdf';
+      if (!isPdf(bytes)) {
+        mime = 'text/plain;charset=utf-8';
+        try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { throw new Error('só texto (UTF-8) ou PDF. Outros formatos não abrem com segurança dentro do app.'); }
+        if (bytes.includes(0)) throw new Error('arquivo binário: só texto (UTF-8) ou PDF.');
+      }
       const q = await S.client.api.get('/v1/docs/mine');
       if (q.active >= q.max && !await confirmSheet(`Você já tem ${q.max} documentos ativos no app. Enviar este apaga o mais antigo para todos, em qualquer conversa.`, 'Enviar mesmo assim')) return;
       let name = file.name.replace(/[\u0000-\u001f\u007f/\\]/g, '').trim().slice(0, 100);
-      if (!validDocName(name)) name = 'documento.txt';
-      const m = await S.client.sendMedia(roomId, bytes, { mode: 'doc', mime: 'text/plain;charset=utf-8', name });
+      if (!validDocName(name)) name = mime === 'application/pdf' ? 'documento.pdf' : 'documento.txt';
+      const m = await S.client.sendMedia(roomId, bytes, { mode: 'doc', mime, name });
       if (m.quota?.evicted?.length) toast('Documento enviado. O mais antigo foi apagado para todos (limite de 3).');
       await render();
     } catch (e) { toast(`Não enviou: ${errText(e)}`); }
@@ -157,7 +162,7 @@ export async function chatScreen(go, { roomId }) {
     if (!session.maxMode()) opts.push(
       { label: 'Galeria: foto', value: 'photo' }, { label: 'Galeria: foto de ver uma vez', value: 'photo-once' },
       { label: 'Galeria: vídeo (até 5 min)', value: 'video' }, { label: 'Galeria: vídeo de ver uma vez', value: 'video-once' });
-    opts.push({ label: 'Documento de texto (até 20 MB)', value: 'doc' });
+    opts.push({ label: 'Documento: texto ou PDF (até 20 MB)', value: 'doc' });
     const c = await choiceSheet(session.maxMode() ? 'Enviar (modo máximo: só pela câmera do app)' : 'Enviar', opts);
     if (!c) return;
     const once = c.endsWith('-once');
@@ -168,7 +173,7 @@ export async function chatScreen(go, { roomId }) {
       return video ? sendVideo(shot.blob, once) : sendPhoto(shot.bytes, shot.mime, once);
     }
     pick = { video: c.startsWith('video'), once, doc: c === 'doc' };
-    fileIn.accept = pick.doc ? '.txt,.md,.csv,text/plain' : pick.video ? 'video/*' : 'image/*';
+    fileIn.accept = pick.doc ? '.txt,.md,.csv,text/plain,.pdf,application/pdf' : pick.video ? 'video/*' : 'image/*';
     fileIn.click();
   };
   // Microfone: tocar para gravar; enviar ou descartar. Até 1 hora.
@@ -267,7 +272,7 @@ export async function chatScreen(go, { roomId }) {
     const what = mediaName(m);
     if (m.body.mode === 'doc') {
       if (!m.body.key) return h('span', { class: 'media-tag', text: `Documento · ${m.body.name ?? ''}` });
-      return h('button', { class: 'open media-tag', text: `Documento · ${m.body.name ?? 'sem nome'} · abrir`, onclick: () => openText(load, m.body.name).catch((e) => toast(`Não abriu: ${errText(e)}`)) });
+      return h('button', { class: 'open media-tag', text: `Documento · ${m.body.name ?? 'sem nome'} · abrir`, onclick: () => openDoc(load, m.body.name, m.body.mime).catch((e) => toast(`Não abriu: ${errText(e)}`)) });
     }
     if (m.body.mode === 'once') {
       const a = what === 'Foto' ? 'a' : 'o';

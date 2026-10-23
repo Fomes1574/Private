@@ -215,7 +215,7 @@ test('documento de texto: enviado cifrado, aberto como texto puro (HTML não vir
   const text = 'lista:\n- pão\n<img src=x onerror="document.title=\'xss\'"><script>document.title=\'xss\'</script>\nção ✓';
   const chooser = ana.page.waitForEvent('filechooser');
   await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
-  await ana.page.click('text=Documento de texto (até 20 MB)');
+  await ana.page.click('text=Documento: texto ou PDF (até 20 MB)');
   await (await chooser).setFiles({ name: 'notas/../secreto.txt', mimeType: 'text/plain', buffer: Buffer.from(text) });
   await ana.page.waitForSelector('.msg.mine >> text=/Documento · notas..secreto.txt/', { timeout: 30000 })
     .catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} | aviso: ${await status(ana)}`); });
@@ -230,9 +230,70 @@ test('documento de texto: enviado cifrado, aberto como texto puro (HTML não vir
   // Binário é recusado antes de sair do aparelho.
   const c2 = ana.page.waitForEvent('filechooser');
   await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
-  await ana.page.click('text=Documento de texto (até 20 MB)');
+  await ana.page.click('text=Documento: texto ou PDF (até 20 MB)');
   await (await c2).setFiles({ name: 'x.txt', mimeType: 'text/plain', buffer: Buffer.from([0xff, 0xfe, 0, 1, 2]) });
-  await ana.page.waitForFunction(() => /Não enviou: só documentos de texto/.test(document.querySelector('#toast').textContent));
+  await ana.page.waitForFunction(() => /Não enviou: só texto \(UTF-8\) ou PDF/.test(document.querySelector('#toast').textContent));
+});
+
+// PDF mínimo com: um retângulo preto (tinta garantida), texto, JavaScript
+// que rodaria ao abrir e um link para fora. Só o desenho pode acontecer.
+function hostilePdf() {
+  const content = 'q 0 0 0 rg 50 500 300 100 re f Q BT /F1 36 Tf 50 700 Td (Pacto PDF) Tj ET';
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R /OpenAction 5 0 R /Names << /JavaScript << /Names [(x) 5 0 R] >> >> >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 6 0 R >> >> /Annots [7 0 R] >>',
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    "<< /S /JavaScript /JS (document.title='pdfxss'; app.launchURL('https://exemplo.invalid/js', true);) >>",
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Type /Annot /Subtype /Link /Rect [50 500 350 600] /A << /S /URI /URI (https://exemplo.invalid/link) >> >>',
+  ];
+  let out = '%PDF-1.7\n';
+  const offs = [];
+  objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offs.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, 'latin1');
+}
+
+test('PDF: aberto dentro do app, só desenhado; JavaScript, ação automática e link não fazem nada', async () => {
+  const outside = [];
+  bia.page.on('request', (r) => { if (r.url().includes('exemplo.invalid')) outside.push(r.url()); });
+  const popups = [];
+  bia.ctx.on('page', (p) => popups.push(p.url()));
+  const chooser = ana.page.waitForEvent('filechooser');
+  await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
+  await ana.page.click('text=Documento: texto ou PDF (até 20 MB)');
+  await (await chooser).setFiles({ name: 'contrato.pdf', mimeType: 'application/pdf', buffer: hostilePdf() });
+  await bia.page.waitForSelector('.msg:not(.mine) >> text=/Documento · contrato.pdf · abrir/', { timeout: 40000 });
+  await bia.page.click('.msg:not(.mine) >> text=/Documento · contrato.pdf/');
+  await bia.page.waitForSelector('.viewer.pdf canvas.pdf-page', { timeout: 30000 });
+  await bia.page.waitForFunction(() => /1 página/.test(document.querySelector('.pdf-status')?.textContent ?? ''));
+  const ink = await bia.page.evaluate(() => {
+    const c = document.querySelector('canvas.pdf-page');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let dark = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] < 100 && d[i + 3] > 0) dark++;
+    return dark / (d.length / 4);
+  });
+  assert.ok(ink > 0.01, `página desenhada (tinta ${ink})`);
+  // Toca bem em cima do link: nada abre.
+  await bia.page.click('canvas.pdf-page', { position: { x: 100, y: 180 } });
+  await bia.page.waitForTimeout(1500);
+  assert.notEqual(await bia.page.title(), 'pdfxss', 'JavaScript do PDF não roda');
+  assert.deepEqual(outside, [], 'nenhum acesso ao endereço do PDF');
+  assert.deepEqual(popups, [], 'nenhuma janela ou app aberto');
+  assert.equal(await bia.page.$('.viewer.pdf a, .viewer.pdf .annotationLayer, .viewer.pdf .textLayer'), null, 'sem camada de links ou texto');
+  await bia.page.click('.viewer-close');
+  assert.equal(await bia.page.$('.viewer.pdf'), null);
+
+  // "PDF" que não é PDF (nome .pdf, conteúdo de .docx/zip) é recusado no envio.
+  const c2 = ana.page.waitForEvent('filechooser');
+  await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
+  await ana.page.click('text=Documento: texto ou PDF (até 20 MB)');
+  await (await c2).setFiles({ name: 'falso.pdf', mimeType: 'application/pdf', buffer: Buffer.from([0x50, 0x4b, 3, 4, 0, 0, 0xff, 0xfe]) });
+  await ana.page.waitForFunction(() => /Não enviou: só texto \(UTF-8\) ou PDF/.test(document.querySelector('#toast').textContent));
 });
 
 test('rascunho: fica no aparelho ao sair da conversa e some ao enviar', async () => {

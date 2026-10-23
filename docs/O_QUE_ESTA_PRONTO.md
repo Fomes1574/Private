@@ -9,6 +9,17 @@ automático. O CI está verde e o APK do Android compila. Falta só o que
 depende de você: a conta da Cloudflare, a publicação e o teste nos aparelhos
 reais (ver `docs/CLOUDFLARE_PASSO_A_PASSO.md` e `docs/ACOES_DO_PROPRIETARIO.md`).
 
+**APK Android de produção (outubro 2026):** o relatório com o que foi
+implementado, o que teve teste automático, o que foi testado em Android real
+(nada ainda) e o que falta está em `docs/RELATORIO_APK_ANDROID.md`. Os guias
+são:
+- `APK_RELEASE.md`
+- `FIREBASE_MINIMO.md`
+- `MIGRAR_DEBUG_PARA_RELEASE.md`
+- `TESTE_EM_CELULAR.md`
+- `RISCOS_PENDENTES.md`
+- `ROTACAO_DE_CREDENCIAIS.md`
+
 ---
 
 ## 1. Como o repositório está organizado

@@ -37,7 +37,9 @@ export function unpad(padded) {
 export const MEDIA_MIME = /^(image\/(jpeg|webp)|video\/mp4|audio\/(webm|ogg|mp4|aac))(;\s?codecs="?[a-z0-9.]+"?)?$/;
 // Documentos (P-12, lista positiva): por enquanto só texto UTF-8, que o app
 // mostra como texto puro, nunca como HTML. PDF e outros esperam a decisão.
-export const DOC_MIME = /^text\/plain;charset=utf-8$/;
+// Documentos (P-12): lista positiva. Texto UTF-8 e PDF, ambos mostrados
+// dentro do app (texto puro; PDF só desenhado, sem scripts nem links).
+export const DOC_MIME = /^(text\/plain;charset=utf-8|application\/pdf)$/;
 // Nome do arquivo: só para exibir; sem barras, sem caracteres de controle.
 export const validDocName = (n) => typeof n === 'string' && n.length >= 1 && n.length <= 100 && !/[\u0000-\u001f\u007f/\\]/.test(n);
 const ID = /^[A-Za-z0-9_-]{8,64}$/;

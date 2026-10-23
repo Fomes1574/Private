@@ -46,7 +46,7 @@ await cp(join(repo, 'branding/pacto-talk-icon-180.png'), join(stage, 'icon-180.p
 await cp(join(repo, 'branding/pacto-talk-icon-512.webp'), join(stage, 'icon-512.webp'));
 
 // Cópia de terceiros precisa bater com o SHA256SUMS conferido no CI.
-for (const dir of ['vendor/sqlite', 'video/vendor']) {
+for (const dir of ['vendor/sqlite', 'video/vendor', 'vendor/pdfjs']) {
   const sums = (await readFile(join(stage, dir, 'SHA256SUMS'), 'utf8')).split('\n').filter((l) => /^[0-9a-f]{64}/.test(l));
   if (!sums.length) throw new Error(`${dir}: SHA256SUMS vazio`);
   for (const l of sums) {

@@ -1,6 +1,6 @@
 // Trusted Types (V7-017): só scripts da própria origem com nome conhecido
 // viram Worker ou service worker.
-const ALLOWED = new Set(['db-worker.js', 'sw.js']);
+const ALLOWED = new Set(['db-worker.js', 'sw.js', 'pdf.worker.min.mjs']);
 const policy = globalThis.trustedTypes?.createPolicy('mp-urls', {
   createScriptURL(u) {
     const url = new URL(u, location.href);

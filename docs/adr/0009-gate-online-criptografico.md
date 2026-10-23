@@ -31,3 +31,16 @@ Exigir conexão para abrir texto protegido sem que o servidor veja o conteúdo.
 ## O que existe enquanto isso
 A política de cliente honesto: o app só mostra conteúdo depois de validar
 online prazo, revogações e tombstones (§25.6). Isso está implementado no núcleo.
+
+## Revisão (outubro 2026, preparação do APK de distribuição)
+Continua **bloqueado**. Nada deste rascunho virou código, nem no app, nem no
+servidor. O que mudou ao redor dele:
+- ADR 0014 já exige o servidor para **abrir o app**: a chave do banco depende
+  de uma parte guardada no servidor, e o servidor conta os erros. Isso é um
+  "gate online" do aparelho, não da mensagem: não revoga uma mensagem já
+  aberta e guardada por um cliente alterado.
+- Um ponto novo para a revisão: a troca de aparelho em duas fases (aparelho
+  pendente, confirmação) cria um estado intermediário. Um gate por mensagem
+  não pode liberar `S_d` para um aparelho pendente. Hoje o servidor já recusa
+  qualquer rota de mensagem a pendentes (`PENDING_ROUTES`).
+- Sem revisão criptográfica independente, a decisão segue: não implementar.

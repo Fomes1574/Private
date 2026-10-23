@@ -66,7 +66,9 @@ test('mídia: só formatos que o app gera (V7-016); ver uma vez só foto/vídeo'
   assert.throws(() => p.encodeInner(media({ mime: 'audio/mp4', duration: 4e6 })), /duração/);
   assert.throws(() => p.encodeInner(media({ mime: 'audio/mp4', duration: -1 })), /duração/);
   assert.ok(p.encodeInner(media({ mime: 'text/plain;charset=utf-8', mode: 'doc', name: 'lista de compras.txt' })));
-  for (const mime of ['application/pdf', 'text/html', 'image/svg+xml', 'text/plain']) {
+  assert.ok(p.encodeInner(media({ mime: 'application/pdf', mode: 'doc', name: 'contrato.pdf' })), 'PDF entra na lista positiva');
+  assert.throws(() => p.encodeInner(media({ mime: 'application/pdf', mode: 'once' })), /ver uma vez|tipo de mídia/, 'PDF não é ver uma vez');
+  for (const mime of ['text/html', 'image/svg+xml', 'text/plain', 'application/zip', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/pdf; x=1']) {
     assert.throws(() => p.encodeInner(media({ mime, mode: 'doc' })), /tipo de mídia/, `documento ${mime} fora da lista positiva`);
   }
   for (const name of ['../../etc/passwd', 'a\u0000b', '', 'x'.repeat(101), 42]) {
