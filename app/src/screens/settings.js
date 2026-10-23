@@ -5,22 +5,10 @@ import * as session from '../session.js';
 import { CONFIG } from '../config.js';
 import { formatDateTime } from '../packages/protocol/src/time.js';
 import { avatar } from '../avatar.js';
-import { preparePhoto } from '../media.js';
+import { pickImage } from '../pick-image.js';
 
-// Escolhe uma imagem, recorta quadrada (512 px), recodifica sem metadados.
-export function pickSquarePhoto() {
-  return new Promise((resolve) => {
-    const input = h('input', { type: 'file', accept: 'image/*', hidden: true });
-    input.onchange = async () => {
-      const f = input.files[0];
-      input.remove();
-      if (!f) return resolve(null);
-      try { resolve((await preparePhoto(f, { maxSide: 512, square: true })).bytes); } catch (e) { toast(e.message); resolve(null); }
-    };
-    document.body.append(input);
-    input.click();
-  });
-}
+// Foto de perfil/grupo: quadrada, 512 px, sem metadados.
+export const pickSquarePhoto = (facing = 'user') => pickImage({ maxSide: 512, square: true, facing });
 
 export async function settingsScreen(go) {
   const S = session.S;
@@ -74,6 +62,15 @@ export async function settingsScreen(go) {
         h('h2', { text: 'Notificações' }),
         h('p', { class: 'muted small', text: 'O aviso diz só "novas mensagens". Sem nome, grupo, quantidade ou prévia. A Apple ou o Google ainda veem que houve um aviso e quando.' }),
         h('button', { class: 'secondary', text: 'Ativar notificações', onclick: () => session.enablePush().then(() => toast('Notificações ativadas.')).catch((e) => toast(e.message)) })),
+      h('section', { class: 'card' },
+        h('h2', { text: 'Privacidade máxima' }),
+        h('label', { class: 'switch' },
+          h('input', { id: 'max-mode', type: 'checkbox', checked: session.maxMode(), onchange: async (e) => {
+            await session.setPrefs({ maxMode: e.target.checked });
+            toast(e.target.checked ? 'Modo máximo ligado: fotos e vídeos só pela câmera do app.' : 'Modo máximo desligado: a galeria volta a aparecer.');
+          } }),
+          h('span', {}, h('strong', { text: 'Modo máximo' }), h('br'),
+            h('span', { class: 'muted small', text: 'Fotos e vídeos só pela câmera do app: nada vai para a galeria, para a nuvem ou para pastas temporárias, e o original com localização e modelo do aparelho nunca existe. Desligar permite escolher da galeria (o original continua lá).' })))),
       updateSection(),
       isAdmin ? adminSection(me) : null,
       h('section', { class: 'card' },

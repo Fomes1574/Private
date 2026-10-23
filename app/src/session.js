@@ -15,7 +15,7 @@ import * as native from './vault/native.js';
 
 const REANNOUNCE_MS = 7 * 86_400_000;
 const listeners = new Set();
-export const S = { client: null, store: null, clock: null, kek: null, nicknames: {}, rooms: {}, unlocked: false };
+export const S = { client: null, store: null, clock: null, kek: null, nicknames: {}, rooms: {}, prefs: {}, unlocked: false };
 
 export function onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 const emit = (what) => { for (const fn of listeners) { try { fn(what); } catch (e) { console.error(e); } } };
@@ -152,6 +152,7 @@ async function afterUnlock() {
   if (Date.now() - ((await idbGet('lastRotate')) ?? 0) > ROTATE_EVERY) scheduleRotate();
   S.nicknames = (await S.store.get('nicknames')) ?? {};
   S.rooms = (await S.store.get('rooms')) ?? {};
+  S.prefs = { ...DEFAULT_PREFS, ...((await S.store.get('prefs')) ?? {}) };
   await S.client.refreshDirectory();
   await syncNow();
   connectLive();
@@ -169,6 +170,7 @@ export async function lock(reason = 'manual') {
   // Nada legível fica na memória da página depois de trancar.
   S.nicknames = {};
   S.rooms = {};
+  S.prefs = {};
   viewCache.clear();
   clearVisuals();
   disconnectLive();
@@ -342,6 +344,16 @@ export async function sendRoomProfile(roomId) {
   await S.client.sendInner(roomId, 'room_profile', { title: r.title ?? '', photo: r.photo ?? null, background: r.background ?? null });
   await S.store.put('rooms', S.rooms);
 }
+
+// ---------- preferências deste aparelho ----------
+// Modo máximo (padrão): foto e vídeo só pela câmera do app, nunca da galeria
+// (o original da galeria tem GPS/modelo e o sistema faz cópia temporária).
+export const DEFAULT_PREFS = Object.freeze({ maxMode: true });
+export async function setPrefs(patch) {
+  S.prefs = { ...S.prefs, ...patch };
+  await S.store.put('prefs', S.prefs);
+}
+export const maxMode = () => S.prefs.maxMode !== false;
 
 // ---------- organização local da conversa (§18) ----------
 export async function setRoomFlag(roomId, patch) {

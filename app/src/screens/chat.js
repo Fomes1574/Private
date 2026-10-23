@@ -5,6 +5,7 @@ import * as session from '../session.js';
 import { formatTime, formatDateTime } from '../packages/protocol/src/time.js';
 import { preparePhoto } from '../media.js';
 import { editPhoto } from '../editor.js';
+import { openCamera } from '../camera.js';
 import { openMedia, holdButton, playAudio, openText } from './viewer.js';
 import { MAX_DOC_BYTES } from '../packages/protocol/src/documents.js';
 import { validDocName } from '../packages/protocol/src/envelope.js';
@@ -62,15 +63,22 @@ export async function chatScreen(go, { roomId }) {
     if (video) return sendVideo(f, once);
     try {
       const prepared = await preparePhoto(f); // recodificada, sem metadados
-      const p = await editPhoto(prepared.bytes, prepared.mime);
-      prepared.bytes.fill(0);
+      await sendPhoto(prepared.bytes, prepared.mime, once);
+    } catch (e) { toast(`Não enviou: ${errText(e)}`); }
+  };
+
+  // Foto (da câmera do app ou da galeria): editor → cifra → envia.
+  async function sendPhoto(bytes, mime, once) {
+    try {
+      const p = await editPhoto(bytes, mime);
       if (!p) return; // cancelou no editor
       const caption = takeCaption(once);
       await S.client.sendMedia(roomId, p.bytes, { mode: once ? 'once' : 'media', mime: p.mime, caption });
       p.bytes.fill(0);
       await render();
     } catch (e) { toast(`Não enviou: ${errText(e)}`); }
-  };
+    finally { bytes.fill(0); }
+  }
 
   // Legenda (V6-025): o que estiver escrito na caixa vai junto, cifrado.
   // Ver uma vez não leva legenda (ela ficaria visível sem segurar).
@@ -135,13 +143,25 @@ export async function chatScreen(go, { roomId }) {
     finally { bytes?.fill(0); }
   }
 
+  // Câmera do app sempre; galeria só com o modo máximo desligado (Ajustes).
   const attach = async () => {
-    const c = await choiceSheet('Enviar', [
-      { label: 'Foto', value: 'photo' }, { label: 'Foto de ver uma vez', value: 'photo-once' },
-      { label: 'Vídeo (até 5 min)', value: 'video' }, { label: 'Vídeo de ver uma vez', value: 'video-once' },
-      { label: 'Documento de texto (até 20 MB)', value: 'doc' }]);
+    const opts = [
+      { label: 'Câmera: foto', value: 'cam-photo' }, { label: 'Câmera: foto de ver uma vez', value: 'cam-photo-once' },
+      { label: 'Câmera: vídeo (até 5 min)', value: 'cam-video' }, { label: 'Câmera: vídeo de ver uma vez', value: 'cam-video-once' }];
+    if (!session.maxMode()) opts.push(
+      { label: 'Galeria: foto', value: 'photo' }, { label: 'Galeria: foto de ver uma vez', value: 'photo-once' },
+      { label: 'Galeria: vídeo (até 5 min)', value: 'video' }, { label: 'Galeria: vídeo de ver uma vez', value: 'video-once' });
+    opts.push({ label: 'Documento de texto (até 20 MB)', value: 'doc' });
+    const c = await choiceSheet(session.maxMode() ? 'Enviar (modo máximo: só pela câmera do app)' : 'Enviar', opts);
     if (!c) return;
-    pick = { video: c.startsWith('video'), once: c.endsWith('-once'), doc: c === 'doc' };
+    const once = c.endsWith('-once');
+    if (c.startsWith('cam-')) {
+      const video = c.startsWith('cam-video');
+      const shot = await openCamera({ mode: video ? 'video' : 'photo' });
+      if (!shot) return;
+      return video ? sendVideo(shot.blob, once) : sendPhoto(shot.bytes, shot.mime, once);
+    }
+    pick = { video: c.startsWith('video'), once, doc: c === 'doc' };
     fileIn.accept = pick.doc ? '.txt,.md,.csv,text/plain' : pick.video ? 'video/*' : 'image/*';
     fileIn.click();
   };

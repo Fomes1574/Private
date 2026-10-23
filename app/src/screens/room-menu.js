@@ -4,22 +4,10 @@ import { h, toast, choiceSheet, confirmSheet, errText } from '../ui.js';
 import * as session from '../session.js';
 import { TTL_OPTIONS, describeTtl } from '../packages/protocol/src/ttl.js';
 import { pickSquarePhoto } from './settings.js';
-import { preparePhoto } from '../media.js';
+import { pickImage } from '../pick-image.js';
 
-// Fundo: escolhe imagem, recodifica (até 1280 px, sem metadados).
-function pickBackground() {
-  return new Promise((resolve) => {
-    const input = h('input', { type: 'file', accept: 'image/*', hidden: true });
-    input.onchange = async () => {
-      const f = input.files[0];
-      input.remove();
-      if (!f) return resolve(null);
-      try { resolve((await preparePhoto(f, { maxSide: 1280 })).bytes); } catch (e) { toast(e.message); resolve(null); }
-    };
-    document.body.append(input);
-    input.click();
-  });
-}
+// Fundo: até 1280 px, sem metadados; câmera traseira.
+const pickBackground = () => pickImage({ maxSide: 1280, facing: 'environment' });
 
 export async function roomMenu(go, roomId) {
   const S = session.S;
@@ -81,7 +69,7 @@ export async function roomMenu(go, roomId) {
       const has = !!S.rooms[roomId]?.[c];
       const a = has ? await choiceSheet(`${what} (só quem está no grupo vê, cifrado)`, [{ label: 'Trocar', value: 'set' }, { label: 'Remover', value: 'rm', danger: true }]) : 'set';
       if (a === 'set') {
-        const b = c === 'photo' ? await pickSquarePhoto() : await pickBackground();
+        const b = c === 'photo' ? await pickSquarePhoto('environment') : await pickBackground();
         if (!b) return;
         try { await session.setRoomVisual(roomId, c, b); } finally { b.fill(0); }
         toast(`${what} trocada. A anterior foi apagada.`);

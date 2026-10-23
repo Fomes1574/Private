@@ -10,6 +10,7 @@ import { preparePhoto } from '../media.js';
 import { prepareVideo } from '../video-prep.js';
 import { openMedia } from './viewer.js';
 import { avatar } from '../avatar.js';
+import { openCamera } from '../camera.js';
 
 export async function storiesScreen(go) {
   const S = session.S;
@@ -52,7 +53,18 @@ function compose(go) {
   const S = session.S;
   const people = Object.entries(S.nicknames).filter(([u]) => u !== S.client.userId);
   if (!people.length) return toast('Ainda não há outras pessoas no círculo.');
-  const file = h('input', { id: 'story-file', type: 'file', accept: 'image/*,video/*' });
+  // Câmera do app sempre; galeria só com o modo máximo desligado.
+  const file = h('input', { id: 'story-file', type: 'file', accept: 'image/*,video/*', hidden: session.maxMode() });
+  let shot = null;
+  const shotInfo = h('p', { class: 'muted small', 'aria-live': 'polite', text: '' });
+  const camBtn = (label, mode) => h('button', { type: 'button', class: 'secondary small', text: label, onclick: async () => {
+    const r = await openCamera({ mode });
+    if (!r) return;
+    shot?.bytes?.fill(0);
+    shot = r;
+    file.value = '';
+    shotInfo.textContent = mode === 'photo' ? 'Foto pronta.' : 'Vídeo pronto.';
+  } });
   const boxes = people.map(([u, n]) => h('label', { class: 'check' }, h('input', { type: 'checkbox', value: u, checked: true }), n.nickname));
   const ttl = h('select', { id: 'story-ttl' }, TTL_OPTIONS.map((s) => h('option', { value: String(s), text: describeTtl(s), selected: s === DAY })));
   const caption = h('input', { id: 'story-caption', maxlength: '1000', autocomplete: 'off', placeholder: 'Legenda (opcional)' });
@@ -60,7 +72,7 @@ function compose(go) {
   const close = () => sheet.remove();
   const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' }, h('form', { class: 'sheet-box', onsubmit: async (e) => {
     e.preventDefault();
-    const f = file.files[0];
+    const f = shot ? (shot.blob ?? new Blob([shot.bytes], { type: shot.mime })) : file.files[0];
     const audience = boxes.map((b) => b.querySelector('input')).filter((i) => i.checked).map((i) => i.value);
     if (!f) return toast('Escolha uma foto ou um vídeo.');
     if (!audience.length) return toast('Escolha pelo menos uma pessoa.');
@@ -84,10 +96,11 @@ function compose(go) {
       toast('Story publicada.');
       go('stories');
     } catch (err) { toast(`Não publicou: ${errText(err)}`); status.textContent = ''; btn.disabled = false; }
-    finally { bytes?.fill(0); }
+    finally { bytes?.fill(0); shot?.bytes?.fill(0); }
   } },
     h('p', { text: 'Nova story' }),
-    h('label', { for: 'story-file', text: 'Foto ou vídeo (até 5 min)' }), file,
+    h('div', { class: 'row' }, camBtn('Câmera: foto', 'photo'), camBtn('Câmera: vídeo', 'video')), shotInfo,
+    session.maxMode() ? null : h('label', { for: 'story-file', text: 'Ou da galeria: foto ou vídeo (até 5 min)' }), file,
     h('fieldset', {}, h('legend', { text: 'Quem pode ver' }), boxes),
     h('label', { for: 'story-ttl', text: 'Some em' }), ttl,
     caption, status,
