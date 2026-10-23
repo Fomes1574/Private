@@ -7,6 +7,15 @@
     "web": "cd ../app && MP_MODE=plain MP_CSP_META=1 node build.mjs",
     "sync": "npm run web && cap sync android"
   },
-  "dependencies": { "@capacitor/core": "8.5.3", "@capacitor/android": "8.5.3" },
-  "devDependencies": { "@capacitor/cli": "8.5.3" }
+  "dependencies": {
+    "@capacitor/core": "8.5.3",
+    "@capacitor/android": "8.5.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  },
+  "//": "overrides: uuid 7.0.3 (via @capacitor/cli > xcode) tem GHSA-w5hq-g745-h8pq; 11.1.1 corrige e mantém a API v4 usada."
 }
