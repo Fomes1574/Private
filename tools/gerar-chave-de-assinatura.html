@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
+<title>Chave de assinatura</title>
+<style>
+  body { font: 16px/1.5 -apple-system, system-ui, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; background: #0B1220; color: #E8EEF8; }
+  textarea { width: 100%; height: 150px; font: 13px ui-monospace, Menlo, monospace; background: #131D31; color: #E8EEF8; border: 1px solid #2a3a58; border-radius: 8px; padding: 8px; box-sizing: border-box; }
+  button { font: inherit; padding: 10px 16px; border-radius: 8px; border: 0; background: #6CB4FF; color: #0B1220; font-weight: 600; cursor: pointer; }
+  .muted { color: #93A1B8; font-size: 14px; } .warn { color: #FF7A7A; }
+</style>
+</head>
+<body>
+<h1>Chave de assinatura das versões do app</h1>
+<p class="muted">Abra este arquivo direto do seu computador (sem internet funciona). A chave é criada aqui mesmo, pelo navegador, e não vai para nenhum servidor.</p>
+<button id="go">Gerar chave</button>
+<div id="out" hidden>
+  <h2>1. Chave privada → segredo <code>MP_RELEASE_KEY</code> no GitHub</h2>
+  <p class="warn">Copie tudo, inclusive as linhas BEGIN e END. Não mande para ninguém.</p>
+  <textarea id="priv" readonly></textarea>
+  <h2>2. Chave pública (pode mostrar)</h2>
+  <p class="muted">Anote. Ela aparece no log de cada publicação: se um dia vier outra, alguém trocou a chave.</p>
+  <textarea id="pub" readonly style="height:60px"></textarea>
+  <p class="muted">Depois de colar no GitHub, feche esta aba. Guarde uma cópia da chave privada no seu gerenciador de senhas: sem ela, quem já instalou o app não aceita atualizações.</p>
+</div>
+<p id="err" class="warn"></p>
+<script>
+const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+document.getElementById('go').onclick = async () => {
+  try {
+    const kp = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+    const pk8 = b64(await crypto.subtle.exportKey('pkcs8', kp.privateKey));
+    const label = ['PRIVATE', 'KEY'].join(' '); // cabeçalho PEM PKCS#8
+    const pem = `-----BEGIN ${label}-----\n` + pk8.match(/.{1,64}/g).join('\n') + `\n-----END ${label}-----\n`;
+    document.getElementById('priv').value = pem;
+    document.getElementById('pub').value = b64(await crypto.subtle.exportKey('raw', kp.publicKey));
+    document.getElementById('out').hidden = false;
+    document.getElementById('go').hidden = true;
+  } catch (e) {
+    document.getElementById('err').textContent = 'Este navegador não gera chave Ed25519. Use Chrome, Edge, Firefox ou Safari atualizados. (' + e.message + ')';
+  }
+};
+</script>
+</body>
+</html>

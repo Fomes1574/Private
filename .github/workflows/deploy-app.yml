@@ -1,0 +1,61 @@
+name: deploy-app
+
+# Publica o app (PWA) como release assinada. Só à mão:
+# Actions → deploy-app → Run workflow → digite PUBLICAR-APP.
+on:
+  workflow_dispatch:
+    inputs:
+      confirmar:
+        description: 'Digite PUBLICAR-APP para publicar o app'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-app
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event.inputs.confirmar == 'PUBLICAR-APP'
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: app } }
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v7
+        with: { node-version: "22" }
+      - name: Conferir segredos e variáveis (sem mostrar valores)
+        env:
+          RELEASE_KEY: ${{ secrets.MP_RELEASE_KEY }}
+          API: ${{ vars.MP_API_ORIGIN }}
+        run: |
+          [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "Faltam CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+          case "$RELEASE_KEY" in *"-----BEGIN "*"-----"*) ;; *) echo "Falta o segredo MP_RELEASE_KEY (tools/gerar-chave-de-assinatura.html)"; exit 1;; esac
+          case "$API" in https://*) ;; *) echo "A variável MP_API_ORIGIN precisa ser https://..."; exit 1;; esac
+      - run: npm ci
+      - name: Cópias de terceiros conferem com os pacotes travados
+        run: |
+          (cd ../poc/03-banco-local-cifrado && npm ci && node vendor.mjs --check)
+          (cd ../poc/06-video-safari && npm ci && node vendor.mjs --check)
+      - name: Montar a release assinada
+        env:
+          MP_MODE: sw
+          MP_API: ${{ vars.MP_API_ORIGIN }}
+          # Número da versão sempre crescente (anti-downgrade no service worker).
+          MP_VERSION: ${{ github.run_number }}
+          MP_RELEASE_KEY: ${{ secrets.MP_RELEASE_KEY }}
+        run: |
+          node build.mjs
+          grep -q 'BUILD DE DESENVOLVIMENTO' dist/RELEASE && { echo "Build sem a chave de assinatura"; exit 1; } || true
+      - name: Publicar
+        run: npx wrangler deploy
+      - name: Código da versão (conferir no app e guardar fora da Cloudflare)
+        run: |
+          cat dist/RELEASE
+          { echo '### Release publicada'; echo '```'; cat dist/RELEASE; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
