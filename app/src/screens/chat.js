@@ -253,6 +253,11 @@ export async function chatScreen(go, { roomId }) {
     log.lastElementChild?.scrollIntoView({ block: 'end' });
   }
 
+  // Fundo do grupo (cifrado, escolhido pela líder): imagem por CSSOM, sem
+  // estilo em linha (CSP).
+  const bg = view.kind === 'group' ? S.rooms[roomId]?.background : null;
+  if (bg) session.visualURL(bg).then((url) => { if (url) { log.style.backgroundImage = `url("${url}")`; log.classList.add('has-bg'); } });
+
   await render();
   const timer = setInterval(() => render().catch(() => {}), 30_000); // vencidas somem sozinhas
   const off = session.onChange((w) => { if (w === 'synced') render().catch(() => {}); });

@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS recoveries (user_id TEXT PRIMARY KEY, state TEXT NOT 
   wait_until INTEGER, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS push_subs (device_id TEXT PRIMARY KEY, endpoint TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS security_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, user_id TEXT);
-CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);`;
+CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS visuals (owner TEXT NOT NULL, slot TEXT NOT NULL, media_id TEXT NOT NULL, PRIMARY KEY (owner, slot));`;
 
 const KEY_RE = /^[A-Za-z0-9+/]{43}=?$/; // chave Curve25519/Ed25519 em base64 (32 bytes)
 const P256_RE = /^[A-Za-z0-9+/]{87}=?$/; // ponto P-256 não comprimido (65 bytes)
@@ -335,6 +336,22 @@ export class Circle extends DurableObject {
     this.sql.exec("UPDATE identities SET state = 'removed' WHERE user_id = ?", userId);
     this.event('removed', userId);
     return { ok: true };
+  }
+
+  // Foto de perfil, foto e fundo de grupo (§21): só a versão atual existe.
+  // owner = "u:<userId>" ou "r:<roomId>". Devolve o id anterior para o Worker
+  // apagar o objeto na hora.
+  visualSwap(owner, slot, mediaId) {
+    const old = this.one('SELECT media_id FROM visuals WHERE owner = ? AND slot = ?', owner, slot)?.media_id ?? null;
+    if (mediaId) this.sql.exec('INSERT OR REPLACE INTO visuals(owner, slot, media_id) VALUES (?, ?, ?)', owner, slot, mediaId);
+    else this.sql.exec('DELETE FROM visuals WHERE owner = ? AND slot = ?', owner, slot);
+    return { old };
+  }
+  visualCurrent(owner, slot) { return this.one('SELECT media_id FROM visuals WHERE owner = ? AND slot = ?', owner, slot)?.media_id ?? null; }
+  visualClear(owner) {
+    const ids = this.q('SELECT media_id FROM visuals WHERE owner = ?', owner).map((r) => r.media_id);
+    this.sql.exec('DELETE FROM visuals WHERE owner = ?', owner);
+    return ids;
   }
 
   securityEvents(afterSeq = 0) {

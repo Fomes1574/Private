@@ -33,6 +33,6 @@ export class Api {
     return binary ? new Uint8Array(await res.arrayBuffer()) : res.json();
   }
 
-  get(path) { return this.call('GET', path); }
+  get(path, opts) { return this.call('GET', path, undefined, opts); }
   post(path, body, opts) { return this.call('POST', path, body, opts); }
 }

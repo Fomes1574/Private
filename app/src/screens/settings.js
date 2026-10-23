@@ -4,12 +4,30 @@ import { h, mount, header, toast, confirmSheet, choiceSheet } from '../ui.js';
 import * as session from '../session.js';
 import { CONFIG } from '../config.js';
 import { formatDateTime } from '../packages/protocol/src/time.js';
+import { avatar } from '../avatar.js';
+import { preparePhoto } from '../media.js';
+
+// Escolhe uma imagem, recorta quadrada (512 px), recodifica sem metadados.
+export function pickSquarePhoto() {
+  return new Promise((resolve) => {
+    const input = h('input', { type: 'file', accept: 'image/*', hidden: true });
+    input.onchange = async () => {
+      const f = input.files[0];
+      input.remove();
+      if (!f) return resolve(null);
+      try { resolve((await preparePhoto(f, { maxSide: 512, square: true })).bytes); } catch (e) { toast(e.message); resolve(null); }
+    };
+    document.body.append(input);
+    input.click();
+  });
+}
 
 export async function settingsScreen(go) {
   const S = session.S;
   const me = (await S.client.api.get('/v1/directory')).members;
   const { isAdmin } = await S.client.api.get('/v1/me');
   const fp = await session.myFingerprint();
+  const meAvatar = h('span', {}, avatar(session.myNickname(), session.photoOf(S.client.userId), { big: true }));
   const warnings = S.client.warnings.map((w) => h('li', { class: 'warn', text: warningText(w) }));
 
   mount(h('div', {},
@@ -17,8 +35,19 @@ export async function settingsScreen(go) {
     h('main', {},
       h('section', { class: 'card' },
         h('h2', { text: 'Você' }),
-        h('p', {}, 'Apelido: ', h('strong', { text: session.myNickname() ?? '—' })),
-        h('button', { class: 'secondary', text: 'Mudar apelido', onclick: () => go('nickname', { back: 'settings' }) })),
+        h('div', { class: 'row' }, meAvatar,
+          h('p', {}, 'Apelido: ', h('strong', { text: session.myNickname() ?? '—' }))),
+        h('button', { class: 'secondary', text: 'Mudar apelido', onclick: () => go('nickname', { back: 'settings' }) }),
+        h('button', { class: 'secondary', text: 'Foto de perfil', onclick: async () => {
+          const has = !!session.photoOf(S.client.userId);
+          const c = has ? await choiceSheet('Foto de perfil (só o círculo vê, cifrada)', [{ label: 'Trocar foto', value: 'set' }, { label: 'Remover foto', value: 'rm', danger: true }]) : 'set';
+          try {
+            if (c === 'set') { const b = await pickSquarePhoto(); if (!b) return; await session.setProfilePhoto(b); b.fill(0); toast('Foto de perfil trocada. A anterior foi apagada.'); }
+            if (c === 'rm') { await session.setProfilePhoto(null); toast('Foto de perfil removida.'); }
+            // Atualiza só o avatar: a pessoa pode já ter saído desta tela.
+            meAvatar.replaceChildren(avatar(session.myNickname(), session.photoOf(S.client.userId), { big: true }));
+          } catch (e) { toast(`Não deu: ${e.message}`); }
+        } })),
       h('section', { class: 'card' },
         h('h2', { text: 'Segurança' }),
         h('p', { class: 'muted small', text: 'Seu número de segurança (compare pessoalmente):' }),

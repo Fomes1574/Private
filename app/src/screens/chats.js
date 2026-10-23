@@ -2,6 +2,7 @@
 import { h, mount, header, toast } from '../ui.js';
 import * as session from '../session.js';
 import { formatTime } from '../packages/protocol/src/time.js';
+import { avatar } from '../avatar.js';
 
 export async function chatsScreen(go) {
   const list = h('ul', { class: 'list', role: 'list' });
@@ -11,7 +12,7 @@ export async function chatsScreen(go) {
     results.replaceChildren(...session.searchPeople(search.value).map((p) =>
       h('li', {}, h('button', { class: 'row-btn', onclick: async () => {
         try { const v = await session.startDirect(p.userId); go('chat', { roomId: v.roomId }); } catch (e) { toast(`Não deu: ${e.message}`); }
-      } }, h('span', { class: 'avatar', 'aria-hidden': 'true', text: p.nickname.slice(0, 1).toUpperCase() }), h('span', { text: p.nickname })))));
+      } }, avatar(p.nickname, session.photoOf(p.userId)), h('span', { text: p.nickname })))));
   };
   mount(h('div', {},
     header('Conversas', { actions: [
@@ -31,7 +32,7 @@ export async function chatsScreen(go) {
     rows.sort((a, b) => b.at - a.at);
     list.replaceChildren(...(rows.length ? rows.map(({ v, last }) =>
       h('li', {}, h('button', { class: 'row-btn', onclick: () => go('chat', { roomId: v.roomId }) },
-        h('span', { class: 'avatar', 'aria-hidden': 'true', text: session.roomTitle(v).slice(0, 1).toUpperCase() }),
+        avatar(session.roomTitle(v), session.roomPhoto(v)),
         h('span', { class: 'grow' },
           h('span', { class: 'title', text: session.roomTitle(v) }),
           h('span', { class: 'muted small', text: last ? (last.kind === 'media' ? 'Mídia' : 'Mensagem') : (v.closed ? 'Encerrada' : 'Sem mensagens') })),

@@ -39,6 +39,10 @@ export const DOC_MIME = /^text\/plain;charset=utf-8$/;
 // Nome do arquivo: só para exibir; sem barras, sem caracteres de controle.
 export const validDocName = (n) => typeof n === 'string' && n.length >= 1 && n.length <= 100 && !/[\u0000-\u001f\u007f/\\]/.test(n);
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
+// Foto de perfil/grupo ou fundo: id do objeto + chave AES-256 em base64.
+// Ausente (não mexe), null (removida) ou referência válida.
+const KEY_B64 = /^[A-Za-z0-9+/]{43}=$/;
+const visualRef = (r) => r === undefined || r === null || (typeof r === 'object' && ID.test(r.mediaId ?? '') && KEY_B64.test(r.key ?? '') && Object.keys(r).length === 2);
 
 // Valida a estrutura. Não decide permissão (isso é de policy.js).
 export function validateInner(m) {
@@ -53,11 +57,17 @@ export function validateInner(m) {
     case 'reaction': if (!ID.test(m.body?.target ?? '') || typeof m.body.emoji !== 'string' || [...m.body.emoji].length > 8) fail('reação'); break;
     case 'edit': if (!ID.test(m.body?.target ?? '') || typeof m.body.text !== 'string' || !Number.isSafeInteger(m.body.version) || m.body.version < 1) fail('edição'); break;
     case 'delete_for_all': if (!ID.test(m.body?.target ?? '')) fail('apagar'); break;
-    case 'nickname_change': if (typeof m.body?.nickname !== 'string' || m.body.nickname.trim().length < 2 || m.body.nickname.length > 24) fail('apelido'); break;
+    case 'nickname_change':
+      if (typeof m.body?.nickname !== 'string' || m.body.nickname.trim().length < 2 || m.body.nickname.length > 24) fail('apelido');
+      if (!visualRef(m.body.photo)) fail('foto de perfil');
+      break;
     case 'membership':
       if (!Array.isArray(m.body?.members) || m.body.members.length < 1 || m.body.members.length > 10 || !m.body.members.every((x) => ID.test(x)) || !ID.test(m.body.leader ?? '') || !m.body.members.includes(m.body.leader)) fail('membros');
       break;
-    case 'room_profile': if (typeof m.body?.title !== 'string' || m.body.title.length > 60) fail('nome do grupo'); break;
+    case 'room_profile':
+      if (typeof m.body?.title !== 'string' || m.body.title.length > 60) fail('nome do grupo');
+      if (!visualRef(m.body.photo) || !visualRef(m.body.background)) fail('foto ou fundo do grupo');
+      break;
     case 'media': {
       const b = m.body;
       if (!ID.test(b?.mediaId ?? '') || typeof b.key !== 'string' || !['once', 'media', 'doc'].includes(b.mode)) fail('mídia');

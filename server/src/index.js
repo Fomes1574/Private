@@ -118,6 +118,7 @@ route('POST', '/v1/admin/freeze', async ({ env, request, me }) => {
 route('POST', '/v1/admin/remove', async ({ env, ctx, request, me }) => {
   const userId = assertId((await readJson(request)).userId);
   unwrap(await circle(env).removeIdentity(me, userId));
+  await purgeVisuals(env, await circle(env).visualClear(`u:${userId}`)); // foto de perfil some junto
   const { results } = await env.DB.prepare('SELECT room FROM room_members WHERE user_id = ?').bind(userId).all();
   for (const { room: rid } of results) {
     const r = room(env, rid);
@@ -148,6 +149,8 @@ route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/events', async ({ env, ctx, reque
   const ev = await readJson(request);
   const r = room(env, p[1]);
   const view = unwrap(await r.event(me.userId, ev));
+  // Grupo encerrado: foto e fundo do grupo deixam de existir (§21).
+  if (view.closed) ctx.waitUntil(circle(env).visualClear(`r:${p[1]}`).then((ids) => purgeVisuals(env, ids)));
   // Saiu ou foi removido: perde os direitos de mídia pendentes (§15.7).
   const gone = ev.type === 'leave' ? me.userId : ev.type === 'remove_member' ? ev.member : null;
   if (gone) ctx.waitUntil(Promise.all((await r.mediaIds()).map((id) => media(env, id).revokeMember(gone))));
@@ -262,6 +265,62 @@ route('POST', '/v1/media/([A-Za-z0-9_-]{8,64})/revoke', async ({ env, me, p }) =
   const r = unwrap(await media(env, p[1]).revokeAll(me.userId)); // só o autor (conferido no DO)
   await quota(env, me.userId).release(p[1]);
   return json(200, r);
+});
+
+// Foto de perfil, foto e fundo de grupo (§21, V6-024): cifrados no
+// aparelho, sem prazo, só a versão atual existe; trocar ou remover apaga a
+// anterior na hora. A chave só vai cifrada (anúncio no círculo ou perfil do
+// grupo, da líder).
+const MAX_VISUAL_BYTES = 2 * 1024 * 1024;
+const VISUAL_SLOTS = { user: ['profile'], room: ['photo', 'background'] };
+async function visualOwner(env, me, scope, id, slot) {
+  if (!VISUAL_SLOTS[scope].includes(slot)) throw new HttpError(400, 'bad_slot');
+  if (scope === 'user') {
+    if (id !== me.userId) throw new HttpError(403, 'forbidden');
+    return `u:${id}`;
+  }
+  const v = unwrap(await room(env, id).get(me.userId));
+  if (v.kind !== 'group' || v.leader !== me.userId || v.closed) throw new HttpError(403, 'forbidden');
+  return `r:${id}`;
+}
+async function purgeVisuals(env, ids) {
+  for (const id of ids) if (id) await media(env, id).revokeAll(null, { system: true }).catch(() => null);
+}
+route('POST', '/v1/visual/(user|room)/([A-Za-z0-9_-]{8,64})/(profile|photo|background)', async ({ env, request, me, p, url }) => {
+  const owner = await visualOwner(env, me, p[1], p[2], p[3]);
+  if (url.searchParams.get('remove') === '1') {
+    const { old } = await circle(env).visualSwap(owner, p[3], null);
+    await purgeVisuals(env, [old]);
+    return json(200, { ok: true });
+  }
+  const len = Number(request.headers.get('content-length'));
+  if (!(len > 0 && len <= MAX_VISUAL_BYTES)) throw new HttpError(413, 'too_large');
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (bytes.byteLength !== len) throw new HttpError(400, 'bad_length');
+  const mediaId = randomId(16);
+  const box = media(env, mediaId);
+  unwrap(await box.create({ mediaId, mode: 'visual', room: owner, sender: me.userId, recipients: [], expiresAt: null, backend: 'do', slot: p[3] }));
+  let count = 0;
+  for (let off = 0; off < bytes.byteLength; off += CHUNK) unwrap(await box.putChunk(count++, bytes.subarray(off, off + CHUNK)));
+  unwrap(await box.seal({ count, size: bytes.byteLength }));
+  // Só depois de o novo estar completo a referência troca; o antigo some.
+  const { old } = await circle(env).visualSwap(owner, p[3], mediaId);
+  await purgeVisuals(env, [old]);
+  return json(201, { mediaId });
+});
+route('GET', '/v1/visual/([A-Za-z0-9_-]{8,64})', async ({ env, me, p }) => {
+  const box = media(env, p[1]);
+  const d = await box.describe();
+  if (d.error || d.mode !== 'visual' || d.state !== 'active') throw new HttpError(404, 'gone');
+  // Versão antiga nunca é entregue, mesmo que a limpeza tenha falhado.
+  if ((await circle(env).visualCurrent(d.room, d.slot)) !== p[1]) throw new HttpError(404, 'gone');
+  if (d.room.startsWith('r:')) {
+    const v = unwrap(await room(env, d.room.slice(2)).get(me.userId));
+    if (!v.members.some((m) => m.userId === me.userId && m.active)) throw new HttpError(403, 'forbidden');
+  }
+  const out = new Uint8Array(d.size);
+  for (let i = 0, off = 0; i < d.count; i++) { const c = new Uint8Array(await box.readChunk(i)); out.set(c, off); off += c.byteLength; }
+  return new Response(out, { headers: { 'content-type': 'application/octet-stream', 'content-length': String(d.size), ...SECURITY_HEADERS } });
 });
 
 route('GET', '/v1/docs/mine', async ({ env, me }) => json(200, { active: await quota(env, me.userId).active(), max: MAX_ACTIVE_DOCS }));

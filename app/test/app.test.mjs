@@ -234,6 +234,65 @@ test('rascunho: fica no aparelho ao sair da conversa e some ao enviar', async ()
   assert.equal(await bia.page.inputValue('#composer'), '');
 });
 
+test('foto de perfil: cifrada, chega ao círculo e aparece na lista; trocar apaga a anterior', async () => {
+  await ana.page.click('[aria-label=Voltar]');
+  await ana.page.click('[aria-label=Ajustes]');
+  const chooser = ana.page.waitForEvent('filechooser');
+  await ana.page.click('text=Foto de perfil');
+  await (await chooser).setFiles(new URL('../../poc/01-vodozemac-wasm/web/icon-512.png', import.meta.url).pathname);
+  await ana.page.waitForFunction(() => /Foto de perfil trocada/.test(document.querySelector('#toast').textContent), null, { timeout: 20000 });
+  await ana.page.waitForSelector('.avatar.big img');
+  const first = await ana.page.evaluate(() => globalThis.__mpTest.S.nicknames[globalThis.__mpTest.S.client.userId].photo.mediaId);
+
+  await bia.page.click('[aria-label=Voltar]');
+  await bia.page.waitForSelector('.row-btn .avatar img', { timeout: 40000 });
+  assert.match(await bia.page.getAttribute('.row-btn .avatar img', 'src'), /^blob:/, 'decifrada no aparelho');
+
+  // Trocar: a versão anterior deixa de existir no servidor.
+  const c2 = ana.page.waitForEvent('filechooser');
+  await ana.page.click('text=Foto de perfil');
+  await ana.page.click('text=Trocar foto');
+  await (await c2).setFiles(new URL('../../poc/01-vodozemac-wasm/web/icon-180.png', import.meta.url).pathname);
+  await ana.page.waitForFunction((old) => globalThis.__mpTest.S.nicknames[globalThis.__mpTest.S.client.userId].photo?.mediaId !== old, first, { timeout: 20000 });
+  const status = await bia.page.evaluate(async ([base, id]) => (await fetch(`${base}/v1/visual/${id}`, { headers: { authorization: `Bearer ${globalThis.__mpTest.S.client.api.token}` } })).status, [api.base, first]);
+  assert.equal(status, 404, 'foto antiga apagada');
+  await ana.page.click('[aria-label=Voltar]');
+  await ana.page.click('.row-btn .title');
+  await ana.page.waitForSelector('#composer');
+  await bia.page.click('.row-btn .title');
+  await bia.page.waitForSelector('#composer');
+});
+
+test('grupo: foto e fundo só da líder, cifrados, chegam a quem está no grupo', async () => {
+  await ana.page.click('[aria-label=Voltar]');
+  await ana.page.click('[aria-label="Novo grupo"]');
+  await ana.page.fill('#title', 'Família');
+  await ana.page.check('label.check:has-text("Bia") input');
+  await ana.page.click('text=Criar grupo');
+  await ana.page.waitForSelector('#composer');
+  for (const [item, file, msg] of [['Foto do grupo', 'icon-512.png', /Foto do grupo trocada/], ['Fundo da conversa', 'icon-180.png', /Fundo da conversa trocada/]]) {
+    const chooser = ana.page.waitForEvent('filechooser');
+    await ana.page.click('[aria-label="Menu da conversa"]');
+    await ana.page.click(`.sheet >> text=${item}`);
+    await (await chooser).setFiles(new URL(`../../poc/01-vodozemac-wasm/web/${file}`, import.meta.url).pathname);
+    await ana.page.waitForFunction((re) => new RegExp(re).test(document.querySelector('#toast').textContent), msg.source, { timeout: 20000 });
+  }
+  await bia.page.click('[aria-label=Voltar]');
+  await bia.page.waitForSelector('.row-btn:has-text("Família") .avatar img', { timeout: 40000 });
+  await bia.page.click('.row-btn:has-text("Família")');
+  await bia.page.waitForSelector('.messages.has-bg', { timeout: 15000 });
+  assert.match(await bia.page.$eval('.messages', (e) => e.style.backgroundImage), /^url\("blob:/, 'fundo decifrado no aparelho');
+  // Quem não é líder não tem as opções.
+  await bia.page.click('[aria-label="Menu da conversa"]');
+  assert.equal(await bia.page.$('.sheet >> text=Foto do grupo'), null);
+  await bia.page.click('.sheet >> text=Fechar');
+  for (const [p, other] of [[ana, 'Bia'], [bia, 'Ana']]) {
+    await p.page.click('[aria-label=Voltar]');
+    await p.page.click(`.row-btn:has-text("${other}")`);
+    await p.page.waitForSelector('#composer');
+  }
+});
+
 const dbDirs = (p) => p.page.evaluate(async () => {
   const out = [];
   for await (const [name] of (await navigator.storage.getDirectory()).entries()) if (name.startsWith('.mp-')) out.push(name);

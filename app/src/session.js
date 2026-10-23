@@ -170,6 +170,7 @@ export async function lock(reason = 'manual') {
   S.nicknames = {};
   S.rooms = {};
   viewCache.clear();
+  clearVisuals();
   disconnectLive();
   S.client = null;
   await S.store?.lock();
@@ -221,12 +222,20 @@ async function handleExtras(received) {
   let changed = false;
   for (const m of received) {
     if (m.kind === 'nickname_change' && m.room === CIRCLE_ROOM_ID && !validNickname(m.body.nickname)) {
-      S.nicknames[m.sender] = { nickname: m.body.nickname.trim(), at: Date.now() };
+      const prev = S.nicknames[m.sender];
+      S.nicknames[m.sender] = { nickname: m.body.nickname.trim(), at: Date.now(), photo: 'photo' in m.body ? m.body.photo : prev?.photo ?? null };
+      if (prev?.photo && prev.photo.mediaId !== S.nicknames[m.sender].photo?.mediaId) forgetVisual(prev.photo);
       changed = true;
     }
     if (m.kind === 'room_profile') {
       // Nome do grupo só da líder confirmada de ponta a ponta (não do servidor).
-      if (S.client.trusted[m.room]?.leader === m.sender) { S.rooms[m.room] = { ...(S.rooms[m.room] ?? {}), title: m.body.title }; changed = true; }
+      if (S.client.trusted[m.room]?.leader === m.sender) {
+        const prev = S.rooms[m.room] ?? {};
+        const next = { ...prev, title: m.body.title };
+        for (const k of ['photo', 'background']) if (k in m.body) { next[k] = m.body[k]; if (prev[k] && prev[k].mediaId !== m.body[k]?.mediaId) forgetVisual(prev[k]); }
+        S.rooms[m.room] = next;
+        changed = true;
+      }
     }
     if (m.room !== CIRCLE_ROOM_ID && !S.rooms[m.room]) { S.rooms[m.room] = {}; changed = true; }
   }
@@ -242,7 +251,7 @@ export async function setNickname(nick) {
   if (problem) throw new Error(problem);
   const taken = Object.entries(S.nicknames).some(([u, n]) => u !== S.client.userId && normalize(n.nickname) === normalize(nick));
   if (taken) throw new Error('Esse apelido já existe no círculo.');
-  S.nicknames[S.client.userId] = { nickname: nick.trim(), at: Date.now() };
+  S.nicknames[S.client.userId] = { ...(S.nicknames[S.client.userId] ?? {}), nickname: nick.trim(), at: Date.now() };
   await S.store.put('nicknames', S.nicknames);
   await announce();
 }
@@ -251,7 +260,7 @@ async function announce() {
   const nick = myNickname();
   if (!nick) return;
   const view = await roomView(CIRCLE_ROOM_ID, true);
-  if (view && view.members.filter((m) => m.active).length > 1) await S.client.sendInner(CIRCLE_ROOM_ID, 'nickname_change', { nickname: nick });
+  if (view && view.members.filter((m) => m.active).length > 1) await S.client.sendInner(CIRCLE_ROOM_ID, 'nickname_change', { nickname: nick, photo: S.nicknames[S.client.userId]?.photo ?? null });
   await S.store.put('lastAnnounce', { at: Date.now(), members: view?.members.filter((m) => m.active).length ?? 0 });
 }
 
@@ -323,9 +332,61 @@ export async function startGroup(title, members, ttls) {
 }
 
 export async function setRoomTitle(roomId, title) {
-  await S.client.sendInner(roomId, 'room_profile', { title });
   S.rooms[roomId] = { ...(S.rooms[roomId] ?? {}), title };
+  await sendRoomProfile(roomId);
+}
+// O perfil do grupo (nome, foto, fundo) vai inteiro, cifrado, da líder.
+// Reenviado também quando entra alguém, para a pessoa nova ver.
+export async function sendRoomProfile(roomId) {
+  const r = S.rooms[roomId] ?? {};
+  await S.client.sendInner(roomId, 'room_profile', { title: r.title ?? '', photo: r.photo ?? null, background: r.background ?? null });
   await S.store.put('rooms', S.rooms);
+}
+
+// ---------- fotos de perfil, de grupo e fundo (§21) ----------
+// Decifradas só em memória; trancar o app solta tudo.
+const visualCache = new Map();
+export function visualURL(ref) {
+  if (!ref?.mediaId || !S.unlocked) return Promise.resolve(null);
+  if (!visualCache.has(ref.mediaId)) {
+    visualCache.set(ref.mediaId, S.client.openVisual(ref).then((bytes) => {
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
+      bytes.fill(0);
+      return url;
+    }).catch(() => { visualCache.delete(ref.mediaId); return null; }));
+  }
+  return visualCache.get(ref.mediaId);
+}
+function forgetVisual(ref) {
+  const p = visualCache.get(ref?.mediaId);
+  if (p) { visualCache.delete(ref.mediaId); p.then((u) => u && URL.revokeObjectURL(u)); }
+}
+function clearVisuals() {
+  for (const p of visualCache.values()) p.then((u) => u && URL.revokeObjectURL(u));
+  visualCache.clear();
+}
+export const photoOf = (userId) => S.nicknames[userId]?.photo ?? null;
+export function roomPhoto(view) {
+  if (!view) return null;
+  if (view.kind === 'direct') return photoOf(view.members.find((m) => m.userId !== S.client.userId)?.userId);
+  return S.rooms[view.roomId]?.photo ?? null;
+}
+
+export async function setProfilePhoto(bytes) {
+  const me = S.client.userId;
+  const old = S.nicknames[me]?.photo;
+  const ref = bytes ? await S.client.setVisual('user', me, 'profile', bytes) : (await S.client.removeVisual('user', me, 'profile'), null);
+  S.nicknames[me] = { ...(S.nicknames[me] ?? {}), photo: ref };
+  if (old) forgetVisual(old);
+  await S.store.put('nicknames', S.nicknames);
+  await announce();
+}
+export async function setRoomVisual(roomId, slot, bytes) {
+  const old = S.rooms[roomId]?.[slot];
+  const ref = bytes ? await S.client.setVisual('room', roomId, slot, bytes) : (await S.client.removeVisual('room', roomId, slot), null);
+  S.rooms[roomId] = { ...(S.rooms[roomId] ?? {}), [slot]: ref };
+  if (old) forgetVisual(old);
+  await sendRoomProfile(roomId);
 }
 
 export async function roomEvent(roomId, ev) {

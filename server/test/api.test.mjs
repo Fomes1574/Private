@@ -290,3 +290,44 @@ test('conversa do círculo: todos entram sozinhos; ninguém mexe nela', async ()
   assert.equal(r.status, 201);
   assert.equal(r.data.expiresAt - r.data.acceptedAt, 15 * 86400 * 1000, 'anúncios de perfil com o prazo máximo');
 });
+
+test('foto de perfil e de grupo: só a versão atual existe; só quem pode vê; sem prazo', async () => {
+  const blob = (n, v) => new Uint8Array(n).fill(v);
+  const up = (c, path, b) => c.post(`/v1/visual/${path}`, b);
+  const get = async (c, id) => { const r = await c.get(`/v1/visual/${id}`, { raw: true }); return { status: r.status, bytes: r.ok ? new Uint8Array(await r.arrayBuffer()) : null }; };
+
+  assert.equal((await up(people.bia, `user/${people.bia.userId}/profile`, blob(2 * 1024 * 1024 + 1, 1))).status, 413);
+  assert.equal((await up(people.bia, `user/${people.admin.userId}/profile`, blob(10, 1))).status, 403, 'só a própria foto');
+  assert.equal((await up(people.bia, `user/${people.bia.userId}/background`, blob(10, 1))).status, 400, 'pessoa não tem fundo');
+  const v1 = await up(people.bia, `user/${people.bia.userId}/profile`, blob(2_000_000, 7)); // dois pedaços no DO
+  assert.equal(v1.status, 201, JSON.stringify(v1));
+  const g1 = await get(people.caio, v1.data.mediaId);
+  assert.equal(g1.status, 200);
+  assert.equal(g1.bytes.length, 2_000_000);
+  assert.ok(g1.bytes.every((x) => x === 7));
+  // A rota de mídia comum não abre nem apaga a foto (sem prazo ≠ vencida).
+  assert.notEqual((await people.caio.post(`/v1/media/${v1.data.mediaId}/open`)).status, 200);
+  assert.equal((await get(people.caio, v1.data.mediaId)).status, 200, 'continua lá');
+
+  const v2 = await up(people.bia, `user/${people.bia.userId}/profile`, blob(100, 9));
+  assert.equal((await get(people.admin, v1.data.mediaId)).status, 404, 'versão anterior não é mais entregue');
+  assert.equal((await get(people.admin, v2.data.mediaId)).status, 200);
+  assert.equal((await people.bia.post(`/v1/visual/user/${people.bia.userId}/profile?remove=1`)).status, 200);
+  assert.equal((await get(people.admin, v2.data.mediaId)).status, 404, 'removida some');
+
+  // Grupo: só a líder troca; só membros ativos veem; encerrar apaga.
+  const g = (await people.admin.post('/v1/rooms', { kind: 'group', members: [people.bia.userId] })).data.roomId;
+  assert.equal((await up(people.bia, `room/${g}/photo`, blob(10, 1))).status, 403, 'quem não é líder não troca');
+  assert.equal((await up(people.admin, `room/${g}/profile`, blob(10, 1))).status, 400);
+  const photo = await up(people.admin, `room/${g}/photo`, blob(500, 3));
+  const bg = await up(people.admin, `room/${g}/background`, blob(500, 4));
+  assert.equal((await get(people.bia, photo.data.mediaId)).status, 200);
+  assert.equal((await get(people.bia, bg.data.mediaId)).bytes[0], 4);
+  assert.equal((await get(people.caio, photo.data.mediaId)).status, 403, 'quem não está no grupo não vê');
+  await people.admin.post(`/v1/rooms/${g}/events`, { type: 'remove_member', member: people.bia.userId });
+  assert.equal((await get(people.bia, photo.data.mediaId)).status, 403, 'removida perde o acesso');
+  await people.admin.post(`/v1/rooms/${g}/events`, { type: 'close' });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal((await get(people.admin, photo.data.mediaId)).status, 404, 'grupo encerrado: foto apagada');
+  assert.equal((await get(people.admin, bg.data.mediaId)).status, 404);
+});

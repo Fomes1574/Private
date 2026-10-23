@@ -278,6 +278,24 @@ export class MessengerClient {
     try { return await decryptMedia(key, blob); } finally { key.fill(0); if (once) await forget(); }
   }
 
+  // ---------- foto de perfil / foto e fundo de grupo (§21) ----------
+  // Cifra no aparelho; o servidor guarda só a versão atual. Devolve a
+  // referência {mediaId, key} que vai cifrada no anúncio (nunca ao servidor).
+  async setVisual(scope, ownerId, slot, bytes) {
+    const key = await newMediaKey();
+    try {
+      const blob = await encryptMedia(key, bytes);
+      const r = await this.api.post(`/v1/visual/${scope}/${ownerId}/${slot}`, blob);
+      return { mediaId: r.mediaId, key: b64(key) };
+    } finally { key.fill(0); }
+  }
+  removeVisual(scope, ownerId, slot) { return this.api.post(`/v1/visual/${scope}/${ownerId}/${slot}?remove=1`); }
+  async openVisual(ref) {
+    const blob = await this.api.get(`/v1/visual/${ref.mediaId}`, { binary: true });
+    const key = unb64(ref.key);
+    try { return await decryptMedia(key, blob); } finally { key.fill(0); }
+  }
+
   // ---------- sincronização ----------
   async decryptFrom(sender, type, body) {
     const list = this.sessions.get(sender) ?? [];

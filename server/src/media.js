@@ -1,6 +1,7 @@
 // Mídia cifrada (Prova 5 generalizada). Um Durable Object por objeto.
 // mode "once": ver uma vez por destinatário (§15); "media": foto, vídeo e
-// áudio até vencer; "doc": documento (cota global em docs.js).
+// áudio até vencer; "doc": documento (cota global em docs.js); "visual": foto
+// de perfil/grupo ou fundo, sem prazo, só a versão atual (rota própria).
 // O servidor nunca recebe a chave do conteúdo.
 import { DurableObject } from 'cloudflare:workers';
 
@@ -29,11 +30,11 @@ export class MediaBox extends DurableObject {
   }
   pending() { return this.sql.exec("SELECT count(*) AS n FROM rights WHERE state = 'pending'").one().n; }
 
-  async create({ mediaId, mode, room, sender, recipients, expiresAt, backend }) {
+  async create({ mediaId, mode, room, sender, recipients, expiresAt, backend, slot = null }) {
     if (this.meta().state) return { error: 'exists' };
-    this.setMeta({ state: 'uploading', mediaId, mode, room, sender, expiresAt, backend });
+    this.setMeta({ state: 'uploading', mediaId, mode, room, sender, expiresAt, backend, slot });
     for (const m of recipients) this.sql.exec("INSERT INTO rights(member, state) VALUES(?, 'pending')", m);
-    await this.ctx.storage.setAlarm(expiresAt);
+    if (expiresAt) await this.ctx.storage.setAlarm(expiresAt);
     return { ok: true };
   }
 
@@ -54,6 +55,7 @@ export class MediaBox extends DurableObject {
     const meta = this.meta();
     if (!meta.state) return { error: 'gone' };
     if (meta.state !== 'active') return { error: 'not_ready' };
+    if (meta.mode === 'visual') return { error: 'forbidden' }; // só pela rota de visuais (confere a versão atual)
     if (Date.now() >= meta.expiresAt) { await this.purge(); return { error: 'expired' }; }
     const info = { backend: meta.backend, count: meta.count, size: meta.size, mediaId: meta.mediaId };
     if (meta.mode !== 'once') {
@@ -76,7 +78,7 @@ export class MediaBox extends DurableObject {
   describe() {
     const m = this.meta();
     if (!m.state) return { error: 'gone' };
-    return { mode: m.mode, room: m.room, sender: m.sender, size: m.size ?? 0, expiresAt: m.expiresAt, state: m.state };
+    return { mode: m.mode, room: m.room, sender: m.sender, size: m.size ?? 0, expiresAt: m.expiresAt, state: m.state, slot: m.slot, count: m.count };
   }
 
   readChunk(i) { return this.sql.exec('SELECT data FROM chunks WHERE i = ?', i).one().data; }

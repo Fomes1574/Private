@@ -74,3 +74,14 @@ test('mídia: só formatos que o app gera (V7-016); ver uma vez só foto/vídeo'
   }
   assert.throws(() => p.encodeInner(media({ mime: 'image/jpeg', name: 'foto.jpg' })), /nome/, 'nome só em documento');
 });
+
+test('foto de perfil, foto e fundo de grupo: referência cifrada bem formada ou nada', () => {
+  const ref = { mediaId: 'media_0000001', key: 'A'.repeat(43) + '=' };
+  assert.ok(p.encodeInner({ ...base, kind: 'nickname_change', body: { nickname: 'Ana', photo: ref } }));
+  assert.ok(p.encodeInner({ ...base, kind: 'nickname_change', body: { nickname: 'Ana', photo: null } }));
+  assert.ok(p.encodeInner({ ...base, kind: 'room_profile', body: { title: 'Família', photo: ref, background: null } }));
+  for (const bad of [{ mediaId: 'x', key: ref.key }, { mediaId: ref.mediaId, key: 'curta' }, { ...ref, url: 'https://x' }, 'texto', 1]) {
+    assert.throws(() => p.encodeInner({ ...base, kind: 'nickname_change', body: { nickname: 'Ana', photo: bad } }), /foto/);
+    assert.throws(() => p.encodeInner({ ...base, kind: 'room_profile', body: { title: 'x', background: bad } }), /fundo/);
+  }
+});

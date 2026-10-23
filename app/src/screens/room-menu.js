@@ -3,6 +3,23 @@
 import { h, toast, choiceSheet, confirmSheet } from '../ui.js';
 import * as session from '../session.js';
 import { TTL_OPTIONS, describeTtl } from '../packages/protocol/src/ttl.js';
+import { pickSquarePhoto } from './settings.js';
+import { preparePhoto } from '../media.js';
+
+// Fundo: escolhe imagem, recodifica (até 1280 px, sem metadados).
+function pickBackground() {
+  return new Promise((resolve) => {
+    const input = h('input', { type: 'file', accept: 'image/*', hidden: true });
+    input.onchange = async () => {
+      const f = input.files[0];
+      input.remove();
+      if (!f) return resolve(null);
+      try { resolve((await preparePhoto(f, { maxSide: 1280 })).bytes); } catch (e) { toast(e.message); resolve(null); }
+    };
+    document.body.append(input);
+    input.click();
+  });
+}
 
 export async function roomMenu(go, roomId) {
   const S = session.S;
@@ -12,7 +29,7 @@ export async function roomMenu(go, roomId) {
   const opts = [{ label: 'Participantes e verificação', value: 'members' }];
   if (leader && !v.closed) {
     opts.push({ label: 'Prazos de mensagens e mídia', value: 'ttl' });
-    if (v.kind === 'group') opts.push({ label: 'Nome do grupo', value: 'title' }, { label: 'Adicionar pessoa', value: 'add' }, { label: 'Remover pessoa', value: 'remove' });
+    if (v.kind === 'group') opts.push({ label: 'Nome do grupo', value: 'title' }, { label: 'Foto do grupo', value: 'photo' }, { label: 'Fundo da conversa', value: 'background' }, { label: 'Adicionar pessoa', value: 'add' }, { label: 'Remover pessoa', value: 'remove' });
     opts.push({ label: 'Ceder liderança', value: 'transfer' });
   }
   if (!v.closed) opts.push(v.kind === 'direct' ? { label: 'Desfazer vínculo', value: 'unlink', danger: true } : { label: 'Sair do grupo', value: 'leave', danger: true });
@@ -35,10 +52,29 @@ export async function roomMenu(go, roomId) {
       if (t) { await session.setRoomTitle(roomId, t); return 'refresh'; }
       return;
     }
+    if (c === 'photo' || c === 'background') {
+      const what = c === 'photo' ? 'Foto do grupo' : 'Fundo da conversa';
+      const has = !!S.rooms[roomId]?.[c];
+      const a = has ? await choiceSheet(`${what} (só quem está no grupo vê, cifrado)`, [{ label: 'Trocar', value: 'set' }, { label: 'Remover', value: 'rm', danger: true }]) : 'set';
+      if (a === 'set') {
+        const b = c === 'photo' ? await pickSquarePhoto() : await pickBackground();
+        if (!b) return;
+        try { await session.setRoomVisual(roomId, c, b); } finally { b.fill(0); }
+        toast(`${what} trocada. A anterior foi apagada.`);
+        return 'refresh';
+      }
+      if (a === 'rm') { await session.setRoomVisual(roomId, c, null); toast(`${what} removida.`); return 'refresh'; }
+      return;
+    }
     if (c === 'add') {
       const out = Object.entries(S.nicknames).filter(([u]) => !active.some((m) => m.userId === u));
       const u = await choiceSheet('Adicionar quem? A pessoa não vê nada do que veio antes.', out.map(([u, n]) => ({ label: n.nickname, value: u })));
-      if (u) { const nv = await session.roomEvent(roomId, { type: 'add_member', member: u }); await S.client.announceMembership(roomId, nv); return 'refresh'; }
+      if (u) {
+        const nv = await session.roomEvent(roomId, { type: 'add_member', member: u });
+        await S.client.announceMembership(roomId, nv);
+        await session.sendRoomProfile(roomId); // nome, foto e fundo para quem entrou
+        return 'refresh';
+      }
       return;
     }
     if (c === 'remove') {

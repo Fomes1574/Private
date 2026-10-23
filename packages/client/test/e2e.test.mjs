@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { startApi, SETUP, d1 } from '../../../server/test/helpers.mjs';
 import { loadCrypto } from '../../crypto/index.js';
 import { TrustedClock } from '../../protocol/src/time.js';
+import { CIRCLE_ROOM_ID } from '../../protocol/src/room.js';
 import { MessengerClient, Api, MemoryStore } from '../src/index.js';
 
 await loadCrypto(await readFile(new URL('../../crypto/pkg/mp_crypto_bg.wasm', import.meta.url)));
@@ -121,6 +122,22 @@ test('mídia cifrada em segmentos; ver uma vez pelo cliente', async () => {
   assert.equal((await p.ana.store.getMessage(m.msgId)).body.key, null, 'quem enviou não guarda a chave');
   await assert.rejects(p.ana.openMedia(m), /sem chave/, 'quem enviou não reabre');
   assert.deepEqual(await p.caio.openMedia(await p.caio.store.getMessage(m.msgId)), photo);
+});
+
+test('foto de perfil: cifrada, referência só dentro do anúncio; trocar invalida a anterior', async () => {
+  const pic = new Uint8Array(70_000).map((_, i) => i % 251);
+  const ref = await p.ana.setVisual('user', p.ana.userId, 'profile', pic);
+  await p.ana.sendInner(CIRCLE_ROOM_ID, 'nickname_change', { nickname: 'Ana', photo: ref });
+  const got = (await p.bia.sync()).received.find((m) => m.kind === 'nickname_change');
+  assert.deepEqual(got.body.photo, ref);
+  assert.deepEqual(await p.bia.openVisual(got.body.photo), pic);
+  const raw = new Uint8Array(await (await fetch(`${api.base}/v1/visual/${ref.mediaId}`, { headers: { authorization: `Bearer ${p.bia.api.token}` } })).arrayBuffer());
+  assert.notDeepEqual(raw.subarray(0, 100), pic.subarray(0, 100), 'servidor só tem cifrado');
+  const ref2 = await p.ana.setVisual('user', p.ana.userId, 'profile', pic.slice(0, 1000));
+  await assert.rejects(p.bia.openVisual(ref), /404/, 'a anterior não existe mais');
+  assert.deepEqual(await p.bia.openVisual(ref2), pic.slice(0, 1000));
+  await assert.rejects(p.bia.openVisual({ ...ref2, key: ref.key }), 'chave errada não abre');
+  await p.caio.sync();
 });
 
 test('fechar e reabrir o app: mesma identidade e sessões continuam', async () => {
