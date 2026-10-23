@@ -25,6 +25,13 @@ medir_print() {
   ' "$1"
 }
 
+# O ambiente precisa ser como um celular de verdade (build "user"): numa
+# imagem de depuração o Android liga a depuração de todo WebView e o teste do
+# item 5 não diria nada sobre o app.
+BUILD="$(adb shell getprop ro.build.type | tr -d '\r') ro.debuggable=$(adb shell getprop ro.debuggable | tr -d '\r')"
+echo "emulador: $BUILD"
+echo "$BUILD" | grep -q 'ro.debuggable=0' || fail "emulador é build de depuração ($BUILD): o teste não seria válido"
+
 adb install -r "$APK" >/dev/null
 DUMP=$(adb shell dumpsys package "$PKG")
 
@@ -82,7 +89,9 @@ echo "janela: $(echo "$WIN" | grep -m1 -E '^[[:space:]]*fl=|[[:space:]]fl=' | tr
 echo "$WIN" | grep -q 'SECURE' || fail "janela da MainActivity sem FLAG_SECURE"
 
 # 5) Sem porta de depuração do WebView aberta.
-adb shell cat /proc/net/unix | grep -q "webview_devtools_remote_$pidof_app" && fail "depuração do WebView ligada"
+SOCKS=$(adb shell cat /proc/net/unix | grep -o '@\?webview_devtools_remote_[0-9]*' | sort -u | tr '\n' ' ')
+echo "sockets de depuração de WebView: ${SOCKS:-nenhum} (app pid $pidof_app)"
+echo "$SOCKS" | grep -qw "webview_devtools_remote_$pidof_app" && fail "depuração do WebView ligada"
 
 # 6) Nada do console do app no logcat (release sem console).
 adb logcat -d | grep -E "Capacitor/Console|chromium.*CONSOLE" && fail "console do app vazando para o logcat"
