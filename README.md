@@ -39,6 +39,7 @@ aparelho por código, recuperação com guardião e atualização assinada.
 - [`docs/adr/`](docs/adr/) decisões de arquitetura registradas.
 - [`docs/ACOES_DO_PROPRIETARIO.md`](docs/ACOES_DO_PROPRIETARIO.md) o que só o dono pode fazer (contas, aparelhos, decisões com custo).
 - [`docs/PENDENCIAS.md`](docs/PENDENCIAS.md) estado de cada pendência P-xx.
+- [`docs/O_QUE_ESTA_PRONTO.md`](docs/O_QUE_ESTA_PRONTO.md) tudo o que já está pronto, num lugar só.
 - [`SECURITY.md`](SECURITY.md) regras de segurança e o que o projeto não promete.
 
 ## Regras do repositório
