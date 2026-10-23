@@ -26,18 +26,42 @@ export async function roomMenu(go, roomId) {
   const v = await session.roomView(roomId, true);
   const me = S.client.userId;
   const leader = v.leader === me;
-  const opts = [{ label: 'Participantes e verificação', value: 'members' }];
+  const flags = S.rooms[roomId] ?? {};
+  const opts = [{ label: 'Buscar nesta conversa', value: 'search' }, { label: 'Participantes e verificação', value: 'members' },
+    { label: session.isMuted(roomId) ? 'Reativar avisos' : 'Silenciar', value: 'mute' },
+    { label: flags.pinned ? 'Desafixar' : 'Fixar no topo', value: 'pin' },
+    { label: flags.archived ? 'Desarquivar' : 'Arquivar', value: 'archive' }];
   if (leader && !v.closed) {
     opts.push({ label: 'Prazos de mensagens e mídia', value: 'ttl' });
     if (v.kind === 'group') opts.push({ label: 'Nome do grupo', value: 'title' }, { label: 'Foto do grupo', value: 'photo' }, { label: 'Fundo da conversa', value: 'background' }, { label: 'Adicionar pessoa', value: 'add' }, { label: 'Remover pessoa', value: 'remove' });
     opts.push({ label: 'Ceder liderança', value: 'transfer' });
   }
+  opts.push({ label: 'Apagar conversa (só para mim)', value: 'clear', danger: true });
   if (!v.closed) opts.push(v.kind === 'direct' ? { label: 'Desfazer vínculo', value: 'unlink', danger: true } : { label: 'Sair do grupo', value: 'leave', danger: true });
   if (leader && v.kind === 'group' && !v.closed) opts.push({ label: 'Encerrar o grupo', value: 'close', danger: true });
   const c = await choiceSheet(leader ? 'Você é a líder desta conversa' : `Líder: ${session.nameOf(v.leader)}`, opts);
   const active = v.members.filter((m) => m.active);
   try {
     if (c === 'members') return membersSheet(v);
+    if (c === 'search') return 'search';
+    if (c === 'mute') {
+      if (session.isMuted(roomId)) { await session.muteRoom(roomId, 0); toast('Avisos reativados.'); return; }
+      const H = 3600_000;
+      const d = await choiceSheet('Silenciar por quanto tempo? As mensagens chegam e somem no prazo de sempre; só o aviso deixa de tocar.',
+        [{ label: '1 hora', value: H }, { label: '8 horas', value: 8 * H }, { label: '24 horas', value: 24 * H }, { label: '7 dias', value: 168 * H }, { label: 'Até reativar', value: -1 }]);
+      if (!d) return;
+      await session.muteRoom(roomId, d === -1 ? Date.now() + 100 * 365 * 24 * H : Date.now() + d);
+      toast('Conversa silenciada.');
+      return;
+    }
+    if (c === 'pin') { await session.setRoomFlag(roomId, { pinned: !flags.pinned }); toast(flags.pinned ? 'Desafixada.' : 'Fixada no topo.'); return; }
+    if (c === 'archive') { await session.setRoomFlag(roomId, { archived: !flags.archived }); toast(flags.archived ? 'Desarquivada.' : 'Arquivada. Fica em "Arquivadas" na lista.'); return; }
+    if (c === 'clear') {
+      if (!await confirmSheet('Apagar todas as mensagens desta conversa só deste aparelho? Os outros continuam vendo até o prazo. Não dá para desfazer.', 'Apagar conversa')) return;
+      const n = await S.client.clearRoomForMe(roomId);
+      toast(n ? 'Conversa apagada deste aparelho.' : 'Nada para apagar.');
+      return 'refresh';
+    }
     if (c === 'ttl') {
       const kind = await choiceSheet('Qual prazo mudar? Vale só para o que for enviado depois.', [{ label: `Mensagens (agora ${describeTtl(v.textTtl)})`, value: 'textTtl' }, { label: `Mídia (agora ${describeTtl(v.mediaTtl)})`, value: 'mediaTtl' }]);
       if (!kind) return;

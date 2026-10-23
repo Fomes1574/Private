@@ -16,7 +16,8 @@ export class Room extends DurableObject {
     this.sql = ctx.storage.sql;
     this.sql.exec(`CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, actor TEXT NOT NULL, json TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS media (media_id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS media (media_id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS mutes (user_id TEXT PRIMARY KEY, until INTEGER NOT NULL);`);
   }
 
   load() { const r = this.sql.exec('SELECT json FROM state').toArray()[0]; return r ? fromJson(r.json) : null; }
@@ -126,7 +127,7 @@ export class Room extends DurableObject {
     if (existing) {
       // Reenvio: mesmo prazo de antes, nunca um prazo "novo" (§11.7).
       if (existing.sender !== actor) return { error: 'conflict' };
-      return { acceptedAt: existing.accepted_at, expiresAt: existing.expires_at, recipients: to, duplicate: true };
+      return { acceptedAt: existing.accepted_at, expiresAt: existing.expires_at, recipients: to, silent: this.mutedAmong(to), duplicate: true };
     }
     const acceptedAt = Date.now();
     const expiresAt = acceptedAt + ttlFor(s, kind === 'media' ? 'media' : 'text') * 1000;
@@ -136,7 +137,23 @@ export class Room extends DurableObject {
       stmts.push(db.prepare('INSERT INTO envelopes(recipient, room, msg_id, sender, accepted_at, expires_at, ct) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(rcpt, s.roomId, msgId, actor, acceptedAt, expiresAt, bytes));
     }
     await db.batch(stmts); // tudo ou nada
-    return { acceptedAt, expiresAt, recipients: to };
+    return { acceptedAt, expiresAt, recipients: to, silent: this.mutedAmong(to) };
+  }
+
+  // Silenciar (§18, §19): só suprime o push desta conversa para a pessoa.
+  // Recebimento, prazos e cripto continuam iguais. until = 0 reativa.
+  setMute(actor, until) {
+    const s = this.load();
+    if (!s?.members.get(actor)?.active) return { error: 'forbidden' };
+    if (!Number.isSafeInteger(until) || until < 0) return { error: 'bad_request' };
+    if (until > Date.now()) this.sql.exec('INSERT OR REPLACE INTO mutes(user_id, until) VALUES (?, ?)', actor, until);
+    else this.sql.exec('DELETE FROM mutes WHERE user_id = ?', actor);
+    return { ok: true, until: until > Date.now() ? until : 0 };
+  }
+  mutedAmong(ids) {
+    this.sql.exec('DELETE FROM mutes WHERE until <= ?', Date.now());
+    const muted = new Set(this.sql.exec('SELECT user_id FROM mutes').toArray().map((r) => r.user_id));
+    return ids.filter((u) => muted.has(u));
   }
 
   // Identidade removida do círculo sai de todas as conversas (sem precisar

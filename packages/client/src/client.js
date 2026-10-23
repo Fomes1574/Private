@@ -235,10 +235,21 @@ export class MessengerClient {
     await this.destroy([msgId]);
   }
 
-  async deleteForMe(msgId) {
-    this.hidden.set(msgId, Date.now());
+  async deleteForMe(msgId) { return this.deleteManyForMe([msgId]); }
+
+  // Apagar conversa (V7-007): tudo desta conversa some só deste aparelho;
+  // os outros continuam vendo até o prazo.
+  async deleteManyForMe(ids) {
+    if (!ids.length) return;
+    const now = Date.now();
+    for (const id of ids) this.hidden.set(id, now);
     await this.saveMarks();
-    await this.destroy([msgId]);
+    await this.destroy(ids);
+  }
+  async clearRoomForMe(roomId) {
+    const ids = (await this.store.roomMessages(roomId)).map((m) => m.msgId);
+    await this.deleteManyForMe(ids);
+    return ids.length;
   }
 
   // ---------- mídia ----------

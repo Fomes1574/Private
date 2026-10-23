@@ -293,6 +293,50 @@ test('grupo: foto e fundo só da líder, cifrados, chegam a quem está no grupo'
   }
 });
 
+test('menu da conversa: buscar, silenciar, fixar, arquivar e apagar conversa só para mim', async () => {
+  const menu = async (p, item) => { await p.page.click('[aria-label="Menu da conversa"]'); await p.page.click(`.sheet >> text=${item}`); };
+  // Busca local, sem acento e sem maiúscula.
+  await menu(bia, 'Buscar nesta conversa');
+  await bia.page.fill('#chat-search', 'CIFRADO');
+  await bia.page.waitForFunction(() => document.querySelectorAll('.msg').length === 1);
+  assert.match(await bia.page.textContent('.msg'), /tudo cifrado/);
+  await bia.page.fill('#chat-search', 'zzz-nada');
+  await bia.page.waitForSelector('text=Nada encontrado');
+  await bia.page.click('[aria-label="Fechar busca"]');
+  // Silenciar: o servidor guarda só "até quando".
+  await menu(bia, 'Silenciar');
+  await bia.page.click('.sheet >> text=8 horas');
+  await bia.page.waitForFunction(() => /silenciada/.test(document.querySelector('#toast').textContent));
+  await menu(bia, 'Fixar no topo');
+  await bia.page.click('[aria-label=Voltar]');
+  await bia.page.waitForSelector('.row-btn .title >> text=/📌 Ana 🔕/');
+  assert.match(await bia.page.textContent('.list:not(.results) li:first-child'), /Ana/, 'fixada no topo');
+  // Arquivar o grupo e apagá-lo só deste aparelho.
+  await bia.page.click('.row-btn:has-text("Família")');
+  await bia.page.fill('#composer', 'mensagem do grupo');
+  await bia.page.click('[aria-label=Enviar]');
+  await bia.page.waitForSelector('.msg.mine >> text=mensagem do grupo');
+  await menu(bia, 'Apagar conversa (só para mim)');
+  await bia.page.click('.sheet button.danger');
+  await bia.page.waitForSelector('text=Nenhuma mensagem.');
+  await menu(bia, 'Arquivar');
+  await bia.page.click('[aria-label=Voltar]');
+  await bia.page.waitForSelector('text=Arquivadas (1)');
+  assert.equal(await bia.page.$('.list:not(.results) .row-btn:has-text("Família")'), null, 'arquivada sai da lista principal');
+  await bia.page.click('text=Arquivadas (1)');
+  await bia.page.waitForSelector('.row-btn:has-text("Família")');
+  await bia.page.click('text=Voltar às conversas');
+  // Para a Ana, a mensagem do grupo continua (apagar para mim não apaga dos outros).
+  await ana.page.click('[aria-label=Voltar]');
+  await ana.page.click('.row-btn:has-text("Família")');
+  await ana.page.waitForSelector('.msg >> text=mensagem do grupo', { timeout: 40000 });
+  for (const [p, other] of [[ana, 'Bia'], [bia, 'Ana']]) {
+    if (p === ana) await p.page.click('[aria-label=Voltar]');
+    await p.page.click(`.row-btn:has-text("${other}")`);
+    await p.page.waitForSelector('#composer');
+  }
+});
+
 const dbDirs = (p) => p.page.evaluate(async () => {
   const out = [];
   for await (const [name] of (await navigator.storage.getDirectory()).entries()) if (name.startsWith('.mp-')) out.push(name);
@@ -322,7 +366,7 @@ test('bloquear e desbloquear: conversa continua, guardada cifrada no aparelho', 
   await ana.page.waitForFunction(() => /PIN errado/.test(document.querySelector('#toast').textContent));
   await ana.page.fill('#secret', PIN);
   await ana.page.click('text=Desbloquear');
-  await ana.page.click('.row-btn .title');
+  await ana.page.click('.row-btn:has-text("Bia")');
   await ana.page.waitForFunction(() => [...document.querySelectorAll('.msg .text')].some((e) => e.textContent === 'oi, Ana! tudo cifrado?'));
   assert.ok(!(await ana.page.textContent('.chat')).includes('tudo, Bia 🌙'), 'apagada para mim não volta depois da rotação');
   // Bia, que não apagou, continua vendo (apagar para mim não afeta os outros).

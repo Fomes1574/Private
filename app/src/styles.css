@@ -96,3 +96,4 @@ button.small { padding: 6px 10px; min-height: 36px; font-size: 14px; }
 .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: inherit; pointer-events: none; }
 .avatar.big { width: 64px; height: 64px; font-size: 26px; }
 .messages.has-bg { background-size: cover; background-position: center; background-attachment: local; }
+.search-bar { padding: 6px 12px; gap: 6px; } .search-bar input { flex: 1; }

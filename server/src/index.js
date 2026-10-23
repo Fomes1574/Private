@@ -41,11 +41,13 @@ async function auth(env, request) {
 }
 
 // Aviso "sincronize" para quem recebeu algo (sem conteúdo, sem remetente).
-async function nudge(env, ctx, userIds) {
+// Quem silenciou a conversa recebe só o aviso pelo WebSocket, sem push.
+async function nudge(env, ctx, userIds, { silent = [] } = {}) {
   if (!userIds?.length) return;
   const targets = await circle(env).pushTargetsByUser(userIds);
   ctx.waitUntil(Promise.all(userIds.map(async (u) => {
-    const r = await live(env, u).nudge(env.VAPID_PRIVATE_JWK ? targets[u] ?? [] : []).catch(() => null);
+    const push = env.VAPID_PRIVATE_JWK && !silent.includes(u) ? targets[u] ?? [] : [];
+    const r = await live(env, u).nudge(push).catch(() => null);
     if (r?.gone?.length) await circle(env).dropPushEndpoints(r.gone);
   })));
 }
@@ -157,10 +159,11 @@ route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/events', async ({ env, ctx, reque
   await nudge(env, ctx, view.members.filter((m) => m.active && m.userId !== me.userId).map((m) => m.userId));
   return json(200, view);
 });
+route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/mute', async ({ env, request, me, p }) => json(200, unwrap(await room(env, p[1]).setMute(me.userId, Number((await readJson(request)).until)))));
 route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/messages', async ({ env, ctx, request, me, p }) => {
   const b = await readJson(request, 2 * 1024 * 1024);
   const r = unwrap(await room(env, p[1]).send(me.userId, { msgId: assertId(b.msgId), kind: b.kind === 'media' ? 'media' : 'text', envelopes: b.envelopes }));
-  await nudge(env, ctx, r.recipients);
+  await nudge(env, ctx, r.recipients, { silent: r.silent });
   return json(r.duplicate ? 200 : 201, { acceptedAt: r.acceptedAt, expiresAt: r.expiresAt });
 });
 route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/messages/([A-Za-z0-9_-]{8,64})/delete', async ({ env, ctx, me, p }) => {

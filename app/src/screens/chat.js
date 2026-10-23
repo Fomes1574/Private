@@ -10,6 +10,7 @@ import { validDocName } from '../packages/protocol/src/envelope.js';
 import { CONFIG } from '../config.js';
 import { startRecording, fmtDuration } from '../audio.js';
 import { roomMenu } from './room-menu.js';
+import { normalize } from '../packages/protocol/src/nickname.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 // Abaixo do limite do servidor (100 MiB) com folga para a cifra segmentada.
@@ -21,6 +22,12 @@ export async function chatScreen(go, { roomId }) {
   let view = await session.roomView(roomId, true);
   if (!view) { toast('Conversa não encontrada.'); return go('chats'); }
   let replyTo = null;
+  // Busca local (V7-021): só no que ainda vale, na memória, sem índice salvo.
+  let term = '';
+  const searchIn = h('input', { id: 'chat-search', type: 'search', placeholder: 'Buscar nesta conversa', autocomplete: 'off', 'aria-label': 'Buscar nesta conversa' });
+  const searchBar = h('div', { class: 'search-bar row', hidden: true }, searchIn,
+    h('button', { class: 'icon', 'aria-label': 'Fechar busca', text: '×', onclick: () => { term = ''; searchIn.value = ''; searchBar.hidden = true; render(); } }));
+  searchIn.oninput = () => { term = normalize(searchIn.value.trim()); render(); };
   const log = h('ol', { class: 'messages', role: 'log', 'aria-live': 'polite' });
   const input = h('textarea', { id: 'composer', rows: '1', maxlength: '4000', placeholder: 'Mensagem', autocomplete: 'off', autocorrect: 'off', spellcheck: 'false', 'aria-label': 'Mensagem' });
   const replyBar = h('div', { class: 'reply-bar', hidden: true });
@@ -157,8 +164,9 @@ export async function chatScreen(go, { roomId }) {
   const emojiPanel = h('div', { class: 'emoji-panel', hidden: true }, EMOJIS.map((e) => h('button', { class: 'emoji', type: 'button', text: e, onclick: () => { input.value += e; input.focus(); } })));
 
   mount(h('div', { class: 'chat' },
-    header(session.roomTitle(view), { back: () => go('chats'), actions: [h('button', { class: 'icon', 'aria-label': 'Menu da conversa', text: '⋮', onclick: async () => { const r = await roomMenu(go, roomId); if (r === 'refresh') { view = await session.roomView(roomId, true); chatScreen(go, { roomId }); } } })] }),
+    header(session.roomTitle(view), { back: () => go('chats'), actions: [h('button', { class: 'icon', 'aria-label': 'Menu da conversa', text: '⋮', onclick: async () => { const r = await roomMenu(go, roomId); if (r === 'search') { searchBar.hidden = false; searchIn.focus(); return; } if (r === 'refresh') { view = await session.roomView(roomId, true); chatScreen(go, { roomId }); } } })] }),
     h('div', { class: 'policy muted small', text: policyLine(view) }),
+    searchBar,
     log,
     view.closed ? h('p', { class: 'note center-text', text: 'Conversa encerrada. O que já existe continua só para leitura até vencer.' }) :
       h('footer', { class: 'composer' }, replyBar, recBar, progressBar, emojiPanel,
@@ -249,7 +257,8 @@ export async function chatScreen(go, { roomId }) {
     const r = await S.client.view(roomId);
     if (r.blocked) { log.replaceChildren(h('li', { class: 'note', text: 'Sem conexão confiável com o servidor: as mensagens ficam escondidas até reconectar.' })); return; }
     const byId = new Map(r.render.map((m) => [m.msgId, m]));
-    log.replaceChildren(...(r.render.length ? r.render.map((m) => bubble(m, byId)) : [h('li', { class: 'note', text: 'Nenhuma mensagem.' })]));
+    const list = term ? r.render.filter((m) => normalize((m.kind === 'media' ? m.body?.caption ?? m.body?.name ?? '' : m.text) ?? '').includes(term)) : r.render;
+    log.replaceChildren(...(list.length ? list.map((m) => bubble(m, byId)) : [h('li', { class: 'note', text: term ? 'Nada encontrado no que ainda não venceu.' : 'Nenhuma mensagem.' })]));
     log.lastElementChild?.scrollIntoView({ block: 'end' });
   }
 

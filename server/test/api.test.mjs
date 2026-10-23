@@ -331,3 +331,19 @@ test('foto de perfil e de grupo: só a versão atual existe; só quem pode vê; 
   assert.equal((await get(people.admin, photo.data.mediaId)).status, 404, 'grupo encerrado: foto apagada');
   assert.equal((await get(people.admin, bg.data.mediaId)).status, 404);
 });
+
+test('silenciar: só membro ativo, só para si; reativar; valor inválido recusado', async () => {
+  const g = (await people.admin.post('/v1/rooms', { kind: 'group', members: [people.bia.userId] })).data.roomId;
+  const until = Date.now() + 3600_000;
+  const r = await people.bia.post(`/v1/rooms/${g}/mute`, { until });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.until, until);
+  assert.equal((await people.caio.post(`/v1/rooms/${g}/mute`, { until })).status, 403, 'quem não está no grupo não mexe');
+  assert.equal((await people.bia.post(`/v1/rooms/${g}/mute`, { until: -5 })).status, 400);
+  assert.equal((await people.bia.post(`/v1/rooms/${g}/mute`, { until: 'x' })).status, 400);
+  // Envio continua normal e a resposta não revela quem silenciou.
+  const m = await people.admin.post(`/v1/rooms/${g}/messages`, { msgId: msgId(), kind: 'text', envelopes: { [people.bia.userId]: fakeCt() } });
+  assert.equal(m.status, 201);
+  assert.deepEqual(Object.keys(m.data).sort(), ['acceptedAt', 'expiresAt']);
+  assert.equal((await people.bia.post(`/v1/rooms/${g}/mute`, { until: 0 })).data.until, 0);
+});

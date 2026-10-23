@@ -343,6 +343,18 @@ export async function sendRoomProfile(roomId) {
   await S.store.put('rooms', S.rooms);
 }
 
+// ---------- organização local da conversa (§18) ----------
+export async function setRoomFlag(roomId, patch) {
+  S.rooms[roomId] = { ...(S.rooms[roomId] ?? {}), ...patch };
+  await S.store.put('rooms', S.rooms);
+}
+// Silenciar: o servidor só deixa de mandar push desta conversa para mim.
+export async function muteRoom(roomId, until) {
+  const r = await S.client.api.post(`/v1/rooms/${roomId}/mute`, { until });
+  await setRoomFlag(roomId, { mutedUntil: r.until });
+}
+export const isMuted = (roomId) => (S.rooms[roomId]?.mutedUntil ?? 0) > Date.now();
+
 // ---------- fotos de perfil, de grupo e fundo (§21) ----------
 // Decifradas só em memória; trancar o app solta tudo.
 const visualCache = new Map();
