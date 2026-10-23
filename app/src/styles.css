@@ -119,3 +119,4 @@ button.small { padding: 6px 10px; min-height: 36px; font-size: 14px; }
 .covered .camera { visibility: hidden; }
 .switch { display: flex; gap: 10px; align-items: flex-start; }
 .msg.pending { opacity: .6; }
+button.link { background: none; border: 0; color: var(--accent, #6CB4FF); text-decoration: underline; padding: 8px; min-height: 0; }

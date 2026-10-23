@@ -1,8 +1,10 @@
-// Cofre da chave do banco (ADR 0005), revisado da Prova 2 e usando @mp/crypto.
-// DEK aleatória, embrulhada por KEK = HKDF(PRF ‖ Argon2id(PIN)).
+// Cofre da chave do banco (ADR 0005 e ADR 0014), usando @mp/crypto.
+// DEK aleatória, embrulhada por KEK = HKDF(PRF ‖ Argon2id(PIN) ‖ S), em que
+// S é a parte do servidor: só sai com o PIN certo, e quem conta os erros é o
+// servidor. Uma cópia do aparelho não permite testar PINs fora dele.
 import { argon2id } from '../packages/crypto/index.js';
 
-export const VAULT_VERSION = 1;
+export const VAULT_VERSION = 2;
 export const MAX_FAILURES = 5;
 export const DEFAULT_ARGON = { m: 64 * 1024, t: 3, p: 1 };
 
@@ -14,6 +16,7 @@ export const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 export class WrongSecretError extends Error { constructor() { super('PIN ou frase-senha errados'); this.name = 'WrongSecretError'; } }
 export class VaultWipedError extends Error { constructor() { super('Tentativas esgotadas: chave local destruída'); this.name = 'VaultWipedError'; } }
+export class OfflineError extends Error { constructor() { super('Sem conexão: o app só abre online'); this.name = 'OfflineError'; } }
 
 export function checkPin(pin) {
   if (!/^\d{6,12}$/.test(pin)) return 'Use de 6 a 12 números.';
@@ -30,55 +33,89 @@ export function checkPassphrase(p) {
 
 const aad = (r) => enc.encode(`mp/dek/v${r.v}/${r.mode}/${r.credentialId || '-'}`);
 
-async function deriveKek(r, { prf, secret }) {
+// Parte do aparelho: PRF (Face ID/digital) ‖ Argon2id(PIN). Dela saem o
+// verificador (vai ao servidor) e, junto com S, a KEK. O verificador não
+// abre nada sozinho: falta S, que só o servidor tem.
+async function devicePart(r, { prf, secret }) {
   const secretBytes = enc.encode(secret.normalize('NFKC'));
   const stretched = argon2id(secretBytes, unb64(r.secretSalt), r.argon.m, r.argon.t, r.argon.p);
   secretBytes.fill(0);
-  let ikm;
-  if (r.mode === 'passkey') {
-    if (!prf || prf.byteLength !== 32) throw new Error('PRF ausente');
-    ikm = new Uint8Array(64); ikm.set(prf, 0); ikm.set(stretched, 32);
-  } else ikm = stretched;
-  const base = await subtle.importKey('raw', ikm, 'HKDF', false, ['deriveKey']);
-  ikm.fill(0); stretched.fill(0);
-  return subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: unb64(r.hkdfSalt), info: enc.encode(`mp/kek/v${r.v}`) }, base, { name: 'AES-GCM', length: 256 }, false, ['wrapKey', 'unwrapKey']);
+  if (r.mode !== 'passkey') return stretched;
+  if (!prf || prf.byteLength !== 32) { stretched.fill(0); throw new Error('PRF ausente'); }
+  const ikm = new Uint8Array(64); ikm.set(prf, 0); ikm.set(stretched, 32);
+  stretched.fill(0);
+  return ikm;
+}
+async function hkdf(ikm, r, info, usage) {
+  const base = await subtle.importKey('raw', ikm, 'HKDF', false, ['deriveKey', 'deriveBits']);
+  const p = { name: 'HKDF', hash: 'SHA-256', salt: unb64(r.hkdfSalt), info: enc.encode(info) };
+  if (usage === 'bits') return new Uint8Array(await subtle.deriveBits(p, base, 256));
+  return subtle.deriveKey(p, base, { name: 'AES-GCM', length: 256 }, false, ['wrapKey', 'unwrapKey']);
+}
+const verifierOf = async (part, r) => b64(await hkdf(part, r, `mp/unlock/verifier/v${r.v}`, 'bits'));
+async function kekOf(part, share, r) {
+  const s = unb64(share);
+  const ikm = new Uint8Array(part.byteLength + s.byteLength); ikm.set(part, 0); ikm.set(s, part.byteLength);
+  try { return await hkdf(ikm, r, `mp/kek/v${r.v}`, 'key'); } finally { ikm.fill(0); s.fill(0); }
 }
 
 const unwrap = (r, kek) => subtle.unwrapKey('raw', unb64(r.wrapped), kek, { name: 'AES-GCM', iv: unb64(r.iv), additionalData: aad(r) }, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
 
-export async function createVault({ mode, prf, secret, credentialId = null, prfSalt = null, argon = DEFAULT_ARGON }) {
-  const r = { v: VAULT_VERSION, mode, credentialId, prfSalt, secretSalt: b64(random(16)), hkdfSalt: b64(random(32)), argon, iv: b64(random(12)), wrapped: null, failures: 0 };
-  const kek = await deriveKek(r, { prf, secret });
-  const tmp = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
-  r.wrapped = b64(new Uint8Array(await subtle.wrapKey('raw', tmp, kek, { name: 'AES-GCM', iv: unb64(r.iv), additionalData: aad(r) })));
-  return { record: r, dek: await unwrap(r, kek), kek };
+// Criação em duas etapas: a DEK já serve para abrir o banco novo; ela só é
+// embrulhada (e o cofre gravado) depois que o servidor registra a parte S,
+// o que exige a identidade criada e a sessão aberta.
+export async function startVault({ mode, prf, secret, credentialId = null, prfSalt = null, argon = DEFAULT_ARGON }) {
+  const r = { v: VAULT_VERSION, mode, credentialId, prfSalt, secretSalt: b64(random(16)), hkdfSalt: b64(random(32)), argon, iv: b64(random(12)), wrapped: null, vaultId: null };
+  let part = await devicePart(r, { prf, secret });
+  const verifier = await verifierOf(part, r);
+  const raw = random(32);
+  const dek = await subtle.importKey('raw', raw, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  async function finish({ vaultId, share }) {
+    const kek = await kekOf(part, share, r);
+    const tmp = await subtle.importKey('raw', raw, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+    const record = { ...r, vaultId, wrapped: b64(new Uint8Array(await subtle.wrapKey('raw', tmp, kek, { name: 'AES-GCM', iv: unb64(r.iv), additionalData: aad(r) }))) };
+    raw.fill(0); part.fill(0); part = null;
+    return { record, kek };
+  }
+  return { dek, verifier, finish, mode };
+}
+
+// Verificador de um PIN de coação (mesmos sais do cofre): o servidor guarda
+// só o resumo; digitar esse PIN destrói a parte S sem nenhum aviso.
+export async function duressVerifier(record, { prf, secret }) {
+  const part = await devicePart(record, { prf, secret });
+  try { return await verifierOf(part, record); } finally { part.fill(0); }
 }
 
 // Troca a chave do banco (rotação, "os dados morrem"): DEK nova e aleatória,
 // embrulhada pela mesma KEK que já está em memória durante a sessão. A DEK
 // antiga deixa de existir em qualquer registro novo.
 export async function rotateDek(record, kek) {
-  const r = { ...record, iv: b64(random(12)), wrapped: null, failures: 0 };
+  const r = { ...record, iv: b64(random(12)), wrapped: null };
   const tmp = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
   r.wrapped = b64(new Uint8Array(await subtle.wrapKey('raw', tmp, kek, { name: 'AES-GCM', iv: unb64(r.iv), additionalData: aad(r) })));
   return { record: r, dek: await unwrap(r, kek) };
 }
 
-// O erro é contado ANTES de tentar: fechar o app no meio não zera o contador.
-export async function openVault(store, { prf, secret }) {
+// Abrir: o servidor confere o verificador e conta os erros (ADR 0014).
+// release(vaultId, verifier) → { share } | { gone } | { wrong, left }; erro
+// de rede vira OfflineError (falha fechada: sem servidor, nada abre).
+export async function openVault(store, { prf, secret, release }) {
   const r = await store.load();
-  if (!r?.wrapped) throw new VaultWipedError();
-  r.failures += 1;
-  await store.save(r);
+  if (!r?.wrapped || !r.vaultId) throw new VaultWipedError();
+  const part = await devicePart(r, { prf, secret });
   try {
-    const kek = await deriveKek(r, { prf, secret });
-    const dek = await unwrap(r, kek);
-    r.failures = 0;
-    await store.save(r);
-    return { dek, kek };
-  } catch (e) {
-    if (e instanceof Error && e.message === 'PRF ausente') throw e;
-    if (r.failures >= MAX_FAILURES) { r.wrapped = null; await store.save(r); throw new VaultWipedError(); }
-    throw new WrongSecretError();
-  }
+    const verifier = await verifierOf(part, r);
+    let res;
+    try { res = await release(r.vaultId, verifier); } catch { throw new OfflineError(); }
+    if (res.gone) {
+      // Servidor destruiu a parte S (erros, coação, emergência ou prazo):
+      // o embrulho local não serve para mais nada; apaga também.
+      await store.save({ ...r, wrapped: null });
+      throw new VaultWipedError();
+    }
+    if (res.wrong) { const e = new WrongSecretError(); e.left = res.left; throw e; }
+    const kek = await kekOf(part, res.share, r);
+    return { dek: await unwrap(r, kek), kek };
+  } finally { part.fill(0); }
 }

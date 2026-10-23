@@ -359,6 +359,25 @@ route('GET', '/v1/visual/([A-Za-z0-9_-]{8,64})', async ({ env, me, p }) => {
   return new Response(out, { headers: { 'content-type': 'application/octet-stream', 'content-length': String(d.size), ...SECURITY_HEADERS } });
 });
 
+// Parte do servidor na chave do aparelho (ADR 0014).
+route('POST', '/v1/vault/register', async ({ env, request, me }) => {
+  const b = await readJson(request);
+  return json(201, unwrap(await circle(env).vaultRegister(me, { verifier: b.verifier, duress: b.duress ?? null, deadDays: Number(b.deadDays ?? 15) })));
+});
+// Aberta (o app ainda está trancado): quem conta os erros é o servidor.
+route('POST', '/v1/vault/release', async ({ env, request }) => {
+  const b = await readJson(request);
+  const r = await circle(env).vaultRelease({ vaultId: b.vaultId, verifier: b.verifier });
+  if (r.error === 'wrong_secret') return json(403, { error: 'wrong_secret', left: r.left });
+  return json(200, unwrap(r));
+}, { open: true });
+route('POST', '/v1/vault/settings', async ({ env, request, me }) => {
+  const b = await readJson(request);
+  return json(200, unwrap(await circle(env).vaultSettings(me, { vaultId: b.vaultId, ...(b.deadDays !== undefined ? { deadDays: Number(b.deadDays) } : {}), ...(b.duress !== undefined ? { duress: b.duress } : {}) })));
+});
+route('POST', '/v1/vault/kill-code', async ({ env, request, me }) => json(200, unwrap(await circle(env).setKillCode(me, { codeHash: (await readJson(request)).codeHash }))));
+route('POST', '/v1/vault/kill', async ({ env, request }) => json(200, unwrap(await circle(env).useKillCode({ code: (await readJson(request)).code }))), { open: true });
+
 route('GET', '/v1/docs/mine', async ({ env, me }) => json(200, { active: await quota(env, me.userId).active(), max: MAX_ACTIVE_DOCS }));
 
 // Documento publicado: cota global de 3 por pessoa (V6-019, V6-020).
@@ -422,5 +441,6 @@ export default {
       env.DB.prepare('DELETE FROM messages WHERE expires_at <= ?').bind(now),
       env.DB.prepare('DELETE FROM media_usage WHERE expires_at IS NOT NULL AND expires_at <= ?').bind(now),
     ]);
+    await circle(env).prune(); // inclui o interruptor do homem morto dos cofres
   },
 };

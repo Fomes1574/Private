@@ -16,6 +16,7 @@ export function welcome(go) {
       : [
         h('button', { class: 'block', text: 'Tenho um convite', onclick: () => withLock(go, 'invite') }),
         h('button', { class: 'block secondary', text: 'Já uso em outro celular', onclick: () => withLock(go, 'pair') }),
+        h('button', { class: 'link', text: 'Perdi meu celular (código de emergência)', onclick: () => emergency(go) }),
       ],
     installHint()));
 }
@@ -84,4 +85,18 @@ async function pairScreen(go, lock) {
     setTimeout(tick, 3000);
   };
   setTimeout(tick, 3000);
+}
+
+// Código de emergência (ADR 0014): de qualquer aparelho, sem conta.
+function emergency(go) {
+  const input = h('input', { id: 'kill', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', placeholder: 'xxxx xxxx xxxx xxxx xxxx xxxx' });
+  mount(h('main', {},
+    h('h1', { text: 'Perdi meu celular' }),
+    h('p', { text: 'Digite o código de emergência que você anotou. O celular perdido perde a chave na hora: o que está guardado nele vira ruído e a sessão cai. Depois, peça à administradora a recuperação da conta.' }),
+    h('form', { onsubmit: async (e) => {
+      e.preventDefault();
+      try { await session.useKillCode(input.value); input.value = ''; toast('Pronto. Se o código estiver certo, o celular perdido já não abre mais nada.'); welcome(go); }
+      catch (err) { toast(err.message); }
+    } }, h('label', { for: 'kill', text: 'Código de emergência' }), input, h('button', { class: 'block danger', text: 'Destruir o celular perdido' })),
+    h('button', { class: 'link', text: 'Voltar', onclick: () => welcome(go) })));
 }

@@ -1,6 +1,10 @@
 // Casca do app: instância única (V7-013), capa ao sair do app e bloqueio
 // automático (§20), roteamento entre telas.
 import './tt.js';
+import { CONFIG as BUILD } from './config.js';
+// Release: nada vai para o console (no Android o console do WebView pode
+// parar no logcat; no iPhone, no Web Inspector). Só builds de teste falam.
+if (!BUILD.testHooks && !BUILD.devBuild) for (const k of ['log', 'info', 'warn', 'error', 'debug', 'trace']) console[k] = () => {};
 import { h, mount, toast } from './ui.js';
 import { CONFIG } from './config.js';
 import { scriptURL } from './tt.js';
@@ -14,7 +18,9 @@ import { nicknameScreen } from './screens/nickname.js';
 import { settingsScreen } from './screens/settings.js';
 import { storiesScreen } from './screens/stories.js';
 
-const LOCK_AFTER_MS = 60_000; // fora do app por mais de 1 minuto: tranca de verdade
+// Tranca de verdade (chaves saem da memória) ao sair do app: na hora por
+// padrão; em Ajustes dá para escolher 1 ou 5 minutos.
+const lockAfter = () => session.S.prefs?.lockAfter ?? 0;
 const routes = { welcome, unlock: unlockScreen, chats: chatsScreen, chat: chatScreen, newGroup: newGroupScreen, nickname: nicknameScreen, settings: settingsScreen, stories: storiesScreen };
 const open = new Set(['welcome', 'unlock']);
 let cleanup = null;
@@ -40,10 +46,15 @@ function setupPrivacy() {
   addEventListener('blur', hide);
   addEventListener('pagehide', hide);
   document.addEventListener('visibilitychange', async () => {
-    if (document.hidden) return hide();
+    if (document.hidden) {
+      hide();
+      // A tela de desbloqueio vem do aviso de "trancado" (uma vez só).
+      if (session.S.unlocked && lockAfter() === 0) await session.lock('hidden');
+      return;
+    }
     const away = hiddenAt ? Date.now() - hiddenAt : 0;
     hiddenAt = 0;
-    if (session.S.unlocked && away > LOCK_AFTER_MS) { await session.lock('timeout'); await go('unlock'); }
+    if (session.S.unlocked && away > lockAfter()) { await session.lock('timeout'); await go('unlock'); }
     cover(false);
     if (session.S.unlocked) session.syncNow().catch(() => {});
   });

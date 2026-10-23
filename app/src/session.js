@@ -81,9 +81,27 @@ export async function createLock({ mode, secret }) {
     prf = reg.prf ?? await passkey.evaluate(credentialId, salt);
     prfSalt = vault.b64(salt);
   }
-  const { record, dek, kek } = await vault.createVault({ mode, prf, secret, credentialId, prfSalt });
-  prf?.fill(0);
-  return { record, dek, kek };
+  try { return await vault.startVault({ mode, prf, secret, credentialId, prfSalt }); } finally { prf?.fill(0); }
+}
+
+// O servidor guarda a parte S do cofre (ADR 0014); só então a DEK é
+// embrulhada e o cofre gravado. Exige a sessão já aberta.
+export const DEFAULT_DEAD_DAYS = 15;
+async function registerVault(lock) {
+  const reg = await S.client.api.post('/v1/vault/register', { verifier: lock.verifier, deadDays: DEFAULT_DEAD_DAYS });
+  const { record, kek } = await lock.finish(reg);
+  S.kek = kek;
+  return record;
+}
+
+// Pedido sem sessão (o app ainda está trancado). Erro de rede propaga.
+async function vaultRelease(vaultId, verifier) {
+  const res = await fetch(`${CONFIG.api}/v1/vault/release`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ vaultId, verifier }) });
+  const body = await res.json().catch(() => ({}));
+  if (res.ok && body.share) return { share: body.share };
+  if (res.status === 404 && body.error === 'gone') return { gone: true };
+  if (res.status === 403 && body.error === 'wrong_secret') return { wrong: true, left: body.left };
+  throw new Error(`release ${res.status}`);
 }
 
 async function openStore(dek, { fresh = false } = {}) {
@@ -98,20 +116,20 @@ async function openStore(dek, { fresh = false } = {}) {
 // Primeira vez: cofre novo, identidade nova (convite ou instalação).
 export async function enroll({ lock, how, token, setupCode }) {
   const pool = await openStore(lock.dek, { fresh: true });
-  S.kek = lock.kek;
   const pickleKey = vault.random(32);
   await S.store.put('pickleKey', vault.b64(pickleKey));
   S.client = makeClient(pickleKey);
   const r = how === 'bootstrap' ? await S.client.bootstrap(setupCode) : await S.client.redeem(token);
-  await idbPutMany({ vault: lock.record, activePool: pool, lastRotate: Date.now() }); // só grava o cofre quando a identidade existe
-  await afterUnlock();
+  await S.client.login();
+  const record = await registerVault(lock);
+  await idbPutMany({ vault: record, activePool: pool, lastRotate: Date.now() }); // só grava o cofre quando a identidade existe
+  await afterUnlock({ loggedIn: true });
   return r;
 }
 
 // Troca de aparelho (V7-015): o aparelho novo mostra código; o antigo aprova.
 export async function pairStart(lock) {
   lock.pool = await openStore(lock.dek, { fresh: true });
-  S.kek = lock.kek;
   const pickleKey = vault.random(32);
   await S.store.put('pickleKey', vault.b64(pickleKey));
   S.client = makeClient(pickleKey);
@@ -125,8 +143,10 @@ export async function pairPoll({ start, device, lock }) {
   if (st.state !== 'approved') return st.state;
   Object.assign(S.client, { userId: st.userId, deviceId: st.deviceId });
   await S.client.saveDevice();
-  await idbPutMany({ vault: lock.record, activePool: lock.pool, lastRotate: Date.now() });
-  await afterUnlock();
+  await S.client.login();
+  const record = await registerVault(lock);
+  await idbPutMany({ vault: record, activePool: lock.pool, lastRotate: Date.now() });
+  await afterUnlock({ loggedIn: true });
   return 'approved';
 }
 
@@ -136,8 +156,15 @@ export async function unlock(secret) {
   const rec = await vaultStore.load();
   let prf = null;
   if (rec?.mode === 'passkey') prf = rec.credentialId === native.NATIVE_ID ? await native.nativeSecret() : await passkey.evaluate(rec.credentialId, vault.unb64(rec.prfSalt));
-  const { dek, kek } = await vault.openVault(vaultStore, { prf, secret });
-  prf?.fill(0);
+  let opened;
+  try { opened = await vault.openVault(vaultStore, { prf, secret, release: vaultRelease }); }
+  catch (e) {
+    // Parte do servidor destruída: nada aqui serve mais; apaga em silêncio
+    // (no PIN de coação, quem olha vê só um app novo, sem aviso).
+    if (e instanceof vault.VaultWipedError) await wipeEverything();
+    throw e;
+  } finally { prf?.fill(0); }
+  const { dek, kek } = opened;
   await openStore(dek);
   S.kek = kek;
   const pickleKey = vault.unb64(await S.store.get('pickleKey'));
@@ -146,9 +173,9 @@ export async function unlock(secret) {
   await afterUnlock();
 }
 
-async function afterUnlock() {
+async function afterUnlock({ loggedIn = false } = {}) {
   announceCheck = true;
-  await S.client.login();
+  if (!loggedIn) await S.client.login();
   S.unlocked = true;
   if (Date.now() - ((await idbGet('lastRotate')) ?? 0) > ROTATE_EVERY) scheduleRotate();
   S.nicknames = (await S.store.get('nicknames')) ?? {};
@@ -189,9 +216,47 @@ export async function wipeEverything() {
   }
   await lock('wipe');
   await S.store?.wipe();
+  // Arquivos do banco que não chegaram a ser abertos nesta sessão também saem.
+  try { const root = await navigator.storage.getDirectory(); for await (const [name] of root.entries()) await root.removeEntry(name, { recursive: true }).catch(() => {}); } catch {}
   await native.nativeDestroy();
   await idbClear();
   try { indexedDB.deleteDatabase('mp-app'); } catch {}
+}
+
+// ---------- proteções de emergência (ADR 0014) ----------
+export async function vaultInfo() { const r = await vaultStore.load(); return { vaultId: r?.vaultId ?? null, mode: r?.mode }; }
+export async function setDeadDays(days) {
+  const { vaultId } = await vaultInfo();
+  await S.client.api.post('/v1/vault/settings', { vaultId, deadDays: days });
+  await setPrefs({ deadDays: days });
+}
+// PIN de coação: pede o Face ID de novo (mesma passkey) para derivar.
+export async function setDuressPin(pin) {
+  const rec = await vaultStore.load();
+  let prf = null;
+  if (rec.mode === 'passkey') prf = rec.credentialId === native.NATIVE_ID ? await native.nativeSecret() : await passkey.evaluate(rec.credentialId, vault.unb64(rec.prfSalt));
+  try {
+    const duress = pin ? await vault.duressVerifier(rec, { prf, secret: pin }) : null;
+    await S.client.api.post('/v1/vault/settings', { vaultId: rec.vaultId, duress });
+    await setPrefs({ duressSet: !!pin });
+  } finally { prf?.fill(0); }
+}
+const KILL_ABC = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+async function sha256hex(t) { return [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)))].map((x) => x.toString(16).padStart(2, '0')).join(''); }
+// Código de emergência: 24 caracteres sem letras parecidas; o servidor guarda
+// só o resumo. Mostrado uma vez para a pessoa anotar no papel.
+export async function createKillCode() {
+  const out = [];
+  while (out.length < 24) for (const x of crypto.getRandomValues(new Uint8Array(48))) if (x < 224 && out.length < 24) out.push(KILL_ABC[x % 56]);
+  const code = out.join('');
+  await S.client.api.post('/v1/vault/kill-code', { codeHash: await sha256hex(code) });
+  await setPrefs({ killCodeSet: true });
+  return code;
+}
+// De qualquer aparelho, sem conta: mata os aparelhos de quem tem o código.
+export async function useKillCode(code) {
+  const res = await fetch(`${CONFIG.api}/v1/vault/kill`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: code.replace(/\s+/g, '') }) });
+  if (!res.ok) throw new Error('Não deu para enviar. Confira a internet e tente de novo.');
 }
 
 // ---------- sincronização ----------
@@ -209,7 +274,7 @@ export function syncNow() {
         while (more && rounds++ < 10 && S.unlocked) {
           const r = await S.client.sync();
           if (r.security?.some((e) => e.kind === 'joined' || e.kind === 'recovered' || e.kind === 'device_changed')) announceCheck = true;
-          for (const x of r.rejected) console.warn('mensagem recusada', x.msgId, x.sender, x.reason);
+          if (r.rejected.length) console.warn('mensagens recusadas', r.rejected.length); // sem id nem remetente em log
           await handleExtras(r.received);
           more = r.more;
         }
@@ -357,7 +422,7 @@ export async function sendRoomProfile(roomId) {
 // ---------- preferências deste aparelho ----------
 // Modo máximo (padrão): foto e vídeo só pela câmera do app, nunca da galeria
 // (o original da galeria tem GPS/modelo e o sistema faz cópia temporária).
-export const DEFAULT_PREFS = Object.freeze({ maxMode: true });
+export const DEFAULT_PREFS = Object.freeze({ maxMode: true, lockAfter: 0 });
 export async function setPrefs(patch) {
   S.prefs = { ...S.prefs, ...patch };
   await S.store.put('prefs', S.prefs);

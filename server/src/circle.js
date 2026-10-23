@@ -33,7 +33,27 @@ CREATE TABLE IF NOT EXISTS recoveries (user_id TEXT PRIMARY KEY, state TEXT NOT 
 CREATE TABLE IF NOT EXISTS push_subs (device_id TEXT PRIMARY KEY, endpoint TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS security_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, user_id TEXT);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS vaults (vault_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, device_id TEXT NOT NULL,
+  verifier_hash TEXT NOT NULL, duress_hash TEXT, share TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+  last_seen INTEGER NOT NULL, dead_days INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS kill_codes (user_id TEXT PRIMARY KEY, code_hash TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS visuals (owner TEXT NOT NULL, slot TEXT NOT NULL, media_id TEXT NOT NULL, PRIMARY KEY (owner, slot));`;
+
+const B64_32 = /^[A-Za-z0-9+/]{43}=$/;
+const DEAD_DAYS = [0, 1, 3, 7, 15, 30]; // 0 = desligado
+const VAULT_MAX_FAILURES = 5;
+const b64 = (bytes) => { let s = ''; for (const x of bytes) s += String.fromCharCode(x); return btoa(s); };
+async function sha(text) {
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
+  return [...d].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+// Comparação em tempo constante (hex de mesmo tamanho).
+function sameHex(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
 
 const KEY_RE = /^[A-Za-z0-9+/]{43}=?$/; // chave Curve25519/Ed25519 em base64 (32 bytes)
 const P256_RE = /^[A-Za-z0-9+/]{87}=?$/; // ponto P-256 não comprimido (65 bytes)
@@ -68,6 +88,9 @@ export class Circle extends DurableObject {
     this.sql.exec('DELETE FROM sessions WHERE expires_at <= ?', now);
     this.sql.exec('DELETE FROM challenges WHERE expires_at <= ?', now);
     this.sql.exec('DELETE FROM pairings WHERE expires_at <= ?', now);
+    // Interruptor do homem morto: aparelho sumido há mais que o combinado
+    // perde a parte do servidor; o banco dele vira ruído para sempre.
+    this.sql.exec('DELETE FROM vaults WHERE dead_days > 0 AND last_seen + dead_days * ? < ?', this.vaultDay(), now);
   }
 
   activeCount() { return this.one("SELECT count(*) AS n FROM identities WHERE state != 'removed'").n; }
@@ -335,6 +358,80 @@ export class Circle extends DurableObject {
     this.revokeDevicesOf(userId);
     this.sql.exec("UPDATE identities SET state = 'removed' WHERE user_id = ?", userId);
     this.event('removed', userId);
+    return { ok: true };
+  }
+
+  // ---------- parte do servidor na chave do aparelho (ADR 0014) ----------
+  // A chave que abre o banco do aparelho depende de Face ID/digital + PIN +
+  // um segredo daqui. O segredo só sai com o PIN certo, e quem conta os erros
+  // é o servidor (cópia do aparelho não dá para testar PIN fora daqui).
+  // 5 erros, PIN de coação, código de emergência ou aparelho sumido por mais
+  // tempo que o combinado: o segredo é apagado e o banco do aparelho morre.
+  vaultDay() { return Number(this.env.VAULT_DAY_MS) || DAY; }
+  async vaultRegister(actor, { verifier, duress = null, deadDays = 15 }) {
+    if (!B64_32.test(verifier ?? '') || (duress !== null && !B64_32.test(duress))) return { error: 'bad_request' };
+    if (!DEAD_DAYS.includes(deadDays)) return { error: 'bad_request' };
+    const vaultId = randomId(18);
+    const share = b64(crypto.getRandomValues(new Uint8Array(32)));
+    // Um cofre por aparelho: o anterior (se houver) deixa de abrir.
+    this.sql.exec('DELETE FROM vaults WHERE device_id = ?', actor.deviceId);
+    this.sql.exec('INSERT INTO vaults(vault_id, user_id, device_id, verifier_hash, duress_hash, share, attempts, last_seen, dead_days) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)',
+      vaultId, actor.userId, actor.deviceId, await sha(verifier), duress ? await sha(duress) : null, share, this.now(), deadDays);
+    return { vaultId, share };
+  }
+  async vaultRelease({ vaultId, verifier }) {
+    if (!/^[A-Za-z0-9_-]{16,64}$/.test(vaultId ?? '') || !B64_32.test(verifier ?? '')) return { error: 'bad_request' };
+    this.prune();
+    const v = this.one('SELECT * FROM vaults WHERE vault_id = ?', vaultId);
+    if (!v) return { error: 'gone' };
+    const h = await sha(verifier);
+    // PIN de coação: mesma resposta de "apagado" (quem olha não distingue).
+    if (v.duress_hash && sameHex(h, v.duress_hash)) { this.vaultKill(v); return { error: 'gone' }; }
+    if (!sameHex(h, v.verifier_hash)) {
+      const attempts = v.attempts + 1;
+      if (attempts >= VAULT_MAX_FAILURES) { this.vaultKill(v); return { error: 'gone' }; }
+      this.sql.exec('UPDATE vaults SET attempts = ? WHERE vault_id = ?', attempts, vaultId);
+      return { error: 'wrong_secret', left: VAULT_MAX_FAILURES - attempts };
+    }
+    this.sql.exec('UPDATE vaults SET attempts = 0, last_seen = ? WHERE vault_id = ?', this.now(), vaultId);
+    return { share: v.share };
+  }
+  vaultKill(v) {
+    this.sql.exec('DELETE FROM vaults WHERE vault_id = ?', v.vault_id);
+    this.revokeDevicesOf(v.user_id); // sessão do aparelho cai junto
+    this.event('vault_destroyed', v.user_id);
+  }
+  vaultSettings(actor, { vaultId, deadDays, duress }) {
+    const v = this.one('SELECT * FROM vaults WHERE vault_id = ? AND device_id = ?', vaultId ?? '', actor.deviceId);
+    if (!v) return { error: 'not_found' };
+    return (async () => {
+      if (deadDays !== undefined) {
+        if (!DEAD_DAYS.includes(deadDays)) return { error: 'bad_request' };
+        this.sql.exec('UPDATE vaults SET dead_days = ?, last_seen = ? WHERE vault_id = ?', deadDays, this.now(), vaultId);
+      }
+      if (duress !== undefined) {
+        if (duress !== null && !B64_32.test(duress)) return { error: 'bad_request' };
+        const dh = duress ? await sha(duress) : null;
+        if (dh && sameHex(dh, v.verifier_hash)) return { error: 'same_as_pin' }; // coação não pode ser o PIN de verdade
+        this.sql.exec('UPDATE vaults SET duress_hash = ? WHERE vault_id = ?', dh, vaultId);
+      }
+      return { ok: true };
+    })();
+  }
+  // Código de emergência: escrito no papel; de qualquer navegador, mata
+  // todos os aparelhos da pessoa (celular perdido ou apreendido).
+  async setKillCode(actor, { codeHash }) {
+    if (!/^[0-9a-f]{64}$/.test(codeHash ?? '')) return { error: 'bad_request' };
+    this.sql.exec('INSERT OR REPLACE INTO kill_codes(user_id, code_hash) VALUES (?, ?)', actor.userId, codeHash);
+    return { ok: true };
+  }
+  async useKillCode({ code }) {
+    if (typeof code !== 'string' || code.length < 16 || code.length > 64) return { error: 'bad_request' };
+    const h = await sha(code.trim());
+    const row = this.q('SELECT user_id, code_hash FROM kill_codes').find((r) => sameHex(r.code_hash, h));
+    if (!row) return { ok: true }; // não revela se o código existe
+    for (const v of this.q('SELECT * FROM vaults WHERE user_id = ?', row.user_id)) this.vaultKill(v);
+    this.revokeDevicesOf(row.user_id);
     return { ok: true };
   }
 

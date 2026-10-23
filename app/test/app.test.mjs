@@ -496,6 +496,14 @@ test('câmera do app (modo máximo, padrão): foto e vídeo sem galeria nem arqu
   assert.equal(live, false, 'nenhum vídeo da câmera ligado');
   await bia.page.evaluate(() => { Object.defineProperty(document, 'hidden', { value: false, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
   assert.equal(picked, 0, 'nenhum seletor de arquivo abriu');
+  // Padrão "trancar na hora": sair do app tirou as chaves da memória.
+  await bia.page.waitForSelector('#secret');
+  assert.equal(await bia.page.evaluate(() => globalThis.__mpTest.S.unlocked), false);
+  await bia.page.fill('#secret', PIN);
+  await bia.page.click('text=Desbloquear');
+  await bia.page.click('.row-btn:has-text("Ana")', { timeout: 15000 })
+    .catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} | tela: ${(await bia.page.textContent('#root')).slice(0, 200)} | aviso: ${await status(bia)} | erros: ${bia.errors.slice(-3).join(' / ')}`); });
+  await bia.page.waitForSelector('#composer');
 });
 
 const dbDirs = (p) => p.page.evaluate(async () => {
@@ -534,4 +542,74 @@ test('bloquear e desbloquear: conversa continua, guardada cifrada no aparelho', 
   assert.ok((await bia.page.textContent('.chat')).includes('tudo, Bia 🌙'));
   const errs = [...ana.errors, ...bia.errors].filter((e) => !/status of (4\d\d)/.test(e));
   assert.deepEqual(errs, []);
+});
+
+// Lê os arquivos crus do banco no OPFS, como uma ferramenta de perícia faria,
+// e procura os textos dentro da página (devolve só o tamanho e o que achou).
+const rawDbScan = (p, needles = []) => p.page.evaluate(async (needles) => {
+  let size = 0; const found = new Set();
+  const dec = new TextDecoder('latin1');
+  async function walk(dir) {
+    for await (const [, h] of dir.entries()) {
+      if (h.kind === 'directory') { await walk(h); continue; }
+      const text = dec.decode(await (await h.getFile()).arrayBuffer());
+      size += text.length;
+      for (const n of needles) if (text.includes(n)) found.add(n);
+    }
+  }
+  await walk(await navigator.storage.getDirectory());
+  return { size, found: [...found] };
+}, needles);
+
+test('cópia do banco local (perícia): nem texto, nem id de conversa, nem id de mensagem em claro', async () => {
+  const info = await bia.page.evaluate(async () => {
+    const { S } = globalThis.__mpTest;
+    const rooms = (await S.client.api.get('/v1/rooms')).rooms;
+    const msgs = [];
+    for (const r of rooms) msgs.push(...(await S.client.store.roomMessages(r)).map((m) => m.msgId));
+    return { rooms, msgs, me: S.client.userId };
+  });
+  assert.ok(info.msgs.length > 0);
+  const needles = [...info.rooms, ...info.msgs, info.me, 'oi, Ana', 'cifrado', 'nicknames', 'drafts', 'pickleKey'];
+  const scan = await rawDbScan(bia, needles);
+  assert.ok(scan.size > 10_000, 'leu os arquivos do banco');
+  assert.deepEqual(scan.found, [], 'nada disso aparece em claro no arquivo');
+});
+
+test('PIN de coação: abre "novo", apaga tudo sem aviso; o PIN de verdade não abre mais', async () => {
+  await bia.page.click('[aria-label=Voltar]');
+  await bia.page.click('[aria-label=Ajustes]');
+  await bia.page.click('text=Criar PIN de coação');
+  await bia.page.fill('#pin-a', '739182'); await bia.page.fill('#pin-b', '739182');
+  await bia.page.click('.sheet >> text=Salvar');
+  await bia.page.waitForFunction(() => /PIN de coação criado/.test(document.querySelector('#toast').textContent), null, { timeout: 15000 });
+  await bia.page.click('text=Bloquear agora');
+  await bia.page.waitForSelector('#secret');
+  await bia.page.fill('#secret', '739182');
+  await bia.page.click('text=Desbloquear');
+  await bia.page.waitForSelector('text=Tenho um convite', { timeout: 20000 });
+  assert.equal(await bia.page.$('text=/destru|apagad|coação/i'), null, 'nenhum aviso visível');
+  assert.equal((await rawDbScan(bia)).size, 0, 'nada do banco ficou no aparelho');
+  assert.equal(await bia.page.evaluate(() => new Promise((ok) => { const r = indexedDB.open('mp-app'); r.onsuccess = () => { const n = r.result.objectStoreNames.length; r.result.close(); ok(n); }; r.onerror = () => ok(-1); })), 0, 'cofre apagado do IndexedDB');
+});
+
+test('código de emergência: de outro aparelho, mata o celular perdido', async () => {
+  await ana.page.click('[aria-label=Voltar]');
+  await ana.page.click('[aria-label=Ajustes]');
+  await ana.page.click('text=Gerar código de emergência');
+  const code = (await ana.page.textContent('#kill-code')).replace(/\s+/g, '');
+  assert.equal(code.length, 24);
+  await ana.page.click('text=Já anotei');
+  // De outro aparelho (o da Bia, já vazio), sem conta nenhuma:
+  await bia.page.click('text=Perdi meu celular');
+  await bia.page.fill('#kill', code);
+  await bia.page.click('text=Destruir o celular perdido');
+  await bia.page.waitForFunction(() => /Pronto/.test(document.querySelector('#toast').textContent));
+  // O celular da Ana: na próxima abertura, nada abre e o app volta a ser novo.
+  await ana.page.click('text=Bloquear agora');
+  await ana.page.waitForSelector('#secret');
+  await ana.page.fill('#secret', PIN);
+  await ana.page.click('text=Desbloquear');
+  await ana.page.waitForSelector('text=/Tenho um convite|Instalar a primeira pessoa/', { timeout: 20000 });
+  assert.equal((await rawDbScan(ana)).size, 0, 'banco da Ana apagado');
 });

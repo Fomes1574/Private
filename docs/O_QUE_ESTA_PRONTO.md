@@ -169,6 +169,15 @@ Garantias de que os dados morrem:
 - A mensagem enviada aparece na hora ("enviando…").
 - Guia: `docs/REDE_TOR_VPN.md` (Orbot no Android e no iPhone, VPN, Retransmissão Privada; o que cada um esconde).
 
+## 5.2 Contra perícia e invasão (ADR 0014, `docs/ANALISE_FORENSE_50.md`)
+- **Parte do servidor na chave:** o app só abre com Face ID + PIN + um segredo do servidor, e quem conta os erros é o servidor. Uma cópia do celular não deixa testar PINs; 5 erros destroem a chave para sempre.
+- **PIN de coação:** abre o app "novo", vazio, e destrói tudo sem aviso.
+- **Interruptor do homem morto:** celular sem abrir o app por X dias (padrão 15) perde a chave no servidor.
+- **Código de emergência:** de qualquer aparelho, "Perdi meu celular" + código mata o celular perdido.
+- **Banco do celular sem metadado em claro:** ids, conversas, datas e tamanhos escondidos (testado lendo os arquivos crus); chave de índice trocada a cada rotação; temporários só em memória.
+- **Tranca na hora** ao sair do app (padrão); release sem nada no console.
+- Os 50 métodos de perícia analisados: 32 protegidos, 16 em parte, 2 que nenhum app impede (spyware com o app aberto e um participante que entrega a conversa).
+
 ## 6. Android (`android-app/`)
 - Capacitor com `appId` `com.mensageiro.privado`.
 - `FLAG_SECURE` em todas as telas e sem miniatura no seletor de apps; WebView endurecido.
@@ -231,6 +240,7 @@ token da Cloudflare fica só nos Secrets do GitHub.
 - `docs/PENDENCIAS.md` — estado de cada pendência P-xx.
 - `docs/CRITERIOS.md` — cada critério de aceite (§26) e onde está testado.
 - `docs/adr/` — por que cada decisão foi tomada.
+- `docs/ANALISE_FORENSE_50.md` — os 50 métodos de perícia e invasão, um por um, e o que fazer.
 - `docs/REDE_TOR_VPN.md` — Tor, VPN e Retransmissão Privada: o que escondem e como ligar.
 - `tools/gerar-chave-de-assinatura.html` — gera, no seu computador, a chave de assinatura e os códigos secretos.
 

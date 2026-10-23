@@ -62,6 +62,7 @@ export async function settingsScreen(go) {
         h('h2', { text: 'Notificações' }),
         h('p', { class: 'muted small', text: 'O aviso diz só "novas mensagens". Sem nome, grupo, quantidade ou prévia. A Apple ou o Google ainda veem que houve um aviso e quando.' }),
         h('button', { class: 'secondary', text: 'Ativar notificações', onclick: () => session.enablePush().then(() => toast('Notificações ativadas.')).catch((e) => toast(e.message)) })),
+      emergencySection(),
       h('section', { class: 'card' },
         h('h2', { text: 'Privacidade máxima' }),
         h('label', { class: 'switch' },
@@ -195,5 +196,65 @@ function textSheet(label, value, max) {
       h('button', { class: 'block', text: 'Salvar' }), h('button', { type: 'button', class: 'secondary block', text: 'Cancelar', onclick: () => close(null) })));
     document.body.append(sheet);
     input.focus();
+  });
+}
+
+// Proteções de emergência (ADR 0014): tudo depende da parte do servidor.
+function emergencySection() {
+  const S = session.S;
+  const days = S.prefs.deadDays ?? session.DEFAULT_DEAD_DAYS;
+  const sel = h('select', { id: 'dead-days', 'aria-label': 'Apagar se o aparelho sumir por' },
+    [[1, '1 dia'], [3, '3 dias'], [7, '7 dias'], [15, '15 dias'], [30, '30 dias'], [0, 'Nunca (desligado)']].map(([v, t]) => h('option', { value: String(v), text: t, selected: v === days })));
+  sel.onchange = async () => {
+    try { await session.setDeadDays(Number(sel.value)); toast(Number(sel.value) ? `Se este aparelho ficar ${sel.selectedOptions[0].text} sem abrir o app, a chave dele é destruída.` : 'Interruptor desligado.'); }
+    catch (e) { toast(`Não deu: ${errText(e)}`); }
+  };
+  const duressBtn = h('button', { class: 'secondary', text: S.prefs.duressSet ? 'Trocar PIN de coação' : 'Criar PIN de coação', onclick: async () => {
+    const pin = await pinSheet('PIN de coação: se alguém te obrigar a abrir o app, digite este no lugar do seu. O app abre vazio, como novo, e tudo deste aparelho é destruído sem aviso. Precisa ser diferente do seu PIN.');
+    if (!pin) return;
+    try { await session.setDuressPin(pin); duressBtn.textContent = 'Trocar PIN de coação'; toast('PIN de coação criado.'); }
+    catch (e) { toast(e.code === 'same_as_pin' ? 'Tem que ser diferente do seu PIN.' : `Não deu: ${errText(e)}`); }
+  } });
+  const killBtn = h('button', { class: 'secondary', text: S.prefs.killCodeSet ? 'Gerar novo código de emergência' : 'Gerar código de emergência', onclick: async () => {
+    if (S.prefs.killCodeSet && !await confirmSheet('O código anterior deixa de valer. Continuar?', 'Gerar novo')) return;
+    try {
+      const code = await session.createKillCode();
+      const box = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'sheet-box' },
+        h('p', { text: 'Anote no papel e guarde longe do celular (ou entregue ao seu guardião). Se perder o celular ou ele for levado, abra o app em qualquer aparelho → "Perdi meu celular" e digite este código: o celular perdido vira ruído na hora.' }),
+        h('p', { class: 'code big', id: 'kill-code', text: code.match(/.{1,4}/g).join(' ') }),
+        h('p', { class: 'muted small', text: 'Ele aparece só agora. O servidor guarda só um resumo dele.' }),
+        h('button', { class: 'block', text: 'Já anotei', onclick: () => box.remove() })));
+      document.body.append(box);
+      killBtn.textContent = 'Gerar novo código de emergência';
+    } catch (e) { toast(`Não deu: ${errText(e)}`); }
+  } });
+  return h('section', { class: 'card' },
+    h('h2', { text: 'Proteções de emergência' }),
+    h('p', { class: 'muted small', text: 'A chave deste aparelho depende do Face ID, do seu PIN e de uma parte guardada no servidor. Quem copia o celular não consegue testar PINs: é o servidor que conta os erros (5 errados seguidos e a chave é destruída).' }),
+    h('label', { for: 'dead-days', text: 'Destruir a chave se o aparelho ficar sem abrir o app por' }), sel,
+    duressBtn, killBtn,
+    h('label', { for: 'lock-after', text: 'Trancar (tirar as chaves da memória) ao sair do app' }), lockSel());
+}
+
+function lockSel() {
+  const cur = session.S.prefs.lockAfter ?? 0;
+  const sel = h('select', { id: 'lock-after' }, [[0, 'Na hora'], [60_000, 'Depois de 1 minuto'], [300_000, 'Depois de 5 minutos']].map(([v, t]) => h('option', { value: String(v), text: t, selected: v === cur })));
+  sel.onchange = () => session.setPrefs({ lockAfter: Number(sel.value) }).then(() => toast('Salvo.'));
+  return sel;
+}
+
+function pinSheet(label) {
+  return new Promise((resolve) => {
+    const a = h('input', { id: 'pin-a', type: 'password', inputmode: 'numeric', autocomplete: 'off', 'aria-label': 'PIN' });
+    const b = h('input', { id: 'pin-b', type: 'password', inputmode: 'numeric', autocomplete: 'off', 'aria-label': 'Repita o PIN' });
+    const close = (v) => { sheet.remove(); resolve(v); };
+    const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' }, h('form', { class: 'sheet-box', onsubmit: (e) => {
+      e.preventDefault();
+      if (!/^\d{6,12}$/.test(a.value)) return toast('Use de 6 a 12 números.');
+      if (a.value !== b.value) return toast('Os dois campos não são iguais.');
+      close(a.value);
+    } }, h('p', { class: 'muted', text: label }), a, b, h('button', { class: 'block', text: 'Salvar' }), h('button', { type: 'button', class: 'secondary block', text: 'Cancelar', onclick: () => close(null) })));
+    document.body.append(sheet);
+    a.focus();
   });
 }
