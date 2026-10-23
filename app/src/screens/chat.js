@@ -4,6 +4,7 @@ import { h, mount, header, toast, choiceSheet, confirmSheet } from '../ui.js';
 import * as session from '../session.js';
 import { formatTime, formatDateTime } from '../packages/protocol/src/time.js';
 import { preparePhoto } from '../media.js';
+import { editPhoto } from '../editor.js';
 import { openMedia, holdButton, playAudio, openText } from './viewer.js';
 import { MAX_DOC_BYTES } from '../packages/protocol/src/documents.js';
 import { validDocName } from '../packages/protocol/src/envelope.js';
@@ -60,8 +61,10 @@ export async function chatScreen(go, { roomId }) {
     if (doc) return sendDoc(f);
     if (video) return sendVideo(f, once);
     try {
-      toast('Preparando a foto…');
-      const p = await preparePhoto(f);
+      const prepared = await preparePhoto(f); // recodificada, sem metadados
+      const p = await editPhoto(prepared.bytes, prepared.mime);
+      prepared.bytes.fill(0);
+      if (!p) return; // cancelou no editor
       const caption = takeCaption(once);
       await S.client.sendMedia(roomId, p.bytes, { mode: once ? 'once' : 'media', mime: p.mime, caption });
       p.bytes.fill(0);

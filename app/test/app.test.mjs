@@ -113,6 +113,7 @@ test('foto de ver uma vez: segurar para ver, soltar esconde, uma vez só', async
   await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
   await ana.page.click('text=Foto de ver uma vez');
   await (await chooser).setFiles(new URL('../../poc/01-vodozemac-wasm/web/icon-512.png', import.meta.url).pathname);
+  await ana.page.click('.editor >> text=Usar foto');
   await ana.page.waitForSelector('text=Foto de ver uma vez (enviada)', { timeout: 30000 });
   assert.equal(await ana.page.$('.hold'), null, 'quem enviou não tem botão para reabrir');
 
@@ -343,6 +344,7 @@ test('legenda vai cifrada com a foto; recado aparece para o círculo', async () 
   await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
   await ana.page.click('.sheet >> text=Foto');
   await (await chooser).setFiles(new URL('../../poc/01-vodozemac-wasm/web/icon-180.png', import.meta.url).pathname);
+  await ana.page.click('.editor >> text=Usar foto');
   await ana.page.waitForSelector('.msg.mine .caption >> text=pôr do sol 🌅', { timeout: 30000 });
   assert.equal(await ana.page.inputValue('#composer'), '', 'texto virou legenda');
   await bia.page.waitForSelector('.msg:not(.mine) .caption >> text=pôr do sol 🌅', { timeout: 40000 });
@@ -389,6 +391,52 @@ test('stories: audiência escolhida, sem contagem de quem viu, apagar some para 
     await p.page.click(`.row-btn:has-text("${other}")`);
     await p.page.waitForSelector('#composer');
   }
+});
+
+// BMP 300×200 (paisagem) gerado aqui, sem dependência.
+function bmp(w, hgt) {
+  const row = Math.ceil((w * 3) / 4) * 4, size = 54 + row * hgt, b = Buffer.alloc(size);
+  b.write('BM'); b.writeUInt32LE(size, 2); b.writeUInt32LE(54, 10); b.writeUInt32LE(40, 14);
+  b.writeInt32LE(w, 18); b.writeInt32LE(hgt, 22); b.writeUInt16LE(1, 26); b.writeUInt16LE(24, 28);
+  for (let y = 0; y < hgt; y++) for (let x = 0; x < w; x++) { const o = 54 + y * row + x * 3; b[o] = x % 256; b[o + 1] = 120; b[o + 2] = y % 256; }
+  return b;
+}
+
+test('editor de foto: girar, desenhar e escrever no aparelho; cancelar não envia nada', async () => {
+  const send = async (p) => {
+    const chooser = p.page.waitForEvent('filechooser');
+    await p.page.click('[aria-label="Anexar foto ou vídeo"]');
+    await p.page.click('.sheet >> text=Foto');
+    await (await chooser).setFiles({ name: 'paisagem.png', mimeType: 'image/png', buffer: bmp(300, 200) });
+    await p.page.waitForSelector('.editor canvas');
+  };
+  const before = await ana.page.$$eval('.msg.mine', (l) => l.length);
+  const biaPhotos = () => bia.page.$$eval('.msg:not(.mine) .open', (l) => l.filter((b) => /Foto · tocar/.test(b.textContent)).length);
+  const biaBefore = await biaPhotos();
+  await send(ana);
+  await ana.page.click('.editor >> text=Cancelar');
+  await ana.page.waitForSelector('.editor', { state: 'detached' });
+  await ana.page.waitForTimeout(500);
+  assert.equal(await ana.page.$$eval('.msg.mine', (l) => l.length), before, 'cancelar não envia');
+
+  await send(ana);
+  await ana.page.click('.editor >> text=Girar');
+  assert.deepEqual(await ana.page.$eval('.editor canvas', (c) => [c.width, c.height]), [200, 300]);
+  const box = await (await ana.page.$('.editor canvas')).boundingBox();
+  await ana.page.mouse.move(box.x + 10, box.y + 10); await ana.page.mouse.down();
+  await ana.page.mouse.move(box.x + box.width - 10, box.y + box.height - 10, { steps: 5 }); await ana.page.mouse.up();
+  await ana.page.click('.editor >> text=Escrever');
+  await ana.page.fill('#editor-text', 'oi!');
+  await ana.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await ana.page.click('.editor >> text=Usar foto');
+  await ana.page.waitForFunction((n) => document.querySelectorAll('.msg.mine').length > n, before, { timeout: 30000 });
+
+  await bia.page.waitForFunction((n) => [...document.querySelectorAll('.msg:not(.mine) .open')].filter((b) => /Foto · tocar/.test(b.textContent)).length > n, biaBefore, { timeout: 40000 });
+  await bia.page.locator('.msg:not(.mine) >> text=Foto · tocar para ver').last().click();
+  await bia.page.waitForSelector('.viewer img');
+  const dims = await bia.page.$eval('.viewer img', (i) => new Promise((ok) => (i.complete ? ok([i.naturalWidth, i.naturalHeight]) : i.addEventListener('load', () => ok([i.naturalWidth, i.naturalHeight])))));
+  assert.deepEqual(dims, [200, 300], 'chegou girada');
+  await bia.page.click('.viewer-close');
 });
 
 const dbDirs = (p) => p.page.evaluate(async () => {
