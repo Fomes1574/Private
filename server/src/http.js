@@ -49,7 +49,7 @@ export function assertId(v, code = 'bad_id') { if (typeof v !== 'string' || !ID_
 const STATUS = {
   unauthorized: 401, forbidden: 403, not_found: 404, gone: 404, used: 410, revoked: 410, expired: 410,
   circle_full: 409, exists: 409, conflict: 409, bad_state: 409, not_ready: 409, frozen: 423, too_early: 425,
-  rate_limited: 429,
+  rate_limited: 429, storage_full: 507,
 };
 export function unwrap(r) {
   if (r && r.error) throw new HttpError(STATUS[r.error] ?? 400, r.error);

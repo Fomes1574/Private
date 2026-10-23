@@ -1,6 +1,6 @@
 // Menu ⋮ da conversa. A líder controla só o futuro (prazos, membros, nome);
 // nunca apaga conteúdo alheio (V7-010).
-import { h, toast, choiceSheet, confirmSheet } from '../ui.js';
+import { h, toast, choiceSheet, confirmSheet, errText } from '../ui.js';
 import * as session from '../session.js';
 import { TTL_OPTIONS, describeTtl } from '../packages/protocol/src/ttl.js';
 import { pickSquarePhoto } from './settings.js';
@@ -118,7 +118,7 @@ export async function roomMenu(go, roomId) {
     }
     if (c === 'unlink' && await confirmSheet('Desfazer vínculo? A conversa acaba; o outro lado fica só com leitura até vencer. Uma conversa nova começa do zero.', 'Desfazer')) { await session.roomEvent(roomId, { type: 'unlink' }); return 'refresh'; }
     if (c === 'close' && await confirmSheet('Encerrar o grupo? Ninguém mais envia nada.', 'Encerrar')) { await session.roomEvent(roomId, { type: 'close' }); return 'refresh'; }
-  } catch (e) { toast(`Não deu: ${e.message}`); }
+  } catch (e) { toast(`Não deu: ${errText(e)}`); }
 }
 
 async function membersSheet(v) {

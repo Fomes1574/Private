@@ -1,7 +1,7 @@
 // Stories (§22): foto ou vídeo para quem a pessoa escolher no círculo, com
 // prazo (24 h por padrão, dentro de 12 h–15 d). Sem contagem nem lista de
 // quem viu. Quem publicou pode apagar antes de vencer (some para todos).
-import { h, mount, header, toast, confirmSheet } from '../ui.js';
+import { h, mount, header, toast, confirmSheet, errText } from '../ui.js';
 import * as session from '../session.js';
 import { formatTime, formatDateTime } from '../packages/protocol/src/time.js';
 import { TTL_OPTIONS, describeTtl, DAY } from '../packages/protocol/src/ttl.js';
@@ -27,7 +27,7 @@ export async function storiesScreen(go) {
       const mine = m.sender === S.client.userId;
       const what = /^video\//.test(m.body.mime) ? 'Vídeo' : 'Foto';
       return h('li', { class: 'story-row' },
-        h('button', { class: 'row-btn open', onclick: () => openMedia(() => S.client.openMedia(m), m.body.mime).catch((e) => toast(`Não abriu: ${e.message}`)) },
+        h('button', { class: 'row-btn open', onclick: () => openMedia(() => S.client.openMedia(m), m.body.mime).catch((e) => toast(`Não abriu: ${errText(e)}`)) },
           avatar(session.nameOf(m.sender), session.photoOf(m.sender)),
           h('span', { class: 'grow' },
             h('span', { class: 'title', text: mine ? 'Você' : session.nameOf(m.sender) }),
@@ -39,11 +39,11 @@ export async function storiesScreen(go) {
             await S.client.api.post(`/v1/media/${m.body.mediaId}/revoke`).catch(() => {});
             await S.client.deleteForAll(CIRCLE_ROOM_ID, m.msgId);
             await render();
-          } catch (e) { toast(`Não deu: ${e.message}`); }
+          } catch (e) { toast(`Não deu: ${errText(e)}`); }
         } }) : null);
     }) : [h('li', { class: 'empty', text: 'Nenhuma story no momento.' })]));
   };
-  await render().catch((e) => toast(`Não deu para carregar: ${e.message}`));
+  await render().catch((e) => toast(`Não deu para carregar: ${errText(e)}`));
   return session.onChange((w) => { if (w === 'synced') render().catch(() => {}); });
 }
 
@@ -83,7 +83,7 @@ function compose(go) {
       close();
       toast('Story publicada.');
       go('stories');
-    } catch (err) { toast(`Não publicou: ${err.message}`); status.textContent = ''; btn.disabled = false; }
+    } catch (err) { toast(`Não publicou: ${errText(err)}`); status.textContent = ''; btn.disabled = false; }
     finally { bytes?.fill(0); }
   } },
     h('p', { text: 'Nova story' }),

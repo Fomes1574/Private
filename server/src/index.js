@@ -52,6 +52,18 @@ async function nudge(env, ctx, userIds, { silent = [] } = {}) {
   })));
 }
 
+// Cota interna (§24): reserva atômica no D1 antes de guardar qualquer byte.
+// Ao passar do limite, nega o upload (melhor que estourar a franquia).
+const DEFAULT_QUOTA = 9 * 1024 ** 3; // abaixo dos 10 GB grátis do R2
+async function reserveBytes(env, mediaId, bytes, expiresAt) {
+  const limit = Number(env.MEDIA_QUOTA_BYTES) || DEFAULT_QUOTA;
+  const now = Date.now();
+  const r = await env.DB.prepare(`INSERT INTO media_usage(media_id, bytes, expires_at)
+    SELECT ?1, ?2, ?3 WHERE (SELECT COALESCE(SUM(bytes), 0) FROM media_usage WHERE expires_at IS NULL OR expires_at > ?4) + ?2 <= ?5`)
+    .bind(mediaId, bytes, expiresAt, now, limit).run();
+  if (!r.meta.changes) throw new HttpError(507, 'storage_full');
+}
+
 const routes = [];
 const route = (method, pattern, handler, { open = false } = {}) => routes.push({ method, re: new RegExp(`^${pattern}$`), handler, open });
 
@@ -209,7 +221,9 @@ route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/media', async ({ env, request, me
   const mediaId = randomId(16);
   const box = media(env, mediaId);
   const expiresAt = Date.now() + plan.ttl * 1000;
-  unwrap(await box.create({ mediaId, mode, room: p[1], sender: me.userId, recipients: plan.recipients, expiresAt, backend: env.BLOB_BACKEND }));
+  await reserveBytes(env, mediaId, len, expiresAt);
+  const created = await box.create({ mediaId, mode, room: p[1], sender: me.userId, recipients: plan.recipients, expiresAt, backend: env.BLOB_BACKEND, key: `m/${mediaId}` });
+  if (created.error) { await env.DB.prepare('DELETE FROM media_usage WHERE media_id = ?').bind(mediaId).run(); unwrap(created); }
   let count = 0, size = 0;
   try {
   if (env.BLOB_BACKEND === 'r2') {
@@ -248,7 +262,7 @@ route('POST', '/v1/media/([A-Za-z0-9_-]{8,64})/open', async ({ env, ctx, me, p }
   const r = unwrap(await box.open(me.userId));
   const headers = { 'content-type': 'application/octet-stream', 'content-length': String(r.size), ...SECURITY_HEADERS };
   if (r.backend === 'r2') {
-    const obj = await env.MEDIA.get(`m/${r.mediaId}`);
+    const obj = await env.MEDIA.get(r.key);
     if (!obj) throw new HttpError(404, 'gone');
     const [a, b] = obj.body.tee();
     if (r.last) ctx.waitUntil(new Response(b).arrayBuffer().then(() => box.purgeIfDone()));
@@ -307,9 +321,16 @@ route('POST', '/v1/visual/(user|room)/([A-Za-z0-9_-]{8,64})/(profile|photo|backg
   if (bytes.byteLength !== len) throw new HttpError(400, 'bad_length');
   const mediaId = randomId(16);
   const box = media(env, mediaId);
-  unwrap(await box.create({ mediaId, mode: 'visual', room: owner, sender: me.userId, recipients: [], expiresAt: null, backend: 'do', slot: p[3] }));
+  // No R2 com prefixo próprio (v/): a regra de 16 dias do bucket só vale
+  // para a mídia temporária (m/), não para a foto atual.
+  const key = `v/${mediaId}`;
+  await reserveBytes(env, mediaId, len, null);
+  unwrap(await box.create({ mediaId, mode: 'visual', room: owner, sender: me.userId, recipients: [], expiresAt: null, backend: env.BLOB_BACKEND, slot: p[3], key }));
   let count = 0;
-  for (let off = 0; off < bytes.byteLength; off += CHUNK) unwrap(await box.putChunk(count++, bytes.subarray(off, off + CHUNK)));
+  try {
+    if (env.BLOB_BACKEND === 'r2') await env.MEDIA.put(key, bytes);
+    else for (let off = 0; off < bytes.byteLength; off += CHUNK) unwrap(await box.putChunk(count++, bytes.subarray(off, off + CHUNK)));
+  } catch (e) { await box.revokeAll(null, { system: true }).catch(() => null); throw e; }
   unwrap(await box.seal({ count, size: bytes.byteLength }));
   // Só depois de o novo estar completo a referência troca; o antigo some.
   const { old } = await circle(env).visualSwap(owner, p[3], mediaId);
@@ -326,8 +347,15 @@ route('GET', '/v1/visual/([A-Za-z0-9_-]{8,64})', async ({ env, me, p }) => {
     const v = unwrap(await room(env, d.room.slice(2)).get(me.userId));
     if (!v.members.some((m) => m.userId === me.userId && m.active)) throw new HttpError(403, 'forbidden');
   }
-  const out = new Uint8Array(d.size);
-  for (let i = 0, off = 0; i < d.count; i++) { const c = new Uint8Array(await box.readChunk(i)); out.set(c, off); off += c.byteLength; }
+  let out;
+  if (d.backend === 'r2') {
+    const obj = await env.MEDIA.get(d.key);
+    if (!obj) throw new HttpError(404, 'gone');
+    out = new Uint8Array(await obj.arrayBuffer());
+  } else {
+    out = new Uint8Array(d.size);
+    for (let i = 0, off = 0; i < d.count; i++) { const c = new Uint8Array(await box.readChunk(i)); out.set(c, off); off += c.byteLength; }
+  }
   return new Response(out, { headers: { 'content-type': 'application/octet-stream', 'content-length': String(d.size), ...SECURITY_HEADERS } });
 });
 
@@ -372,6 +400,8 @@ export default {
       const r = routes.find((x) => x.method === request.method && x.re.test(url.pathname));
       if (!r) throw new HttpError(404, 'not_found');
       const me = r.open ? null : await auth(env, request);
+      // Limite de tráfego por pessoa (§8): escritas em rajada viram 429.
+      if (me && request.method === 'POST' && env.WRITE_LIMIT && !(await env.WRITE_LIMIT.limit({ key: me.userId })).success) throw new HttpError(429, 'rate_limited');
       res = await r.handler({ env, ctx, request, url, me, p: r.re.exec(url.pathname) });
     } catch (e) {
       if (e instanceof HttpError) res = fail(e.status, e.code);
@@ -390,6 +420,7 @@ export default {
       env.DB.prepare('DELETE FROM envelopes WHERE expires_at <= ?').bind(now),
       env.DB.prepare('DELETE FROM tombstones WHERE expires_at <= ?').bind(now),
       env.DB.prepare('DELETE FROM messages WHERE expires_at <= ?').bind(now),
+      env.DB.prepare('DELETE FROM media_usage WHERE expires_at IS NOT NULL AND expires_at <= ?').bind(now),
     ]);
   },
 };

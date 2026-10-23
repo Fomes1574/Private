@@ -65,3 +65,10 @@ export function choiceSheet(title, options) {
     document.body.append(sheet);
   });
 }
+
+// Erro do servidor em palavras de gente.
+export function errText(e) {
+  if (e?.code === 'storage_full') return 'o espaço do servidor está cheio agora. Tente de novo mais tarde ou apague mídias antigas.';
+  if (e?.code === 'rate_limited') return 'muitas ações seguidas. Espere um minuto e tente de novo.';
+  return e?.message ?? String(e);
+}

@@ -30,9 +30,9 @@ export class MediaBox extends DurableObject {
   }
   pending() { return this.sql.exec("SELECT count(*) AS n FROM rights WHERE state = 'pending'").one().n; }
 
-  async create({ mediaId, mode, room, sender, recipients, expiresAt, backend, slot = null }) {
+  async create({ mediaId, mode, room, sender, recipients, expiresAt, backend, slot = null, key = null }) {
     if (this.meta().state) return { error: 'exists' };
-    this.setMeta({ state: 'uploading', mediaId, mode, room, sender, expiresAt, backend, slot });
+    this.setMeta({ state: 'uploading', mediaId, mode, room, sender, expiresAt, backend, slot, key: key ?? `m/${mediaId}` });
     for (const m of recipients) this.sql.exec("INSERT INTO rights(member, state) VALUES(?, 'pending')", m);
     if (expiresAt) await this.ctx.storage.setAlarm(expiresAt);
     return { ok: true };
@@ -57,7 +57,7 @@ export class MediaBox extends DurableObject {
     if (meta.state !== 'active') return { error: 'not_ready' };
     if (meta.mode === 'visual') return { error: 'forbidden' }; // só pela rota de visuais (confere a versão atual)
     if (Date.now() >= meta.expiresAt) { await this.purge(); return { error: 'expired' }; }
-    const info = { backend: meta.backend, count: meta.count, size: meta.size, mediaId: meta.mediaId };
+    const info = { backend: meta.backend, count: meta.count, size: meta.size, mediaId: meta.mediaId, key: meta.key ?? `m/${meta.mediaId}` };
     if (meta.mode !== 'once') {
       // Mídia comum: autor e destinatários baixam até vencer.
       if (member === meta.sender) return { ok: true, ...info, last: false };
@@ -78,7 +78,7 @@ export class MediaBox extends DurableObject {
   describe() {
     const m = this.meta();
     if (!m.state) return { error: 'gone' };
-    return { mode: m.mode, room: m.room, sender: m.sender, size: m.size ?? 0, expiresAt: m.expiresAt, state: m.state, slot: m.slot, count: m.count };
+    return { mode: m.mode, room: m.room, sender: m.sender, size: m.size ?? 0, expiresAt: m.expiresAt, state: m.state, slot: m.slot, count: m.count, backend: m.backend, key: m.key ?? `m/${m.mediaId}` };
   }
 
   readChunk(i) { return this.sql.exec('SELECT data FROM chunks WHERE i = ?', i).one().data; }
@@ -108,7 +108,9 @@ export class MediaBox extends DurableObject {
 
   async purge() {
     const meta = this.meta();
-    if (meta.backend === 'r2' && this.env.MEDIA) await this.env.MEDIA.delete(`m/${meta.mediaId}`);
+    if (meta.backend === 'r2' && this.env.MEDIA) await this.env.MEDIA.delete(meta.key ?? `m/${meta.mediaId}`);
+    // Libera a cota reservada (§24).
+    if (meta.mediaId && this.env.DB) await this.env.DB.prepare('DELETE FROM media_usage WHERE media_id = ?').bind(meta.mediaId).run().catch(() => null);
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
   }

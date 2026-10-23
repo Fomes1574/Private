@@ -1,6 +1,6 @@
 // Conversa 1:1 ou grupo. Só horário (Brasília) em cada mensagem; nada de
 // visto, entregue, online ou digitando (V6-022). Texto sempre como texto.
-import { h, mount, header, toast, choiceSheet, confirmSheet } from '../ui.js';
+import { h, mount, header, toast, choiceSheet, confirmSheet, errText } from '../ui.js';
 import * as session from '../session.js';
 import { formatTime, formatDateTime } from '../packages/protocol/src/time.js';
 import { preparePhoto } from '../media.js';
@@ -45,7 +45,7 @@ export async function chatScreen(go, { roomId }) {
       await session.setDraft(roomId, '');
       setReply(null);
       await render();
-    } catch (e) { input.value = text; toast(e.code === 'gone' ? 'Conversa encerrada.' : `Não enviou: ${e.message}`); }
+    } catch (e) { input.value = text; toast(e.code === 'gone' ? 'Conversa encerrada.' : `Não enviou: ${errText(e)}`); }
   };
   const setReply = (m) => {
     replyTo = m?.msgId ?? null;
@@ -69,7 +69,7 @@ export async function chatScreen(go, { roomId }) {
       await S.client.sendMedia(roomId, p.bytes, { mode: once ? 'once' : 'media', mime: p.mime, caption });
       p.bytes.fill(0);
       await render();
-    } catch (e) { toast(`Não enviou: ${e.message}`); }
+    } catch (e) { toast(`Não enviou: ${errText(e)}`); }
   };
 
   // Legenda (V6-025): o que estiver escrito na caixa vai junto, cifrado.
@@ -110,7 +110,7 @@ export async function chatScreen(go, { roomId }) {
       bar.removeAttribute('value');
       await S.client.sendMedia(roomId, bytes, { mode: once ? 'once' : 'media', mime: 'video/mp4', duration, caption: takeCaption(once) });
       await render();
-    } catch (e) { toast(`Não enviou: ${e.message}`); }
+    } catch (e) { toast(`Não enviou: ${errText(e)}`); }
     finally { bytes?.fill(0); videoJob = null; progressBar.hidden = true; progressBar.replaceChildren(); }
   }
 
@@ -131,7 +131,7 @@ export async function chatScreen(go, { roomId }) {
       const m = await S.client.sendMedia(roomId, bytes, { mode: 'doc', mime: 'text/plain;charset=utf-8', name });
       if (m.quota?.evicted?.length) toast('Documento enviado. O mais antigo foi apagado para todos (limite de 3).');
       await render();
-    } catch (e) { toast(`Não enviou: ${e.message}`); }
+    } catch (e) { toast(`Não enviou: ${errText(e)}`); }
     finally { bytes?.fill(0); }
   }
 
@@ -160,10 +160,10 @@ export async function chatScreen(go, { roomId }) {
           recording = null; recBar.hidden = true;
           if (r.ms < 700) { r.bytes.fill(0); return toast('Áudio curto demais.'); }
           try { await S.client.sendMedia(roomId, r.bytes, { mode: 'media', mime: r.mime, duration: r.ms }); await render(); }
-          catch (e) { toast(`Não enviou: ${e.message}`); } finally { r.bytes.fill(0); }
+          catch (e) { toast(`Não enviou: ${errText(e)}`); } finally { r.bytes.fill(0); }
         } }));
       recBar.hidden = false;
-    } catch (e) { recording = null; toast(e.name === 'NotAllowedError' ? 'Microfone negado.' : `Não deu para gravar: ${e.message}`); }
+    } catch (e) { recording = null; toast(e.name === 'NotAllowedError' ? 'Microfone negado.' : `Não deu para gravar: ${errText(e)}`); }
   };
 
   const emojiPanel = h('div', { class: 'emoji-panel', hidden: true }, EMOJIS.map((e) => h('button', { class: 'emoji', type: 'button', text: e, onclick: () => { input.value += e; input.focus(); } })));
@@ -215,7 +215,7 @@ export async function chatScreen(go, { roomId }) {
         await S.client.deleteForAll(roomId, m.msgId);
       }
       await render();
-    } catch (e) { toast(`Não deu: ${e.message}`); }
+    } catch (e) { toast(`Não deu: ${errText(e)}`); }
   }
 
   function bubble(m, byId) {
@@ -241,7 +241,7 @@ export async function chatScreen(go, { roomId }) {
     const what = mediaName(m);
     if (m.body.mode === 'doc') {
       if (!m.body.key) return h('span', { class: 'media-tag', text: `Documento · ${m.body.name ?? ''}` });
-      return h('button', { class: 'open media-tag', text: `Documento · ${m.body.name ?? 'sem nome'} · abrir`, onclick: () => openText(load, m.body.name).catch((e) => toast(`Não abriu: ${e.message}`)) });
+      return h('button', { class: 'open media-tag', text: `Documento · ${m.body.name ?? 'sem nome'} · abrir`, onclick: () => openText(load, m.body.name).catch((e) => toast(`Não abriu: ${errText(e)}`)) });
     }
     if (m.body.mode === 'once') {
       const a = what === 'Foto' ? 'a' : 'o';
@@ -249,16 +249,16 @@ export async function chatScreen(go, { roomId }) {
       if (m.consumed || !m.body.key) return h('span', { class: 'media-tag', text: `${what} de ver uma vez (já vist${a})` });
       // O núcleo do cliente já apaga a chave depois da tentativa; aqui só redesenha.
       return holdButton('Segure para ver (uma vez)', load, m.body.mime, async (err) => {
-        if (err && !/410|404/.test(err.message)) toast(`Não abriu: ${err.message}`);
+        if (err && !/410|404/.test(err.message)) toast(`Não abriu: ${errText(err)}`);
         setTimeout(() => render().catch(() => {}), 300);
       });
     }
     if (/^audio\//.test(m.body.mime)) {
       const host = h('span', { class: 'audio-host' });
-      return h('span', {}, h('button', { class: 'open media-tag', text: `Áudio · ${fmtDuration(m.body.duration ?? 0)} · tocar`, onclick: () => playAudio(load, m.body.mime, host).catch((e) => toast(`Não tocou: ${e.message}`)) }), host);
+      return h('span', {}, h('button', { class: 'open media-tag', text: `Áudio · ${fmtDuration(m.body.duration ?? 0)} · tocar`, onclick: () => playAudio(load, m.body.mime, host).catch((e) => toast(`Não tocou: ${errText(e)}`)) }), host);
     }
     const label = what === 'Vídeo' ? `Vídeo · ${fmtDuration(m.body.duration ?? 0)} · tocar para ver` : 'Foto · tocar para ver';
-    return h('button', { class: 'open media-tag', text: label, onclick: () => openMedia(load, m.body.mime).catch((e) => toast(`Não abriu: ${e.message}`)) });
+    return h('button', { class: 'open media-tag', text: label, onclick: () => openMedia(load, m.body.mime).catch((e) => toast(`Não abriu: ${errText(e)}`)) });
   }
 
   async function render() {

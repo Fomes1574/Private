@@ -1,6 +1,6 @@
 // Ajustes: apelido, segurança, troca de celular, guardião, notificações,
 // e a parte da administradora (convites, membros, recuperação).
-import { h, mount, header, toast, confirmSheet, choiceSheet } from '../ui.js';
+import { h, mount, header, toast, confirmSheet, choiceSheet, errText } from '../ui.js';
 import * as session from '../session.js';
 import { CONFIG } from '../config.js';
 import { formatDateTime } from '../packages/protocol/src/time.js';
@@ -43,7 +43,7 @@ export async function settingsScreen(go) {
         h('button', { class: 'secondary', text: 'Recado', onclick: async () => {
           const t = await textSheet('Recado (até 140 letras, só o círculo vê, cifrado)', session.aboutOf(S.client.userId) ?? '', 140);
           if (t === null) return;
-          try { await session.setAbout(t); aboutText.textContent = session.aboutOf(S.client.userId) ?? '—'; toast('Recado salvo.'); } catch (e) { toast(`Não deu: ${e.message}`); }
+          try { await session.setAbout(t); aboutText.textContent = session.aboutOf(S.client.userId) ?? '—'; toast('Recado salvo.'); } catch (e) { toast(`Não deu: ${errText(e)}`); }
         } }),
         h('button', { class: 'secondary', text: 'Foto de perfil', onclick: async () => {
           const has = !!session.photoOf(S.client.userId);
@@ -53,7 +53,7 @@ export async function settingsScreen(go) {
             if (c === 'rm') { await session.setProfilePhoto(null); toast('Foto de perfil removida.'); }
             // Atualiza só o avatar: a pessoa pode já ter saído desta tela.
             meAvatar.replaceChildren(avatar(session.myNickname(), session.photoOf(S.client.userId), { big: true }));
-          } catch (e) { toast(`Não deu: ${e.message}`); }
+          } catch (e) { toast(`Não deu: ${errText(e)}`); }
         } })),
       h('section', { class: 'card' },
         h('h2', { text: 'Segurança' }),
@@ -104,7 +104,7 @@ async function chooseGuardian(members) {
   const S = session.S;
   const u = await choiceSheet('Quem é seu guardião?', members.filter((m) => m.userId !== S.client.userId && m.state === 'active').map((m) => ({ label: session.nameOf(m.userId), value: m.userId })));
   if (!u) return;
-  try { await S.client.api.post('/v1/me/guardian', { userId: u }); toast('Guardião definido.'); } catch (e) { toast(`Não deu: ${e.message}`); }
+  try { await S.client.api.post('/v1/me/guardian', { userId: u }); toast('Guardião definido.'); } catch (e) { toast(`Não deu: ${errText(e)}`); }
 }
 
 function adminSection(members) {
@@ -117,7 +117,7 @@ function adminSection(members) {
         const r = await S.client.api.post('/v1/invites', {});
         out.textContent = r.token;
         toast(`Convite vale até ${formatDateTime(r.expiresAt)}. Entregue em mão ou por canal seguro.`);
-      } catch (e) { toast(e.code === 'circle_full' ? 'O círculo já tem 10 pessoas.' : `Não deu: ${e.message}`); }
+      } catch (e) { toast(e.code === 'circle_full' ? 'O círculo já tem 10 pessoas.' : `Não deu: ${errText(e)}`); }
     } }),
     out,
     h('h3', { text: 'Pessoas' }),
@@ -135,7 +135,7 @@ function adminSection(members) {
           if (c === 'recover') toast(`Recuperação: ${(await S.client.api.post('/v1/recovery/approve', { userId: m.userId })).state === 'waiting' ? 'espera de 24 h começou; todos foram avisados.' : 'falta o guardião autorizar.'}`);
           if (c === 'recinvite') { const r = await S.client.api.post('/v1/invites', { kind: 'recovery', forUser: m.userId }); out.textContent = r.token; }
           if (c === 'remove' && await confirmSheet(`Remover ${session.nameOf(m.userId)} do círculo?`, 'Remover')) await S.client.api.post('/v1/admin/remove', { userId: m.userId });
-        } catch (e) { toast(e.code === 'too_early' ? 'Ainda não passaram as 24 horas.' : `Não deu: ${e.message}`); }
+        } catch (e) { toast(e.code === 'too_early' ? 'Ainda não passaram as 24 horas.' : `Não deu: ${errText(e)}`); }
       } })))));
 }
 

@@ -10,11 +10,12 @@ const root = new URL('..', import.meta.url).pathname;
 const bin = join(root, 'node_modules/.bin/wrangler');
 export const SETUP = randomBytes(18).toString('hex');
 
-export async function startApi(port = 8795, { appOrigin = 'http://app.local' } = {}) {
+export async function startApi(port = 8795, { appOrigin = 'http://app.local', vars = {} } = {}) {
   const persist = mkdtempSync(join(tmpdir(), 'mp-api-'));
   execFileSync(bin, ['d1', 'migrations', 'apply', 'mp-db', '--local', '--persist-to', persist], { cwd: root, stdio: 'ignore', env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' } });
   const proc = spawn(bin, ['dev', '--local', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', persist, '--test-scheduled',
-    '--var', `SETUP_CODE:${SETUP}`, '--var', `APP_ORIGIN:${appOrigin}`, '--var', `BLOB_BACKEND:${process.env.MP_TEST_BACKEND || 'r2'}`], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: { ...process.env, WRANGLER_SEND_METRICS: 'false' } });
+    '--var', `SETUP_CODE:${SETUP}`, '--var', `APP_ORIGIN:${appOrigin}`, '--var', `BLOB_BACKEND:${process.env.MP_TEST_BACKEND || 'r2'}`,
+    ...Object.entries(vars).flatMap(([k, v]) => ['--var', `${k}:${v}`])], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: { ...process.env, WRANGLER_SEND_METRICS: 'false' } });
   let log = '';
   proc.stdout.on('data', (d) => { log += d; });
   proc.stderr.on('data', (d) => { log += d; });

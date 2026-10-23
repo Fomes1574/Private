@@ -3,6 +3,16 @@
 Três publicações, nesta ordem: **provas** (testes no celular), **API** e
 **app**. Tudo sai pelo GitHub Actions; ninguém (nem eu) vê token ou senha.
 
+## Onde fica cada coisa (Arquitetura A, §8 — detalhes no ADR 0013)
+- **D1** (banco `mp-db`): mensagens cifradas, prazos, "apagar para todos",
+  membros das conversas e a cota de espaço.
+- **R2** (bucket `mp-media`): fotos, vídeos, áudios, documentos e fotos de
+  perfil/grupo, só cifrados. Regra do bucket apaga mídia com mais de 16 dias.
+- **Durable Objects**: "ver uma vez", conversas, identidades/convites,
+  cota de documentos, tempo real.
+- **Workers**: a API (`mp-api`), o app (`mp-app`) e as provas (`mp-provas`).
+Tudo isso é criado pelos workflows; você não cria nada à mão.
+
 ## 0. Qual conta da Cloudflare
 A mídia cifrada (fotos, vídeos, áudios, documentos) fica no **R2**, como na
 Arquitetura A (V6-006/V6-007). O R2 só funciona em conta **com cartão**.
