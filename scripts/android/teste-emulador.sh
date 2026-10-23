@@ -9,6 +9,22 @@ APK=$1; PKG=$2
 ACT="$PKG/com.mensageiro.privado.MainActivity"
 fail() { echo "FALHOU: $*" >&2; adb logcat -d -t 300 | grep -iE "pactotalk|mensageiro|AndroidRuntime" | tail -40 >&2 || true; exit 1; }
 
+# Mede um print cru do screencap: imprime "vazio" (o sistema recusou) ou a
+# fração de pixels acesos no meio da tela (fora das barras do sistema).
+medir_print() {
+  node -e '
+    const b = require("fs").readFileSync(process.argv[1]);
+    if (b.length < 16) { console.log("vazio"); process.exit(0); }
+    const w = b.readUInt32LE(0), h = b.readUInt32LE(4);
+    const head = b.length - w * h * 4; // 12 ou 16 bytes de cabeçalho
+    if (w < 1 || h < 1 || head < 8 || head > 16) { console.log("vazio"); process.exit(0); }
+    let lit = 0, n = 0;
+    for (let y = Math.floor(h * 0.2); y < Math.floor(h * 0.8); y += 4)
+      for (let x = 0; x < w; x += 4) { const i = head + (y * w + x) * 4; n++; if (b[i] + b[i + 1] + b[i + 2] > 30) lit++; }
+    console.log((lit / n).toFixed(4));
+  ' "$1"
+}
+
 adb install -r "$APK" >/dev/null
 DUMP=$(adb shell dumpsys package "$PKG")
 
@@ -29,6 +45,15 @@ for p in CAMERA RECORD_AUDIO POST_NOTIFICATIONS; do
 done
 true
 
+# Controle: com a tela inicial do Android, o print TEM que funcionar e
+# mostrar algo. Sem isso, um print vazio no app não provaria nada.
+adb shell input keyevent KEYCODE_HOME
+sleep 3
+adb exec-out screencap > /tmp/home.raw 2>/tmp/home.err || true
+HOME_LIT=$(medir_print /tmp/home.raw)
+echo "print de controle (tela inicial): $HOME_LIT"
+[ "$HOME_LIT" != vazio ] && awk -v v="$HOME_LIT" 'BEGIN{exit !(v > 0.05)}' || fail "print de controle não funciona neste emulador (o teste de FLAG_SECURE não seria válido)"
+
 # 3) Abre o app e espera a interface.
 adb logcat -c
 adb shell am start -W -n "$ACT" >/dev/null
@@ -45,18 +70,12 @@ pidof_app=$(adb shell pidof "$PKG" || true)
 
 # 4) FLAG_SECURE. Primeiro o efeito (o print sai preto), depois a flag na
 # janela da MainActivity (não a da tela de abertura, que é outra janela).
-adb exec-out screencap > /tmp/tela.raw
-node -e '
-  const b = require("fs").readFileSync("/tmp/tela.raw");
-  const w = b.readUInt32LE(0), h = b.readUInt32LE(4);
-  const head = b.length - w * h * 4; // 12 ou 16 bytes de cabeçalho
-  let lit = 0, n = 0;
-  // Só o meio da tela (fora barra de status e de navegação, que não são do app).
-  for (let y = Math.floor(h * 0.2); y < Math.floor(h * 0.8); y += 4)
-    for (let x = 0; x < w; x += 4) { const i = head + (y * w + x) * 4; n++; if (b[i] + b[i + 1] + b[i + 2] > 30) lit++; }
-  console.log(`print: ${w}x${h}, pixels acesos no meio: ${(100 * lit / n).toFixed(2)}%`);
-  if (lit / n > 0.01) process.exit(1);
-' || fail "print da tela mostrou o conteúdo"
+adb exec-out screencap > /tmp/tela.raw 2>/tmp/tela.err || true
+APP_LIT=$(medir_print /tmp/tela.raw)
+echo "print com o app aberto: $APP_LIT $(head -c 200 /tmp/tela.err | tr '\n' ' ')"
+if [ "$APP_LIT" != vazio ]; then
+  awk -v v="$APP_LIT" 'BEGIN{exit !(v <= 0.01)}' || fail "print da tela mostrou o conteúdo"
+fi
 WIN=$(adb shell dumpsys window windows | awk -v a="$PKG/com.mensageiro.privado.MainActivity" '/Window #/{p=index($0,a)>0} p')
 echo "janela: $(echo "$WIN" | grep -m1 -E '^[[:space:]]*fl=|[[:space:]]fl=' | tr -s ' ')"
 [ -n "$WIN" ] || fail "janela da MainActivity não encontrada no dumpsys"
