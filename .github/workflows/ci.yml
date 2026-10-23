@@ -160,8 +160,11 @@ jobs:
       - uses: actions/setup-node@v7
         with: { node-version: "22" }
       - run: npm ci
-      - name: API inteira no workerd local (D1 e Durable Objects)
-        env: { WRANGLER_SEND_METRICS: "false" }
+      - name: API inteira no workerd local (D1, Durable Objects e R2)
+        env: { WRANGLER_SEND_METRICS: "false", MP_TEST_BACKEND: "r2" }
+        run: npm test
+      - name: Mesma API com a mídia no SQLite do Durable Object (alternativa sem R2)
+        env: { WRANGLER_SEND_METRICS: "false", MP_TEST_BACKEND: "do" }
         run: npm test
       - run: npm run check
 

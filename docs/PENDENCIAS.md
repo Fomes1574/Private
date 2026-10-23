@@ -14,7 +14,7 @@ falta o teste no iPhone/Android real.
 | P-07 | Origem e `manifest.id` | Decisão 3 do proprietário |
 | P-12 | Formatos de documento | Lista positiva começa só com texto UTF-8; PDF e outros precisam de decisão (visualizador seguro) |
 | P-13 | Limites de bytes de vídeo | Fluxo feito (95 MiB, cai para econômico); medir no aparelho |
-| P-14 | Cota e ativação do R2 | Decisão 1 do proprietário (hoje usa o SQLite do Durable Object) |
+| P-14 | Cota e ativação do R2 | Decidido: R2 para a mídia (conta com cartão); bucket e regra de 16 dias criados pelo deploy-api; testes rodam nos modos R2 e DO |
 | P-24 | Gate online de texto | **Bloqueado**: precisa de revisão independente (ADR 0009) |
 | §22 | Prazo padrão das stories | 24 h implementado como candidato; confirmar |
 | — | Transferir histórico na troca de aparelho | Não feito: troca hoje começa do zero (mais seguro; decidir se vale) |

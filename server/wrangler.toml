@@ -13,11 +13,19 @@ enabled = false
 crons = ["*/15 * * * *"]
 
 [vars]
-BLOB_BACKEND = "do"
+# Mídia cifrada no R2 (Arquitetura A, V6-006/V6-007). "do" guarda no SQLite
+# do Durable Object (alternativa sem R2; limite total de 5 GB no plano grátis).
+BLOB_BACKEND = "r2"
 # Origem do app (CORS). Trocar pelo endereço definitivo antes do uso real (P-07).
 APP_ORIGIN = "http://localhost:8792"
 VAPID_SUBJECT = "http://localhost:8792"
 # Segredos (wrangler secret put): SETUP_CODE, VAPID_PRIVATE_JWK, VAPID_PUBLIC.
+
+# Só ciphertext. Regra de ciclo de vida apaga qualquer objeto com mais de
+# 16 dias (prazo máximo é 15), mesmo se a limpeza do app falhar.
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "mp-media"
 
 [[d1_databases]]
 binding = "DB"

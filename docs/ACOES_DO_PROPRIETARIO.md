@@ -29,7 +29,7 @@ repositório. Marque aqui conforme for fazendo.
 
 | # | Decisão | Por que importa | Minha recomendação |
 |---|---|---|---|
-| 1 | **R2 exige cartão para ativar?** Cadastrar ou não | Cartão = risco de cobrança fora da franquia (§48.1) | Não cadastrar agora. O código já isola o armazenamento; dá para usar o SQLite do Durable Object (grátis, falha em vez de cobrar) e decidir depois dos testes |
+| 1 | ~~R2 com cartão~~ **Decidido:** usar R2 (Arquitetura A); conta com cartão | Mídia no R2, com regra de 16 dias no bucket | Feito no código: `BLOB_BACKEND = "r2"` |
 | 2 | **Revisão criptográfica independente** antes do uso real | A especificação exige (§26-B, V7-011); custa dinheiro | Decidir antes de convidar as 10 pessoas, não agora |
 | 3 | **Endereço fixo do app** (`*.workers.dev` grátis ou domínio próprio) | Trocar depois exige migrar dados de todos (P-07) | `workers.dev` para as provas; decidir antes do primeiro membro real |
 | 4 | **Versão mínima do iOS** | Trusted Types só no Safari 26; PRF estável no 18.4+ | iOS 26 como mínimo (D-070 sugere 26.4) |

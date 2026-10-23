@@ -4,13 +4,17 @@ Três publicações, nesta ordem: **provas** (testes no celular), **API** e
 **app**. Tudo sai pelo GitHub Actions; ninguém (nem eu) vê token ou senha.
 
 ## 0. Qual conta da Cloudflare
-**Recomendado: uma conta nova, só para o Mensageiro, sem cartão.**
-- Se um dia a conta do Quiz Gomes (ou o token dela) vazar, o Mensageiro não
-  vai junto; e o servidor é a ameaça nº 1 da especificação (V7-014).
-- Sem cartão, a conta não consegue cobrar: no limite grátis ela **para**, não
-  cobra (§48). O Mensageiro não usa R2 por padrão (`BLOB_BACKEND = "do"`).
-Se mesmo assim usar a conta do Quiz, os passos são os mesmos; só crie um
-token separado (passo 4) e não reaproveite o do Quiz.
+A mídia cifrada (fotos, vídeos, áudios, documentos) fica no **R2**, como na
+Arquitetura A (V6-006/V6-007). O R2 só funciona em conta **com cartão**.
+**Recomendado: uma conta nova, só para o Mensageiro, com cartão cadastrado.**
+- Se a conta ou um token do Quiz Gomes vazar, o Mensageiro não vai junto (o
+  servidor é a ameaça nº 1, V7-014), e os custos ficam separados.
+- Franquia grátis do R2: 10 GB-mês, 1 milhão de gravações e 10 milhões de
+  leituras por mês, saída grátis. Acima disso, cerca de US$ 0,015 por GB-mês.
+- Em **Notifications** da Cloudflare, crie um alerta de cobrança por uso
+  ("Usage Based Billing"), se aparecer na sua conta, para saber antes.
+Se usar a conta do Quiz, os passos são os mesmos; só crie um token novo
+(passo 4) e não reaproveite o do Quiz.
 
 ## 1. Conta e verificação em duas etapas
 1. `dash.cloudflare.com` → Sign up com um e-mail só seu → confirmar e-mail.
@@ -37,6 +41,7 @@ Em **Workers & Pages**, coluna da direita: **Account ID**. Copiar.
 3. Permissões:
    - `Account` · `Workers Scripts` · `Edit`
    - `Account` · `D1` · `Edit`
+   - `Account` · `Workers R2 Storage` · `Edit`
 4. Account Resources: `Include` · a conta do Mensageiro.
 5. TTL: data de fim (ex.: 90 dias). Renovar quando vencer.
 6. Create Token → **copiar** (aparece uma vez só).
@@ -79,7 +84,8 @@ Mesma tela → aba **Variables → New repository variable**:
 
 ## 8. Publicar (Actions → nome do workflow → Run workflow → branch `ccr-de59a90b-gr4vug`)
 1. **deploy-provas** → digite `PUBLICAR`.
-2. **deploy-api** → digite `PUBLICAR-API`. Cria o banco D1, aplica as
+2. **deploy-api** → digite `PUBLICAR-API`. Cria o banco D1 e o bucket R2
+   `mp-media` (com a regra que apaga tudo com mais de 16 dias), aplica as
    migrações, publica e grava os segredos (as chaves de notificação são
    geradas lá dentro e ninguém vê a privada).
 3. **deploy-app** → digite `PUBLICAR-APP`. No resumo da execução aparece
@@ -96,6 +102,7 @@ falta, sem mostrar valores.
 5. Ajustes → confira que a "Versão do app" bate com o código do passo 8.3.
 
 ## O que não fazer
-- Não ativar R2 nem domínio para o Mensageiro agora.
+- Não criar o bucket R2 à mão nem mexer nas regras dele (o deploy-api faz).
+- Não adicionar domínio agora.
 - Não mandar token, chaves ou códigos para ninguém (nem para mim).
 - Não rodar os workflows de outra branch.

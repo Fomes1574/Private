@@ -47,6 +47,13 @@ jobs:
           if [ -z "$id" ]; then npx wrangler d1 create mp-db >/dev/null; id=$(npx wrangler d1 list --json | node -e 'const l=JSON.parse(require("fs").readFileSync(0));process.stdout.write(l.find(x=>x.name==="mp-db").uuid)'); fi
           sed -i "s/^database_id = .*/database_id = \"$id\"/" wrangler.toml
           npx wrangler d1 migrations apply mp-db --remote
+      - name: Bucket R2 da mídia cifrada (cria se não existir) e regra de 16 dias
+        run: |
+          npx wrangler r2 bucket info mp-media >/dev/null 2>&1 || npx wrangler r2 bucket create mp-media
+          # Rede de segurança: nada fica mais que 16 dias (prazo máximo é 15),
+          # nem upload interrompido, mesmo se a limpeza do app falhar.
+          npx wrangler r2 bucket lifecycle add mp-media apagar-16-dias --expire-days 16 --abort-multipart-days 1 --force \
+            || npx wrangler r2 bucket lifecycle list mp-media | grep -q apagar-16-dias
       - name: Publicar
         env:
           APP_ORIGIN: ${{ vars.MP_APP_ORIGIN }}
