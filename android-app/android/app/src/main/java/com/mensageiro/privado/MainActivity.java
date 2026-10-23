@@ -1,12 +1,15 @@
 package com.mensageiro.privado;
 
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.WindowManager;
+import android.webkit.PermissionRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebChromeClient;
 
 // O app web roda dentro do APK assinado (ADR 0007). Aqui fica o que a web
 // sozinha não consegue no Android: bloquear print e gravação de tela em
@@ -15,6 +18,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(BiometricSecretPlugin.class);
+        registerPlugin(NovasMensagensPlugin.class);
         super.onCreate(savedInstanceState);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         if (Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(false);
@@ -27,5 +31,22 @@ public class MainActivity extends BridgeActivity {
         s.setGeolocationEnabled(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         WebView.setWebContentsDebuggingEnabled(false);
+
+        // Câmera e microfone só para o próprio app (https://localhost) e só
+        // quando ele pede (câmera do app, áudio, vídeo). O Android pergunta à
+        // pessoa na primeira vez. Qualquer outro recurso (MIDI, mídia
+        // protegida etc.) é negado; o Capacitor sozinho liberaria.
+        web.setWebChromeClient(new BridgeWebChromeClient(getBridge()) {
+            @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                Uri o = request.getOrigin();
+                boolean ours = o != null && "https".equals(o.getScheme()) && "localhost".equals(o.getHost());
+                for (String r : request.getResources()) {
+                    if (!PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(r) && !PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(r)) ours = false;
+                }
+                if (!ours) { request.deny(); return; }
+                super.onPermissionRequest(request);
+            }
+        });
     }
 }

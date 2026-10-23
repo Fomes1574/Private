@@ -1,11 +1,15 @@
 name: android
 
-# Compila o APK (o mesmo app web dentro do APK, ADR 0007). O runner do GitHub
-# já tem o Android SDK. APK de debug como artefato; o de distribuição precisa
-# da chave de assinatura do proprietário (segredos ANDROID_*), ver docs.
+# Compila o APK (o mesmo app web dentro do APK, ADR 0007) e testa:
+# - debug (com.pactotalk.app.debug) como artefato, para teste rápido;
+# - release DE TESTE: mesma configuração da distribuição, assinado com uma
+#   chave descartável gerada pela própria página da chave, conferido pelo
+#   script de verificação e aberto num emulador (FLAG_SECURE, sem depuração,
+#   sem backup, permissões). Não publica nada: a distribuição é o workflow
+#   android-release, com a chave permanente do proprietário.
 on:
   push:
-    paths: ['android-app/**', 'app/**', 'packages/**', '.github/workflows/android.yml']
+    paths: ['android-app/**', 'app/**', 'packages/**', 'tools/**', 'scripts/android/**', '.github/workflows/android.yml']
   workflow_dispatch:
 
 permissions:
@@ -21,6 +25,8 @@ jobs:
         with: { node-version: "22" }
       - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: "21" }
+      - name: Página da chave do APK gera certificado válido
+        run: node --test tools/chave-android.test.mjs
       - name: App web + Capacitor
         working-directory: android-app
         env:
@@ -36,6 +42,10 @@ jobs:
           grep -q 'usesCleartextTraffic="false"' app/src/main/AndroidManifest.xml
           ! grep -q 'FileProvider' app/src/main/AndroidManifest.xml
           grep -q 'Content-Security-Policy' app/src/main/assets/public/index.html
+          # Firebase só para o aviso: nada de Analytics.
+          grep -q 'firebase_analytics_collection_deactivated" android:value="true"' app/src/main/AndroidManifest.xml
+          ! grep -rq 'firebase-analytics\|firebase-bom' app/build.gradle
+          [ ! -e app/google-services.json ]
       - name: Compilar APK de debug
         working-directory: android-app/android
         run: ./gradlew --no-daemon assembleDebug
@@ -44,3 +54,30 @@ jobs:
           name: apk-debug
           path: android-app/android/app/build/outputs/apk/debug/*.apk
           retention-days: 7
+      - name: Compilar release (sem assinatura)
+        working-directory: android-app/android
+        env: { MP_VERSION_CODE: "1", MP_VERSION_NAME: "0.0.0-teste" }
+        run: ./gradlew --no-daemon assembleRelease
+      - name: Assinar com chave DESCARTÁVEL e verificar
+        run: |
+          d=$(mktemp -d)
+          node tools/chave-android.mjs "$d"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/zipalign" -p -f 4 android-app/android/app/build/outputs/apk/release/app-release-unsigned.apk "$d/aligned.apk"
+          "$BT/apksigner" sign --key "$d/key.der" --cert "$d/cert.pem" --v4-signing-enabled false --out "$RUNNER_TEMP/teste-release.apk" "$d/aligned.apk"
+          bash scripts/android/verificar-apk.sh "$RUNNER_TEMP/teste-release.apk" "$(cat "$d/sha256.txt")" com.pactotalk.app 1
+          rm -rf "$d"
+      - name: Ligar KVM para o emulador
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Emulador (Android 14) com o APK de release
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
+          script: bash scripts/android/teste-emulador.sh "$RUNNER_TEMP/teste-release.apk" com.pactotalk.app

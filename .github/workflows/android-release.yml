@@ -1,0 +1,128 @@
+name: android-release
+
+# APK de DISTRIBUIÇÃO do Pacto Talk, assinado com a chave permanente do
+# proprietário e publicado como GitHub Release (APK + SHA-256).
+# Pré-requisitos (docs/APK_RELEASE.md):
+#   segredos ANDROID_SIGNING_KEY e ANDROID_SIGNING_CERT (tools/gerar-chave-android.html)
+#   variável ANDROID_CERT_SHA256 (impressão digital da mesma chave)
+#   variável MP_API_ORIGIN (https://...)
+#   segredo GOOGLE_SERVICES_JSON (opcional; sem ele o APK sai SEM notificações)
+# Nada disso fica no repositório. A chave existe só em memória/arquivo
+# temporário deste job e é apagada no fim.
+on:
+  workflow_dispatch:
+    inputs:
+      confirmar:
+        description: 'Digite PUBLICAR-APK para assinar e publicar'
+        required: true
+
+permissions:
+  contents: write # criar a Release
+
+concurrency: { group: android-release, cancel-in-progress: false }
+
+jobs:
+  release:
+    if: github.event.inputs.confirmar == 'PUBLICAR-APK'
+    runs-on: ubuntu-24.04
+    environment: release
+    env:
+      PKG: com.pactotalk.app
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v7
+        with: { node-version: "22" }
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: "21" }
+
+      - name: Conferir segredos e variáveis
+        env:
+          KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+          CERT: ${{ secrets.ANDROID_SIGNING_CERT }}
+          FP: ${{ vars.ANDROID_CERT_SHA256 }}
+          API: ${{ vars.MP_API_ORIGIN }}
+        run: |
+          [ -n "$KEY" ] && [ -n "$CERT" ] || { echo "Faltam ANDROID_SIGNING_KEY/ANDROID_SIGNING_CERT (tools/gerar-chave-android.html)"; exit 1; }
+          echo "$FP" | grep -Eq '^[0-9a-f]{64}$' || { echo "Variável ANDROID_CERT_SHA256 ausente ou inválida"; exit 1; }
+          case "$API" in https://*) ;; *) echo "MP_API_ORIGIN precisa ser https://..."; exit 1;; esac
+
+      - name: Número da versão (sempre maior que o último publicado)
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          code=$(( 100 + ${{ github.run_number }} ))
+          last=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName -q '.[].tagName' | sed -n 's/^android-1\.0\.\([0-9]*\)$/\1/p' | sort -n | tail -1)
+          if [ -n "$last" ] && [ "$code" -le "$last" ]; then code=$(( last + 1 )); fi
+          echo "MP_VERSION_CODE=$code" >> "$GITHUB_ENV"
+          echo "MP_VERSION_NAME=1.0.$code" >> "$GITHUB_ENV"
+          echo "Versão 1.0.$code (versionCode $code; último publicado: ${last:-nenhum})"
+
+      - name: Firebase (só o aviso de notificação)
+        env: { GS: "${{ secrets.GOOGLE_SERVICES_JSON }}" }
+        run: |
+          if [ -z "$GS" ]; then echo "PUSH=nao" >> "$GITHUB_ENV"; echo "::warning::Sem GOOGLE_SERVICES_JSON: este APK sai SEM notificações."; exit 0; fi
+          printf '%s' "$GS" > android-app/android/app/google-services.json
+          node -e '
+            const j = JSON.parse(require("fs").readFileSync("android-app/android/app/google-services.json", "utf8"));
+            const ok = (j.client || []).some((c) => c.client_info?.android_client_info?.package_name === process.env.PKG);
+            if (!ok) { console.error("google-services.json não tem o app " + process.env.PKG); process.exit(1); }
+          '
+          echo "PUSH=sim" >> "$GITHUB_ENV"
+
+      - name: App web + Capacitor
+        working-directory: android-app
+        env:
+          MP_API: ${{ vars.MP_API_ORIGIN }}
+        run: |
+          npm ci
+          npm run sync
+
+      - name: Testes do app antes de publicar (página da chave)
+        run: node --test tools/chave-android.test.mjs
+
+      - name: Compilar release
+        working-directory: android-app/android
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Assinar com a chave permanente e verificar
+        env:
+          KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+          CERT: ${{ secrets.ANDROID_SIGNING_CERT }}
+          FP: ${{ vars.ANDROID_CERT_SHA256 }}
+        run: |
+          d=$(mktemp -d); chmod 700 "$d"
+          trap 'shred -u "$d"/key.der 2>/dev/null; rm -rf "$d"' EXIT
+          printf '%s' "$KEY" | base64 -d > "$d/key.der"
+          printf '%s\n' "$CERT" > "$d/cert.pem"
+          # A chave do segredo tem que ser a da variável (troca acidental ou maliciosa para aqui).
+          got=$(openssl x509 -in "$d/cert.pem" -outform DER | sha256sum | cut -d' ' -f1)
+          [ "$got" = "$FP" ] || { echo "Certificado do segredo ($got) não bate com ANDROID_CERT_SHA256"; exit 1; }
+          [ "$(openssl pkey -inform DER -in "$d/key.der" -pubout | sha256sum)" = "$(openssl x509 -in "$d/cert.pem" -pubkey -noout | sha256sum)" ] || { echo "Chave e certificado não combinam"; exit 1; }
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/zipalign" -p -f 4 android-app/android/app/build/outputs/apk/release/app-release-unsigned.apk "$d/aligned.apk"
+          out="$RUNNER_TEMP/Pacto-Talk-$MP_VERSION_NAME.apk"
+          "$BT/apksigner" sign --key "$d/key.der" --cert "$d/cert.pem" --v4-signing-enabled false --out "$out" "$d/aligned.apk"
+          bash scripts/android/verificar-apk.sh "$out" "$FP" "$PKG" "$MP_VERSION_CODE" | tee "$RUNNER_TEMP/verificacao.txt"
+          rm -f android-app/android/app/google-services.json
+          (cd "$RUNNER_TEMP" && sha256sum "Pacto-Talk-$MP_VERSION_NAME.apk" > "Pacto-Talk-$MP_VERSION_NAME.apk.sha256")
+
+      - name: Publicar GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FP: ${{ vars.ANDROID_CERT_SHA256 }}
+        run: |
+          tag="android-$MP_VERSION_NAME"
+          {
+            echo "APK de distribuição do Pacto Talk $MP_VERSION_NAME (versionCode $MP_VERSION_CODE), commit ${GITHUB_SHA}."
+            echo
+            echo "**Antes de instalar, confira:**"
+            echo "- SHA-256 do APK: \`$(cut -d' ' -f1 "$RUNNER_TEMP/Pacto-Talk-$MP_VERSION_NAME.apk.sha256")\`"
+            echo "- Certificado de assinatura (SHA-256): \`$FP\` — tem que ser SEMPRE este. Se mudar, não instale."
+            echo "- Notificações: $([ "$PUSH" = sim ] && echo 'incluídas (FCM, aviso vazio)' || echo '**NÃO incluídas** (Firebase não configurado)')"
+            echo
+            echo "Primeira vez vindo do APK de debug antigo: siga docs/MIGRAR_DEBUG_PARA_RELEASE.md (não desinstale o antigo antes)."
+            echo
+            echo '```'; cat "$RUNNER_TEMP/verificacao.txt"; echo '```'
+          } > "$RUNNER_TEMP/notas.md"
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Pacto Talk $MP_VERSION_NAME (Android)" --notes-file "$RUNNER_TEMP/notas.md" \
+            "$RUNNER_TEMP/Pacto-Talk-$MP_VERSION_NAME.apk" "$RUNNER_TEMP/Pacto-Talk-$MP_VERSION_NAME.apk.sha256"

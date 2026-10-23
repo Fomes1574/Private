@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:">
+<title>Chave do APK</title>
+<style>
+  body { font: 16px/1.5 -apple-system, system-ui, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; background: #0B1220; color: #E8EEF8; }
+  textarea { width: 100%; height: 120px; font: 13px ui-monospace, Menlo, monospace; background: #131D31; color: #E8EEF8; border: 1px solid #2a3a58; border-radius: 8px; padding: 8px; box-sizing: border-box; }
+  button { font: inherit; padding: 10px 16px; border-radius: 8px; border: 0; background: #6CB4FF; color: #0B1220; font-weight: 600; cursor: pointer; margin: 4px 0; }
+  .muted { color: #93A1B8; font-size: 14px; } .warn { color: #FF7A7A; } code { word-break: break-all; }
+</style>
+</head>
+<body>
+<h1>Chave permanente do APK Android (Pacto Talk)</h1>
+<p class="muted">Abra este arquivo direto do seu computador (funciona sem internet). A chave é criada aqui, pelo navegador, e não vai para nenhum servidor. Faça isto <strong>uma vez só</strong>: todo APK futuro precisa ser assinado com esta mesma chave, senão o Android recusa a atualização.</p>
+<button id="go">Gerar chave (RSA 4096, leva alguns segundos)</button>
+<p id="wait" class="muted" hidden>Gerando…</p>
+<div id="out" hidden>
+  <h2>1. Guarde a cópia de segurança AGORA</h2>
+  <p class="warn">Sem esta cópia, se o segredo do GitHub sumir, ninguém consegue mais atualizar o app (teria que instalar outro e passar todo mundo de novo).</p>
+  <button id="save">Baixar cópia de segurança (.txt)</button>
+  <p class="muted">Guarde o arquivo num pendrive que fica guardado e no seu gerenciador de senhas. Depois apague da pasta Downloads. Não mande por e-mail nem mensagem.</p>
+  <h2>2. Segredo <code>ANDROID_SIGNING_KEY</code></h2>
+  <p class="warn">GitHub → Settings → Secrets and variables → Actions → New repository secret. Cole tudo. Não mostre a ninguém.</p>
+  <textarea id="key" readonly></textarea>
+  <h2>3. Segredo <code>ANDROID_SIGNING_CERT</code></h2>
+  <p class="muted">Certificado público (pode mostrar), também como segredo para o workflow.</p>
+  <textarea id="cert" readonly></textarea>
+  <h2>4. Variável <code>ANDROID_CERT_SHA256</code></h2>
+  <p class="muted">Na aba <em>Variables</em> (não Secrets). É a impressão digital da chave: o workflow só publica se a chave bater com ela, e qualquer pessoa confere no APK.</p>
+  <textarea id="fp" readonly style="height:48px"></textarea>
+  <p class="muted">Depois de copiar, feche esta aba.</p>
+</div>
+<p id="err" class="warn"></p>
+
+<script id="cert-lib">
+// Certificado X.509 v3 autoassinado (RFC 5280), montado em DER à mão. O
+// apksigner aceita chave PKCS#8 (DER) + certificado (PEM): sem keystore, sem
+// senha embutida no repositório, sem ferramenta extra.
+(function (G) {
+  const cat = (...a) => { const o = new Uint8Array(a.reduce((n, x) => n + x.length, 0)); let i = 0; for (const x of a) { o.set(x, i); i += x.length; } return o; };
+  const len = (n) => n < 128 ? [n] : n < 256 ? [0x81, n] : n < 65536 ? [0x82, n >> 8, n & 255] : [0x83, n >> 16, (n >> 8) & 255, n & 255];
+  const tlv = (tag, body) => cat(new Uint8Array([tag, ...len(body.length)]), body);
+  const seq = (...a) => tlv(0x30, cat(...a));
+  const set = (...a) => tlv(0x31, cat(...a));
+  const int = (bytes) => tlv(0x02, bytes[0] & 0x80 ? cat(new Uint8Array([0]), bytes) : bytes);
+  const oid = (hex) => tlv(0x06, new Uint8Array(hex.match(/../g).map((h) => parseInt(h, 16))));
+  const utf8 = (s) => tlv(0x0c, new TextEncoder().encode(s));
+  const NULL = new Uint8Array([5, 0]);
+  const pad = (n) => String(n).padStart(2, '0');
+  // Até 2049: UTCTime (AAMMDDhhmmssZ); de 2050 em diante: GeneralizedTime.
+  const time = (d) => {
+    const s = `${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
+    const y = d.getUTCFullYear();
+    return y < 2050 ? tlv(0x17, new TextEncoder().encode(pad(y % 100) + s)) : tlv(0x18, new TextEncoder().encode(y + s));
+  };
+  const SHA256_RSA = seq(oid('2a864886f70d01010b'), NULL);
+  const name = () => seq(set(seq(oid('550403'), utf8('Pacto Talk'))), set(seq(oid('55040a'), utf8('Pacto Talk'))));
+
+  G.makeAndroidKey = async function (now = new Date()) {
+    const kp = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 4096, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
+    const serial = crypto.getRandomValues(new Uint8Array(16)); serial[0] = (serial[0] & 0x7f) | 0x01;
+    const notAfter = new Date(now); notAfter.setUTCFullYear(now.getUTCFullYear() + 50);
+    const tbs = seq(
+      tlv(0xa0, int(new Uint8Array([2]))), // v3
+      int(serial), SHA256_RSA, name(), seq(time(now), time(notAfter)), name(),
+      new Uint8Array(await crypto.subtle.exportKey('spki', kp.publicKey)));
+    const sig = new Uint8Array(await crypto.subtle.sign('RSASSA-PKCS1-v1_5', kp.privateKey, tbs));
+    const der = seq(tbs, SHA256_RSA, tlv(0x03, cat(new Uint8Array([0]), sig)));
+    const b64 = (u) => { let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(s); };
+    const fp = [...new Uint8Array(await crypto.subtle.digest('SHA-256', der))].map((x) => x.toString(16).padStart(2, '0')).join('');
+    return {
+      key: b64(new Uint8Array(await crypto.subtle.exportKey('pkcs8', kp.privateKey))),
+      cert: `-----BEGIN CERTIFICATE-----\n${b64(der).match(/.{1,64}/g).join('\n')}\n-----END CERTIFICATE-----\n`,
+      fp,
+    };
+  };
+})(globalThis);
+</script>
+<script>
+const $ = (id) => document.getElementById(id);
+let made = null;
+$('go').onclick = async () => {
+  $('go').hidden = true; $('wait').hidden = false;
+  try {
+    made = await makeAndroidKey();
+    $('key').value = made.key; $('cert').value = made.cert; $('fp').value = made.fp;
+    $('out').hidden = false;
+  } catch (e) {
+    $('go').hidden = false;
+    $('err').textContent = 'Este navegador não conseguiu gerar a chave. Use Chrome, Edge, Firefox ou Safari atualizados. (' + e.message + ')';
+  } finally { $('wait').hidden = true; }
+};
+$('save').onclick = () => {
+  const text = `CÓPIA DE SEGURANÇA — chave permanente do APK Pacto Talk (gerada em ${new Date().toISOString()})\n\n`
+    + `ANDROID_SIGNING_KEY (SEGREDO):\n${made.key}\n\nANDROID_SIGNING_CERT:\n${made.cert}\nANDROID_CERT_SHA256:\n${made.fp}\n`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+  a.download = 'pacto-talk-chave-android-BACKUP.txt';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+</script>
+</body>
+</html>

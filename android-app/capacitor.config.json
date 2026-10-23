@@ -1,5 +1,5 @@
 {
-  "appId": "com.mensageiro.privado",
+  "appId": "com.pactotalk.app",
   "appName": "Pacto Talk",
   "webDir": "../app/dist",
   "loggingBehavior": "none",

@@ -4,11 +4,18 @@ android {
     namespace = "com.mensageiro.privado"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.mensageiro.privado"
+        // Pacote novo da versão de distribuição (assinada com a chave
+        // permanente). O APK de debug antigo (com.mensageiro.privado) foi
+        // assinado com uma chave descartável do CI e não aceita atualização;
+        // os dois convivem e a conta passa por "Já uso em outro celular"
+        // (docs/MIGRAR_DEBUG_PARA_RELEASE.md). Nunca mudar este id de novo.
+        applicationId "com.pactotalk.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // Número da versão vem do workflow de release (sempre crescente:
+        // o Android recusa instalar um número menor por cima).
+        versionCode((System.getenv('MP_VERSION_CODE') ?: '1') as Integer)
+        versionName(System.getenv('MP_VERSION_NAME') ?: '0.0.0-local')
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -17,7 +24,13 @@ android {
         }
     }
     buildTypes {
+        debug {
+            // Debug nunca ocupa o lugar da versão de distribuição.
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
+        }
         release {
+            debuggable false
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
@@ -37,6 +50,11 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     implementation "androidx.biometric:biometric:1.1.0"
+    // Só o FCM (sem firebase-analytics nem BoM): entrega o aviso vazio.
+    implementation("com.google.firebase:firebase-messaging:25.0.1") {
+        exclude group: 'com.google.firebase', module: 'firebase-analytics'
+        exclude group: 'com.google.android.gms', module: 'play-services-measurement'
+    }
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
