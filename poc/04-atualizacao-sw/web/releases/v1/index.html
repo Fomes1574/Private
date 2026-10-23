@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#0B1220">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="style.css">
+<title>Prova 4 · Atualização</title>
+</head>
+<body>
+<header>
+  <h1>Prova 4 · versão <span id="ver">1</span></h1>
+  <p id="status">Carregando…</p>
+</header>
+<main>
+  <section class="card">
+    <h2>Esta instalação</h2>
+    <dl>
+      <dt>Versão em uso</dt><dd id="pinned">—</dd>
+      <dt>Código da versão</dt><dd id="code" class="code">—</dd>
+      <dt>Identidade local</dt><dd id="identity">—</dd>
+      <dt>Esquema do banco</dt><dd id="schema">—</dd>
+    </dl>
+    <p class="muted">Versão 1.</p>
+  </section>
+
+  <section class="card">
+    <h2>Procurar atualização</h2>
+    <label for="channel">Canal de teste</label>
+    <select id="channel">
+      <option value="estavel">Versão nova legítima</option>
+      <option value="adulterada">Versão adulterada (arquivo trocado)</option>
+      <option value="assinatura">Assinada com outra chave</option>
+      <option value="downgrade">Versão antiga assinada (downgrade)</option>
+      <option value="repetida">A mesma versão de novo</option>
+    </select>
+    <button id="check">Procurar</button>
+    <div id="offer" hidden>
+      <p>Atualização disponível: versão <b id="offerVer"></b></p>
+      <p>Código: <b id="offerCode" class="code"></b></p>
+      <p class="muted">Confira se este código é o mesmo publicado no GitHub antes de aceitar.</p>
+      <button id="apply">Aceitar e atualizar</button>
+      <button id="later" class="secondary">Agora não</button>
+    </div>
+  </section>
+
+  <section class="tools">
+    <button id="copy" class="secondary">Copiar relatório</button>
+  </section>
+  <section>
+    <h2>Diagnóstico</h2>
+    <pre id="diag"></pre>
+  </section>
+  <details>
+    <summary>Como testar</summary>
+    <ol>
+      <li>Instale na Tela de Início. Anote a identidade local e o código da versão 1.</li>
+      <li>Teste os canais “adulterada”, “assinada com outra chave”, “downgrade” e “a mesma versão”: todos devem ser recusados.</li>
+      <li>Escolha “versão nova legítima”, procure e aceite. O app recarrega na versão 2 com a <b>mesma</b> identidade e o esquema 2.</li>
+      <li>Feche e abra o app sem internet (modo avião): ele deve abrir na versão 2.</li>
+      <li>Toque em “Copiar relatório” e me mande.</li>
+    </ol>
+  </details>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

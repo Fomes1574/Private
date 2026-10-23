@@ -1,0 +1,13 @@
+{
+  "app": "mp-poc4",
+  "version": 1,
+  "notes": "Versão 1.",
+  "files": {
+    "index.html": "211aebf37d3bb3a227ead9db1f3ddd4de6017fcf5f7491dbb6dbd7d62a617c88",
+    "app.js": "1abe36e09ece753304a6eaa2a77aa4284ebb1691693a6dfc15107240e526879a",
+    "style.css": "61e1b35f2dfcf552611379351a5ef9e1a7140dc8bdd6696dacce1d7ff8d25c73",
+    "manifest.webmanifest": "a653f64a1494b2c024e49be09682996290519503cf139bf81714a0403afd1a71",
+    "icon-180.png": "84c9a1c28f2448c5cbda60c564ab54be9d1329b34622cd478815ac996536c71c",
+    "icon-512.png": "c5ce3d8e155ced72175dd92de17e2aaf3de8aba384400f5333a048c0365e9580"
+  }
+}

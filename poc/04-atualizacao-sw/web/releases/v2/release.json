@@ -1,0 +1,13 @@
+{
+  "app": "mp-poc4",
+  "version": 2,
+  "notes": "Versão 2: migra o banco local para o esquema 2.",
+  "files": {
+    "index.html": "626b1182fcbcf243cc198c0c3019d589f6d927f7116536e51793412d4eb0ad49",
+    "app.js": "48ec1efe9921fb55c7edf269effd0c5ef2d6eb2fb303c042877554d81ff2a121",
+    "style.css": "61e1b35f2dfcf552611379351a5ef9e1a7140dc8bdd6696dacce1d7ff8d25c73",
+    "manifest.webmanifest": "a653f64a1494b2c024e49be09682996290519503cf139bf81714a0403afd1a71",
+    "icon-180.png": "84c9a1c28f2448c5cbda60c564ab54be9d1329b34622cd478815ac996536c71c",
+    "icon-512.png": "c5ce3d8e155ced72175dd92de17e2aaf3de8aba384400f5333a048c0365e9580"
+  }
+}

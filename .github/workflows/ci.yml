@@ -75,9 +75,19 @@ jobs:
         run: node vendor.mjs --check
       - run: npm test
 
+  prova-04:
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: poc/04-atualizacao-sw } }
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v7
+        with: { node-version: "22" }
+      - run: npm test
+
   navegador:
     runs-on: ubuntu-24.04
-    needs: [provas-wasm, prova-03]
+    needs: [provas-wasm, prova-03, prova-04]
     defaults: { run: { working-directory: e2e } }
     steps:
       - uses: actions/checkout@v7
