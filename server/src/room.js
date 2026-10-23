@@ -3,6 +3,20 @@
 // O servidor nunca vê o conteúdo: só envelopes cifrados por destinatário.
 import { DurableObject } from 'cloudflare:workers';
 import { createRoom, apply, ttlFor, isMember, RoomError, systemJoin, systemLeave, CIRCLE_ROOM_ID } from '../../packages/protocol/src/room.js';
+import { isValidTtl, DAY } from '../../packages/protocol/src/ttl.js';
+
+// Stories (§22): vão pela conversa do círculo, para uma audiência escolhida
+// por quem publica (subconjunto do círculo), com prazo próprio dentro de
+// 12 h–15 d (24 h por padrão, candidato ainda em decisão).
+export const STORY_DEFAULT_TTL = DAY;
+function storyPlan(s, actor, recipients, audience, ttl) {
+  if (s.kind !== 'circle') return { error: 'bad_request' };
+  const aud = [...new Set(audience)].sort();
+  if (!aud.length || !aud.every((u) => recipients.includes(u))) return { error: 'bad_recipients' };
+  const t = ttl === undefined || ttl === null ? STORY_DEFAULT_TTL : ttl;
+  if (!isValidTtl(t)) return { error: 'bad_request' };
+  return { to: aud, ttl: t };
+}
 
 const MAX_CT_B64 = 128 * 1024; // degrau máximo do envelope + sobra do Olm, em base64
 const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -99,11 +113,17 @@ export class Room extends DurableObject {
 
   // Destinatários = membros ativos menos quem envia. O fan-out precisa cobrir
   // exatamente esse conjunto: nem a mais (vazaria para não membro), nem a menos.
-  mediaPlan(actor, mode) {
+  mediaPlan(actor, mode, story = null) {
     const s = this.load();
     if (!s) return { error: 'not_found' };
     if (!isMember(s, actor)) return { error: 'forbidden' };
     if (s.closed) return { error: 'gone' };
+    if (story) {
+      if (mode !== 'media') return { error: 'bad_request' };
+      const plan = storyPlan(s, actor, this.recipients(s, actor), story.audience, story.ttl);
+      if (plan.error) return plan;
+      return { recipients: plan.to, ttl: plan.ttl, roomId: s.roomId };
+    }
     return { recipients: this.recipients(s, actor), ttl: ttlFor(s, 'media'), roomId: s.roomId };
   }
 
@@ -111,13 +131,20 @@ export class Room extends DurableObject {
     return [...s.members].filter(([id, m]) => m.active && id !== actor).map(([id]) => id).sort();
   }
 
-  async send(actor, { msgId, kind, envelopes }) {
+  async send(actor, { msgId, kind, envelopes, ttl }) {
     const s = this.load();
     if (!s) return { error: 'not_found' };
     if (!isMember(s, actor)) return { error: 'forbidden' };
     if (s.closed) return { error: 'gone' };
-    const to = this.recipients(s, actor);
+    let to = this.recipients(s, actor);
     const given = Object.keys(envelopes || {}).sort();
+    let storyTtl = null;
+    if (kind === 'story') {
+      // Única exceção ao "todos os membros": a audiência é de quem publica.
+      const plan = storyPlan(s, actor, to, given, ttl);
+      if (plan.error) return plan;
+      to = plan.to; storyTtl = plan.ttl;
+    }
     if (to.length === 0 || given.length !== to.length || given.some((id, i) => id !== to[i])) return { error: 'bad_recipients', expected: to };
     for (const ct of Object.values(envelopes)) {
       if (typeof ct !== 'string' || ct.length > MAX_CT_B64 || !B64_RE.test(ct)) return { error: 'bad_envelope' };
@@ -130,7 +157,7 @@ export class Room extends DurableObject {
       return { acceptedAt: existing.accepted_at, expiresAt: existing.expires_at, recipients: to, silent: this.mutedAmong(to), duplicate: true };
     }
     const acceptedAt = Date.now();
-    const expiresAt = acceptedAt + ttlFor(s, kind === 'media' ? 'media' : 'text') * 1000;
+    const expiresAt = acceptedAt + (storyTtl ?? ttlFor(s, kind === 'media' ? 'media' : 'text')) * 1000;
     const stmts = [db.prepare('INSERT INTO messages(room, msg_id, sender, accepted_at, expires_at) VALUES (?, ?, ?, ?, ?)').bind(s.roomId, msgId, actor, acceptedAt, expiresAt)];
     for (const [rcpt, ct] of Object.entries(envelopes)) {
       const bytes = Uint8Array.from(atob(ct), (c) => c.charCodeAt(0));

@@ -181,10 +181,15 @@ export class MessengerClient {
   roomEvent(roomId, ev) { return this.api.post(`/v1/rooms/${roomId}/events`, ev); }
 
   // Envia qualquer tipo de conteúdo interno a todos os membros ativos.
-  async sendInner(roomId, kind, body, { replyTo, msgKind = 'text', view = null } = {}) {
+  async sendInner(roomId, kind, body, { replyTo, msgKind = 'text', view = null, audience = null, ttl } = {}) {
     await this.checkSecurityEvents(); // nunca cifrar para uma chave que já foi trocada
     const room = view ?? await this.room(roomId);
-    const to = room.members.filter((m) => m.active && m.userId !== this.userId).map((m) => m.userId);
+    let to = room.members.filter((m) => m.active && m.userId !== this.userId).map((m) => m.userId);
+    if (audience) {
+      // Story: só para quem a pessoa escolheu, e só gente do círculo.
+      if (!audience.length || audience.some((u) => !to.includes(u))) throw new Error('audiência inválida');
+      to = [...new Set(audience)];
+    }
     if (kind !== 'membership') this.checkRecipients(roomId, room, to);
     else if (to.some((u) => !this.trusted[roomId]?.members.includes(u))) throw new Error('anúncio para quem não está confirmado: recusado');
     const msgId = newMsgId();
@@ -194,9 +199,9 @@ export class MessengerClient {
     const envelopes = {};
     for (const u of to) envelopes[u] = sealOuter(await this.sessionFor(u), bytes);
     await this.persistCrypto(); // ratchet salvo antes de transmitir
-    const r = await this.api.post(`/v1/rooms/${roomId}/messages`, { msgId, kind: msgKind, envelopes });
+    const r = await this.api.post(`/v1/rooms/${roomId}/messages`, { msgId, kind: msgKind, envelopes, ...(ttl ? { ttl } : {}) });
     const local = { msgId, room: roomId, sender: this.userId, kind, body, replyTo, acceptedAt: r.acceptedAt, expiresAt: r.expiresAt, mine: true };
-    if (kind === 'text' || kind === 'media') await this.store.putMessage({ ...local, text: body.text });
+    if (kind === 'text' || kind === 'media' || kind === 'story') await this.store.putMessage({ ...local, text: body.text });
     return local;
   }
 
@@ -270,6 +275,26 @@ export class MessengerClient {
     }
     if (mode === 'doc') msg.quota = await this.api.post('/v1/docs/publish', { mediaId: up.mediaId, msgId: msg.msgId });
     return msg;
+  }
+
+  // Story (§22): foto ou vídeo para quem a pessoa escolher, com prazo
+  // próprio (24 h por padrão). Ninguém fica sabendo quem viu.
+  async sendStory(bytes, { mime, audience, ttl, caption, duration } = {}) {
+    // Confere a audiência antes de subir qualquer coisa.
+    const view = await this.room(CIRCLE_ROOM_ID);
+    const circle = view.members.filter((m) => m.active && m.userId !== this.userId).map((m) => m.userId);
+    if (!audience?.length || audience.some((u) => !circle.includes(u))) throw new Error('audiência inválida');
+    const key = await newMediaKey();
+    const blob = await encryptMedia(key, bytes);
+    const q = new URLSearchParams({ mode: 'media', story: '1', audience: audience.join(','), ...(ttl ? { ttl: String(ttl) } : {}) });
+    const up = await this.api.post(`/v1/rooms/${CIRCLE_ROOM_ID}/media?${q}`, blob);
+    const body = { mediaId: up.mediaId, key: b64(key), mime, ...(caption ? { caption } : {}), ...(duration ? { duration: Math.round(duration) } : {}) };
+    key.fill(0);
+    return this.sendInner(CIRCLE_ROOM_ID, 'story', body, { msgKind: 'story', audience, ttl, view });
+  }
+  async stories() {
+    const r = await this.view(CIRCLE_ROOM_ID);
+    return r.render.filter((m) => m.kind === 'story');
   }
 
   async openMedia(msg) {
@@ -376,6 +401,7 @@ export class MessengerClient {
     switch (inner.kind) {
       case 'text': return this.store.putMessage({ ...base, kind: 'text', text: inner.body.text });
       case 'media': return this.store.putMessage({ ...base, kind: 'media', body: inner.body });
+      case 'story': return inner.room === CIRCLE_ROOM_ID ? this.store.putMessage({ ...base, kind: 'story', body: inner.body }) : undefined;
       case 'edit': {
         const orig = await this.store.getMessage(inner.body.target);
         if (orig) await this.store.putMessage(applyEdit(orig, inner)); // applyEdit exige o mesmo autor

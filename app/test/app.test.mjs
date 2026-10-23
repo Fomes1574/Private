@@ -363,6 +363,34 @@ test('legenda vai cifrada com a foto; recado aparece para o círculo', async () 
   await ana.page.waitForSelector('#composer');
 });
 
+test('stories: audiência escolhida, sem contagem de quem viu, apagar some para todos', async () => {
+  for (const p of [ana, bia]) { await p.page.click('[aria-label=Voltar]'); await p.page.click('[aria-label=Stories]'); }
+  await ana.page.click('[aria-label="Publicar story"]');
+  await ana.page.setInputFiles('#story-file', new URL('../../poc/01-vodozemac-wasm/web/icon-512.png', import.meta.url).pathname);
+  assert.equal(await ana.page.inputValue('#story-ttl'), String(24 * 3600), 'padrão de 24 h');
+  await ana.page.fill('#story-caption', 'café da manhã');
+  await ana.page.click('.sheet >> text=Publicar');
+  await ana.page.waitForSelector('.story-row >> text=Você', { timeout: 30000 });
+  assert.equal(await ana.page.$('text=/visualiza|viram|visto por/i'), null, 'nada de quem viu');
+
+  await bia.page.waitForSelector('.story-row >> text=Ana', { timeout: 40000 });
+  assert.match(await bia.page.textContent('.story-row'), /café da manhã/);
+  await bia.page.click('.story-row .row-btn');
+  await bia.page.waitForSelector('.viewer img');
+  assert.equal(await bia.page.$eval('.viewer', (v) => [...v.childNodes].filter((n) => !n.matches?.('.viewer-close')).map((n) => n.textContent).join('').trim()), '', 'nada escrito sobre a imagem');
+  await bia.page.click('.viewer-close');
+
+  await ana.page.click('.story-row >> text=Apagar');
+  await ana.page.click('.sheet button.danger');
+  await ana.page.waitForSelector('text=Nenhuma story no momento.');
+  await bia.page.waitForSelector('text=Nenhuma story no momento.', { timeout: 40000 });
+  for (const [p, other] of [[ana, 'Bia'], [bia, 'Ana']]) {
+    await p.page.click('[aria-label=Voltar]');
+    await p.page.click(`.row-btn:has-text("${other}")`);
+    await p.page.waitForSelector('#composer');
+  }
+});
+
 const dbDirs = (p) => p.page.evaluate(async () => {
   const out = [];
   for await (const [name] of (await navigator.storage.getDirectory()).entries()) if (name.startsWith('.mp-')) out.push(name);

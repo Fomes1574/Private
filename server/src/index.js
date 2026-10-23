@@ -162,7 +162,8 @@ route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/events', async ({ env, ctx, reque
 route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/mute', async ({ env, request, me, p }) => json(200, unwrap(await room(env, p[1]).setMute(me.userId, Number((await readJson(request)).until)))));
 route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/messages', async ({ env, ctx, request, me, p }) => {
   const b = await readJson(request, 2 * 1024 * 1024);
-  const r = unwrap(await room(env, p[1]).send(me.userId, { msgId: assertId(b.msgId), kind: b.kind === 'media' ? 'media' : 'text', envelopes: b.envelopes }));
+  const kind = ['media', 'story'].includes(b.kind) ? b.kind : 'text';
+  const r = unwrap(await room(env, p[1]).send(me.userId, { msgId: assertId(b.msgId), kind, envelopes: b.envelopes, ttl: b.ttl === undefined ? undefined : Number(b.ttl) }));
   await nudge(env, ctx, r.recipients, { silent: r.silent });
   return json(r.duplicate ? 200 : 201, { acceptedAt: r.acceptedAt, expiresAt: r.expiresAt });
 });
@@ -200,7 +201,11 @@ route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/media', async ({ env, request, me
   const len = Number(request.headers.get('content-length'));
   const max = mode === 'doc' ? MAX_DOC_BYTES + 64 * 1024 : MAX_MEDIA_BYTES;
   if (!(len > 0 && len <= max)) throw new HttpError(413, 'too_large');
-  const plan = unwrap(await room(env, p[1]).mediaPlan(me.userId, mode));
+  // Story: audiência e prazo vêm na URL e são conferidos pela conversa.
+  const story = url.searchParams.get('story') === '1'
+    ? { audience: (url.searchParams.get('audience') || '').split(',').filter(Boolean).slice(0, 10).map(assertId), ttl: url.searchParams.has('ttl') ? Number(url.searchParams.get('ttl')) : undefined }
+    : null;
+  const plan = unwrap(await room(env, p[1]).mediaPlan(me.userId, mode, story));
   const mediaId = randomId(16);
   const box = media(env, mediaId);
   const expiresAt = Date.now() + plan.ttl * 1000;

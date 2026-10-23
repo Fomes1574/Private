@@ -7,14 +7,12 @@ import { preparePhoto } from '../media.js';
 import { openMedia, holdButton, playAudio, openText } from './viewer.js';
 import { MAX_DOC_BYTES } from '../packages/protocol/src/documents.js';
 import { validDocName } from '../packages/protocol/src/envelope.js';
-import { CONFIG } from '../config.js';
+import { prepareVideo } from '../video-prep.js';
 import { startRecording, fmtDuration } from '../audio.js';
 import { roomMenu } from './room-menu.js';
 import { normalize } from '../packages/protocol/src/nickname.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
-// Abaixo do limite do servidor (100 MiB) com folga para a cifra segmentada.
-const MAX_VIDEO_BYTES = 95 * 1024 * 1024;
 const EMOJIS = ['😀', '😂', '🥲', '😍', '😘', '😎', '🤔', '😴', '😢', '😡', '👍', '👎', '👏', '🙏', '💪', '❤️', '🔥', '✨', '🎉', '🌙', '☀️', '🌧️', '☕', '🍕'];
 
 export async function chatScreen(go, { roomId }) {
@@ -94,27 +92,20 @@ export async function chatScreen(go, { roomId }) {
     progressBar.hidden = false;
     let bytes = null;
     try {
-      const { compress, VideoRejected } = await import('../video/compress.js');
-      // Chromium dos testes não tem H.264; o app de verdade usa sempre H.264.
-      const videoCodec = CONFIG.testHooks ? 'vp9' : 'avc';
-      let r;
+      let duration;
       try {
-        for (const preset of ['padrao', 'economico']) {
-          label.textContent = preset === 'padrao' ? 'Preparando o vídeo…' : 'Ficou grande; reduzindo a qualidade…';
-          r = await compress(file, { preset, videoCodec, onProgress: (p) => { bar.value = p; }, signal: ctl.signal });
-          if (r.blob.size <= MAX_VIDEO_BYTES) break;
-          r = null;
-        }
+        ({ bytes, duration } = await prepareVideo(file, {
+          signal: ctl.signal,
+          onProgress: (p) => { bar.value = p; },
+          onStage: (preset) => { label.textContent = preset === 'padrao' ? 'Preparando o vídeo…' : 'Ficou grande; reduzindo a qualidade…'; },
+        }));
       } catch (e) {
         if (ctl.signal.aborted) return toast('Cancelado. Nada foi enviado.');
-        throw e instanceof VideoRejected ? e : new Error(`não deu para preparar o vídeo (${e.message})`);
+        throw e;
       }
-      if (!r) throw new Error('vídeo grande demais mesmo comprimido. Nada foi enviado.');
-      if (ctl.signal.aborted) return toast('Cancelado. Nada foi enviado.');
       label.textContent = 'Enviando cifrado…';
       bar.removeAttribute('value');
-      bytes = new Uint8Array(await r.blob.arrayBuffer());
-      await S.client.sendMedia(roomId, bytes, { mode: once ? 'once' : 'media', mime: 'video/mp4', duration: Math.round(r.stats.out.duration * 1000), caption: takeCaption(once) });
+      await S.client.sendMedia(roomId, bytes, { mode: once ? 'once' : 'media', mime: 'video/mp4', duration, caption: takeCaption(once) });
       await render();
     } catch (e) { toast(`Não enviou: ${e.message}`); }
     finally { bytes?.fill(0); videoJob = null; progressBar.hidden = true; progressBar.replaceChildren(); }

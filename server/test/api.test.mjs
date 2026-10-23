@@ -347,3 +347,33 @@ test('silenciar: só membro ativo, só para si; reativar; valor inválido recusa
   assert.deepEqual(Object.keys(m.data).sort(), ['acceptedAt', 'expiresAt']);
   assert.equal((await people.bia.post(`/v1/rooms/${g}/mute`, { until: 0 })).data.until, 0);
 });
+
+test('stories: audiência escolhida dentro do círculo, prazo próprio, mídia só para a audiência', async () => {
+  const C = 'circulo-0000000000';
+  const aud = [people.caio.userId];
+  // Mídia da story: só a audiência tem direito.
+  const up = await people.bia.post(`/v1/rooms/${C}/media?mode=media&story=1&audience=${aud.join(',')}&ttl=${24 * 3600}`, new Uint8Array(500));
+  assert.equal(up.status, 201, JSON.stringify(up));
+  assert.ok(Math.abs(up.data.expiresAt - Date.now() - 24 * 3600_000) < 10_000, 'prazo de 24 h');
+  assert.equal((await people.caio.post(`/v1/media/${up.data.mediaId}/open`, undefined, { raw: true })).status, 200);
+  assert.equal((await people.admin.post(`/v1/media/${up.data.mediaId}/open`)).status, 403, 'fora da audiência não abre');
+  // Audiência fora do círculo, vazia, ou prazo fora da faixa: recusado.
+  assert.equal((await people.bia.post(`/v1/rooms/${C}/media?mode=media&story=1&audience=intruso0000`, new Uint8Array(10))).status, 400);
+  assert.equal((await people.bia.post(`/v1/rooms/${C}/media?mode=media&story=1&audience=`, new Uint8Array(10))).status, 400);
+  assert.equal((await people.bia.post(`/v1/rooms/${C}/media?mode=media&story=1&audience=${aud}&ttl=60`, new Uint8Array(10))).status, 400);
+  assert.equal((await people.bia.post(`/v1/rooms/${C}/media?mode=once&story=1&audience=${aud}`, new Uint8Array(10))).status, 400);
+  // Envelope da story: exatamente a audiência.
+  const id = msgId();
+  const r = await people.bia.post(`/v1/rooms/${C}/messages`, { msgId: id, kind: 'story', envelopes: { [people.caio.userId]: fakeCt() } });
+  assert.equal(r.status, 201, JSON.stringify(r));
+  assert.equal(r.data.expiresAt - r.data.acceptedAt, 24 * 3600_000, 'padrão de 24 h');
+  assert.ok((await people.caio.get('/v1/sync')).data.envelopes.some((e) => e.msgId === id));
+  assert.ok(!(await people.admin.get('/v1/sync')).data.envelopes.some((e) => e.msgId === id), 'quem não está na audiência nem recebe o envelope');
+  assert.equal((await people.bia.post(`/v1/rooms/${C}/messages`, { msgId: msgId(), kind: 'story', envelopes: { intruso0000: fakeCt() } })).status, 400);
+  // Story só existe na conversa do círculo.
+  const g = (await people.admin.post('/v1/rooms', { kind: 'group', members: [people.bia.userId] })).data.roomId;
+  assert.equal((await people.admin.post(`/v1/rooms/${g}/messages`, { msgId: msgId(), kind: 'story', envelopes: { [people.bia.userId]: fakeCt() } })).status, 400);
+  // Apagar antes de vencer: tombstone para a audiência.
+  assert.equal((await people.bia.post(`/v1/rooms/${C}/messages/${id}/delete`)).status, 200);
+  assert.ok((await people.caio.get('/v1/sync')).data.tombstones.some((t) => t.msgId === id));
+});

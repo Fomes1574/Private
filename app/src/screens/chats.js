@@ -18,6 +18,7 @@ export async function chatsScreen(go) {
   };
   mount(h('div', {},
     header('Conversas', { actions: [
+      h('button', { class: 'icon', 'aria-label': 'Stories', text: '◎', onclick: () => go('stories') }),
       h('button', { class: 'icon', 'aria-label': 'Novo grupo', text: '+', onclick: () => go('newGroup') }),
       h('button', { class: 'icon', 'aria-label': 'Ajustes', text: '⚙', onclick: () => go('settings') }),
     ] }),

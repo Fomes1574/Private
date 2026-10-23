@@ -3,7 +3,7 @@
 export const INNER_VERSION = 1;
 
 export const KINDS = new Set([
-  'text', 'reaction', 'edit', 'delete_for_all', 'media', 'policy', 'leader_transfer',
+  'text', 'reaction', 'edit', 'delete_for_all', 'media', 'story', 'policy', 'leader_transfer',
   'nickname_change', 'membership', 'unlink', 'room_profile',
 ]);
 
@@ -79,6 +79,14 @@ export function validateInner(m) {
       if (b.mode === 'once' && !/^(image|video)\//.test(b.mime)) fail('ver uma vez só para foto ou vídeo');
       if (b.caption !== undefined && (typeof b.caption !== 'string' || b.caption.length > 1000 || b.mode === 'once')) fail('legenda');
       if (b.duration !== undefined && !(Number.isSafeInteger(b.duration) && b.duration >= 0 && b.duration <= 3_600_000 + 5_000)) fail('duração');
+      break;
+    }
+    case 'story': {
+      // Story (§22): só foto ou vídeo, legenda opcional; vai na conversa do círculo.
+      const b = m.body;
+      if (!ID.test(b?.mediaId ?? '') || typeof b.key !== 'string' || !/^(image\/(jpeg|webp)|video\/mp4)$/.test(b.mime ?? '')) fail('story');
+      if (b.caption !== undefined && (typeof b.caption !== 'string' || b.caption.length > 1000)) fail('legenda');
+      if (b.duration !== undefined && !(Number.isSafeInteger(b.duration) && b.duration >= 0 && b.duration <= 300_000 + 5_000)) fail('duração');
       break;
     }
     default: break;

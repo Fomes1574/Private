@@ -94,3 +94,11 @@ test('legenda cifrada (não em ver uma vez) e recado de perfil com limite', () =
   assert.ok(p.encodeInner({ ...base, kind: 'nickname_change', body: { nickname: 'Ana', about: 'de férias' } }));
   assert.throws(() => p.encodeInner({ ...base, kind: 'nickname_change', body: { nickname: 'Ana', about: 'x'.repeat(141) } }), /recado/);
 });
+
+test('story: só foto ou vídeo (até 5 min), legenda opcional', () => {
+  const st = (body) => ({ ...base, kind: 'story', body: { mediaId: 'media_0000001', key: 'k', mime: 'image/jpeg', ...body } });
+  assert.ok(p.encodeInner(st({ caption: 'bom dia' })));
+  assert.ok(p.encodeInner(st({ mime: 'video/mp4', duration: 300000 })));
+  for (const mime of ['audio/mp4', 'text/plain;charset=utf-8', 'image/svg+xml']) assert.throws(() => p.encodeInner(st({ mime })), /story/);
+  assert.throws(() => p.encodeInner(st({ mime: 'video/mp4', duration: 400000 })), /duração/);
+});

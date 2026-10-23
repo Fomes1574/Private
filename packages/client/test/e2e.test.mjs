@@ -102,7 +102,7 @@ test('sem tempo confiável nada aparece; vencida some antes de aparecer', async 
   assert.equal((await p.caio.view(room)).blocked, true);
   await p.caio.api.get('/v1/time'); // volta a ter tempo do servidor
   const any = caioView.render[0];
-  await p.caio.store.putMessage({ ...any, expiresAt: Date.now() - 1 });
+  await p.caio.store.putMessage({ ...any, expiresAt: p.caio.api.clock.now() - 1000 }); // vencida pelo relógio confiável
   assert.ok(!(await p.caio.view(room)).render.some((x) => x.msgId === any.msgId));
   assert.ok(!(await p.caio.store.getMessage(any.msgId)), 'vencida destruída no aparelho');
 });
@@ -138,6 +138,26 @@ test('foto de perfil: cifrada, referência só dentro do anúncio; trocar invali
   assert.deepEqual(await p.bia.openVisual(ref2), pic.slice(0, 1000));
   await assert.rejects(p.bia.openVisual({ ...ref2, key: ref.key }), 'chave errada não abre');
   await p.caio.sync();
+});
+
+test('story: só a audiência recebe e abre; apagar antes de vencer some para ela', async () => {
+  await p.bia.sync(); await p.caio.sync();
+  const pic = new Uint8Array(30_000).map((_, i) => (i * 7) % 256);
+  const st = await p.ana.sendStory(pic, { mime: 'image/jpeg', audience: [p.bia.userId], caption: 'bom dia' });
+  assert.equal(st.expiresAt - st.acceptedAt, 24 * 3600_000);
+  await p.bia.sync(); await p.caio.sync();
+  const bs = await p.bia.stories();
+  assert.equal(bs.length, 1);
+  assert.equal(bs[0].body.caption, 'bom dia');
+  assert.deepEqual(await p.bia.openMedia(bs[0]), pic);
+  assert.equal((await p.caio.stories()).length, 0, 'fora da audiência nem fica sabendo');
+  assert.equal((await p.ana.stories()).length, 1, 'quem publicou vê a própria');
+  await assert.rejects(p.ana.sendStory(pic, { mime: 'image/jpeg', audience: ['intruso0000'] }), /audiência/);
+  await p.ana.deleteForAll(CIRCLE_ROOM_ID, st.msgId);
+  await p.ana.api.post(`/v1/media/${st.body.mediaId}/revoke`);
+  await p.bia.sync();
+  assert.equal((await p.bia.stories()).length, 0, 'apagada some');
+  await assert.rejects(p.bia.openMedia(bs[0]), /404/);
 });
 
 test('fechar e reabrir o app: mesma identidade e sessões continuam', async () => {

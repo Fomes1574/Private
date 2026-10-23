@@ -12,9 +12,10 @@ import { chatScreen } from './screens/chat.js';
 import { newGroupScreen } from './screens/new-group.js';
 import { nicknameScreen } from './screens/nickname.js';
 import { settingsScreen } from './screens/settings.js';
+import { storiesScreen } from './screens/stories.js';
 
 const LOCK_AFTER_MS = 60_000; // fora do app por mais de 1 minuto: tranca de verdade
-const routes = { welcome, unlock: unlockScreen, chats: chatsScreen, chat: chatScreen, newGroup: newGroupScreen, nickname: nicknameScreen, settings: settingsScreen };
+const routes = { welcome, unlock: unlockScreen, chats: chatsScreen, chat: chatScreen, newGroup: newGroupScreen, nickname: nicknameScreen, settings: settingsScreen, stories: storiesScreen };
 const open = new Set(['welcome', 'unlock']);
 let cleanup = null;
 
