@@ -27,6 +27,8 @@ function cors(env, request) {
     'access-control-allow-methods': 'GET, POST',
     'access-control-allow-headers': 'authorization, content-type',
     'access-control-max-age': '600',
+    // O app (outra origem) precisa ler o horário do servidor (relógio confiável).
+    'access-control-expose-headers': 'x-mp-time',
     vary: 'origin',
   };
 }

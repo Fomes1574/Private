@@ -17,7 +17,9 @@ const OTK_LOW = 5;
 const newMsgId = () => b64(crypto.getRandomValues(new Uint8Array(12))).replace(/\+/g, '-').replace(/\//g, '_');
 
 export class MessengerClient {
-  constructor({ api, store, pickleKey }) {
+  // onDestroy(ids): chamado sempre que algo é apagado no aparelho, para o app
+  // reconstruir o banco com chave nova (os restos antigos ficam ilegíveis).
+  constructor({ api, store, pickleKey, onDestroy = () => {} }) {
     if (!(pickleKey instanceof Uint8Array) || pickleKey.byteLength !== 32) throw new Error('pickleKey de 32 bytes');
     this.api = api;
     this.store = store;
@@ -25,8 +27,9 @@ export class MessengerClient {
     this.sessions = new Map(); // userId -> [OlmSession] (mais nova primeiro)
     this.warnings = [];
     this.known = {};
-    this.hidden = new Set();
-    this.tombs = new Set();
+    this.hidden = new Map(); // msgId -> quando (apagado para mim)
+    this.tombs = new Map(); // msgId -> quando (apagado para todos)
+    this.onDestroy = onDestroy;
   }
 
   // ---------- identidade do aparelho ----------
@@ -76,8 +79,8 @@ export class MessengerClient {
     const saved = (await this.store.get('sessions')) ?? {};
     for (const [peer, list] of Object.entries(saved)) this.sessions.set(peer, list.map((p) => OlmSession.fromPickle(p, this.pickleKey)));
     this.known = (await this.store.get('directory')) ?? {};
-    this.hidden = new Set((await this.store.get('hiddenForMe')) ?? []);
-    this.tombs = new Set((await this.store.get('tombstones')) ?? []);
+    this.hidden = new Map(Object.entries((await this.store.get('hiddenForMe')) ?? {}));
+    this.tombs = new Map(Object.entries((await this.store.get('tombstones')) ?? {}));
   }
 
   async login() {
@@ -165,17 +168,34 @@ export class MessengerClient {
     return this.sendInner(roomId, 'edit', { target, text, version });
   }
 
+  // Marcas de apagado só precisam durar o prazo máximo de uma mensagem
+  // (15 dias); depois disso nem o id da mensagem apagada fica guardado.
+  static MARK_TTL = 16 * 86_400_000;
+  prune(map, now = Date.now()) {
+    for (const [id, at] of map) if (now - at > MessengerClient.MARK_TTL) map.delete(id);
+    return Object.fromEntries(map);
+  }
+  async saveMarks() {
+    await this.store.put('tombstones', this.prune(this.tombs));
+    await this.store.put('hiddenForMe', this.prune(this.hidden));
+  }
+  async destroy(ids) {
+    if (!ids.length) return;
+    await this.store.deleteMessages(ids);
+    await this.onDestroy(ids);
+  }
+
   async deleteForAll(roomId, msgId) {
     await this.api.post(`/v1/rooms/${roomId}/messages/${msgId}/delete`);
-    this.tombs.add(msgId);
-    await this.store.deleteMessages([msgId]);
-    await this.store.put('tombstones', [...this.tombs]);
+    this.tombs.set(msgId, Date.now());
+    await this.saveMarks();
+    await this.destroy([msgId]);
   }
 
   async deleteForMe(msgId) {
-    this.hidden.add(msgId);
-    await this.store.deleteMessages([msgId]);
-    await this.store.put('hiddenForMe', [...this.hidden]);
+    this.hidden.set(msgId, Date.now());
+    await this.saveMarks();
+    await this.destroy([msgId]);
   }
 
   // ---------- mídia ----------
@@ -219,10 +239,10 @@ export class MessengerClient {
     const acks = { envelopes: [], tombstones: [] };
     // 1) tombstones primeiro: nada apagado chega a aparecer (§12).
     for (const t of res.tombstones) {
-      this.tombs.add(t.msgId);
+      this.tombs.set(t.msgId, Date.now());
       acks.tombstones.push([t.room, t.msgId]);
     }
-    await this.store.deleteMessages(res.tombstones.map((t) => t.msgId));
+    await this.destroy(res.tombstones.map((t) => t.msgId));
     const received = [], rejected = [];
     for (const e of res.envelopes) {
       acks.envelopes.push([e.room, e.msgId]);
@@ -241,7 +261,7 @@ export class MessengerClient {
       }
     }
     await this.persistCrypto(); // estado salvo antes de confirmar
-    await this.store.put('tombstones', [...this.tombs]);
+    await this.saveMarks();
     if (acks.envelopes.length || acks.tombstones.length) await this.api.post('/v1/ack', acks);
     return { received, rejected, tombstones: res.tombstones.length, more: res.more };
   }
@@ -269,7 +289,7 @@ export class MessengerClient {
   async view(roomId) {
     const messages = await this.store.roomMessages(roomId);
     const r = reconcile({ messages, tombstones: this.tombs, hiddenForMe: this.hidden, trustedNow: this.api.clock.now() });
-    if (r.destroy.length) await this.store.deleteMessages(r.destroy);
+    await this.destroy(r.destroy);
     return r;
   }
 }

@@ -8,14 +8,14 @@ import { normalize, searchByPrefix, validNickname } from './packages/protocol/sr
 import { MessengerClient } from './packages/client/src/client.js';
 import { Api } from './packages/client/src/api.js';
 import { EncryptedStore } from './db/store.js';
-import { idbGet, idbPut, idbClear } from './idb.js';
+import { idbGet, idbPut, idbClear, idbPutMany } from './idb.js';
 import * as vault from './vault/vault.js';
 import * as passkey from './vault/passkey.js';
 import * as native from './vault/native.js';
 
 const REANNOUNCE_MS = 7 * 86_400_000;
 const listeners = new Set();
-export const S = { client: null, store: null, clock: null, nicknames: {}, rooms: {}, unlocked: false };
+export const S = { client: null, store: null, clock: null, kek: null, nicknames: {}, rooms: {}, unlocked: false };
 
 export function onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 const emit = (what) => { for (const fn of listeners) { try { fn(what); } catch (e) { console.error(e); } } };
@@ -28,7 +28,42 @@ export const hasVault = async () => !!(await idbGet('vault'));
 
 function makeClient(pickleKey) {
   S.clock = new TrustedClock();
-  return new MessengerClient({ api: new Api(CONFIG.api, S.clock), store: S.store, pickleKey });
+  return new MessengerClient({ api: new Api(CONFIG.api, S.clock), store: S.store, pickleKey, onDestroy: () => scheduleRotate() });
+}
+
+// ---------- os dados morrem (ADR 0012) ----------
+// Depois de qualquer exclusão, o banco inteiro é copiado (só o que ainda vale)
+// para um arquivo novo com DEK nova; o cofre passa a apontar para ele numa
+// gravação atômica; o arquivo antigo é removido. Restos do banco velho ficam
+// cifrados com uma DEK que não existe mais em lugar nenhum.
+const ROTATE_DELAY = 15_000;
+const ROTATE_EVERY = 24 * 3_600_000;
+let rotateTimer = null, rotating = null, dirty = false;
+const newPoolName = () => 'p' + vault.b64(vault.random(9)).replace(/[+/=]/g, '').slice(0, 10);
+
+export function scheduleRotate() {
+  dirty = true;
+  clearTimeout(rotateTimer);
+  rotateTimer = setTimeout(() => rotate().catch((e) => console.error('rotação falhou', e?.message)), ROTATE_DELAY);
+}
+
+export function rotate() {
+  if (!S.unlocked) return Promise.resolve(false);
+  if (!S.kek) return Promise.reject(new Error('sem chave de embrulho em memória: rotação impossível'));
+  return (rotating ??= (async () => {
+    try {
+      clearTimeout(rotateTimer);
+      dirty = false;
+      const rec = await vaultStore.load();
+      const { record, dek } = await vault.rotateDek(rec, S.kek);
+      const name = newPoolName();
+      await S.store.rebuild(dek, name, S.clock?.now() ?? Date.now());
+      await idbPutMany({ vault: record, activePool: name, lastRotate: Date.now() }); // troca atômica
+      await S.store.switchTo(name);
+      emit('rotated');
+      return true;
+    } catch (e) { dirty = true; throw e; } finally { rotating = null; }
+  })());
 }
 
 // ---------- criar cofre + identidade ----------
@@ -46,31 +81,37 @@ export async function createLock({ mode, secret }) {
     prf = reg.prf ?? await passkey.evaluate(credentialId, salt);
     prfSalt = vault.b64(salt);
   }
-  const { record, dek } = await vault.createVault({ mode, prf, secret, credentialId, prfSalt });
+  const { record, dek, kek } = await vault.createVault({ mode, prf, secret, credentialId, prfSalt });
   prf?.fill(0);
-  return { record, dek };
+  return { record, dek, kek };
 }
 
-async function openStore(dek) {
+async function openStore(dek, { fresh = false } = {}) {
   S.store ??= new EncryptedStore();
+  const name = fresh ? newPoolName() : (await idbGet('activePool')) ?? 'a';
+  await S.store.open(name);
+  await S.store.cleanup(name); // restos de uma rotação interrompida
   await S.store.unlock(dek);
+  return name;
 }
 
 // Primeira vez: cofre novo, identidade nova (convite ou instalação).
 export async function enroll({ lock, how, token, setupCode }) {
-  await openStore(lock.dek);
+  const pool = await openStore(lock.dek, { fresh: true });
+  S.kek = lock.kek;
   const pickleKey = vault.random(32);
   await S.store.put('pickleKey', vault.b64(pickleKey));
   S.client = makeClient(pickleKey);
   const r = how === 'bootstrap' ? await S.client.bootstrap(setupCode) : await S.client.redeem(token);
-  await vaultStore.save(lock.record); // só grava o cofre quando a identidade existe
+  await idbPutMany({ vault: lock.record, activePool: pool, lastRotate: Date.now() }); // só grava o cofre quando a identidade existe
   await afterUnlock();
   return r;
 }
 
 // Troca de aparelho (V7-015): o aparelho novo mostra código; o antigo aprova.
 export async function pairStart(lock) {
-  await openStore(lock.dek);
+  lock.pool = await openStore(lock.dek, { fresh: true });
+  S.kek = lock.kek;
   const pickleKey = vault.random(32);
   await S.store.put('pickleKey', vault.b64(pickleKey));
   S.client = makeClient(pickleKey);
@@ -84,7 +125,7 @@ export async function pairPoll({ start, device, lock }) {
   if (st.state !== 'approved') return st.state;
   Object.assign(S.client, { userId: st.userId, deviceId: st.deviceId });
   await S.client.saveDevice();
-  await vaultStore.save(lock.record);
+  await idbPutMany({ vault: lock.record, activePool: lock.pool, lastRotate: Date.now() });
   await afterUnlock();
   return 'approved';
 }
@@ -95,9 +136,10 @@ export async function unlock(secret) {
   const rec = await vaultStore.load();
   let prf = null;
   if (rec?.mode === 'passkey') prf = rec.credentialId === native.NATIVE_ID ? await native.nativeSecret() : await passkey.evaluate(rec.credentialId, vault.unb64(rec.prfSalt));
-  const dek = await vault.openVault(vaultStore, { prf, secret });
+  const { dek, kek } = await vault.openVault(vaultStore, { prf, secret });
   prf?.fill(0);
   await openStore(dek);
+  S.kek = kek;
   const pickleKey = vault.unb64(await S.store.get('pickleKey'));
   S.client = makeClient(pickleKey);
   await S.client.open();
@@ -107,6 +149,7 @@ export async function unlock(secret) {
 async function afterUnlock() {
   await S.client.login();
   S.unlocked = true;
+  if (Date.now() - ((await idbGet('lastRotate')) ?? 0) > ROTATE_EVERY) scheduleRotate();
   S.nicknames = (await S.store.get('nicknames')) ?? {};
   S.rooms = (await S.store.get('rooms')) ?? {};
   await S.client.refreshDirectory();
@@ -118,7 +161,11 @@ async function afterUnlock() {
 // Sair do app esconde na hora e, depois de um tempo, tranca de verdade (§20).
 export async function lock(reason = 'manual') {
   if (!S.unlocked) return;
+  // Algo foi apagado e a rotação ainda não rodou: roda antes de trancar.
+  if (dirty && reason !== 'wipe') await rotate().catch((e) => console.error('rotação falhou', e?.message));
   S.unlocked = false;
+  S.kek = null;
+  clearTimeout(rotateTimer);
   disconnectLive();
   S.client = null;
   await S.store?.lock();
@@ -145,7 +192,7 @@ export function syncNow() {
         await handleExtras(r.received);
         more = r.more;
       }
-      if (S.clock.now()) await S.store.purgeExpired(S.clock.now());
+      if (S.clock.now() && (await S.store.purgeExpired(S.clock.now())) > 0) scheduleRotate();
       await maybeAnnounce();
       emit('synced');
     } finally { syncing = null; }

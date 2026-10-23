@@ -27,3 +27,11 @@ export async function idbClear() {
   tx.objectStore('kv').clear();
   return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
 }
+
+// Grava várias chaves numa transação só (troca atômica de cofre + banco).
+export async function idbPutMany(obj) {
+  const d = await db();
+  const tx = d.transaction('kv', 'readwrite');
+  for (const [k, v] of Object.entries(obj)) tx.objectStore('kv').put(v, k);
+  return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error); });
+}

@@ -22,7 +22,11 @@ export class EncryptedStore {
       this.worker.postMessage({ id, op, arg });
     });
   }
+  open(name) { return this.call('open', { name }); }
   unlock(dek) { return this.call('setKey', dek); }
+  rebuild(newKey, newName, now) { return this.call('rebuild', { newKey, newName, now }); }
+  switchTo(name) { return this.call('switchTo', { name }); }
+  cleanup(keep) { return this.call('cleanup', { keep }); }
   lock() { return this.call('lock'); }
   wipe() { return this.call('wipe'); }
   purgeExpired(now) { return this.call('purgeExpired', now); }

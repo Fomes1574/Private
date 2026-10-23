@@ -5,8 +5,8 @@
 import { isExpired } from './ttl.js';
 
 // messages: [{ msgId, expiresAt, ... }]
-// tombstones: Set de msgId apagados para todos (vindos do servidor)
-// hiddenForMe: Set de msgId apagados só por mim
+// tombstones: Set ou Map com os msgId apagados para todos (vindos do servidor)
+// hiddenForMe: Set ou Map com os msgId apagados só por mim
 // trustedNow: tempo do servidor ou null
 export function reconcile({ messages, tombstones, hiddenForMe, trustedNow }) {
   if (trustedNow == null) {

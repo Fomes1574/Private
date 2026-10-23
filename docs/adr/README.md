@@ -23,3 +23,4 @@ Estados usados: **Aceito** (decisão do proprietário), **Aceito como direção*
 | [0009](0009-gate-online-criptografico.md) | Gate online criptográfico | Bloqueado até revisão | V7-011, P-24 |
 | [0010](0010-banco-local-cifrado.md) | Banco local cifrado | Aceito como direção | P-04 |
 | [0011](0011-interface-sem-framework.md) | Interface em JavaScript puro, sem framework | Provisório | D-074 |
+| [0012](0012-os-dados-morrem.md) | Os dados morrem: apagar de verdade em cada camada | Aceito | §7, §12, pedido do proprietário |

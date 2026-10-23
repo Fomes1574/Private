@@ -91,7 +91,7 @@ test('Ana recebe e responde; horário em Brasília; sem "visto"', async () => {
   assert.equal(await ana.page.textContent('.msg:not(.mine) .text'), 'oi, Ana! tudo cifrado?');
   const time = await ana.page.textContent('.msg:not(.mine) time');
   assert.match(time, /^\d{2}:\d{2}$/);
-  const body = await ana.page.textContent('body');
+  const body = await ana.page.textContent('.chat'); // só a conversa (o aviso do convite diz "Entregue em mão")
   assert.doesNotMatch(body, /visto|entregue|online|digitando/i);
   await ana.page.fill('#composer', 'tudo, Bia 🌙');
   await ana.page.click('[aria-label=Enviar]');
@@ -108,12 +108,30 @@ test('apagar para todos some do outro lado', async () => {
   await ana.page.waitForFunction(() => ![...document.querySelectorAll('.msg .text')].some((e) => e.textContent === 'vou apagar isto'), null, { timeout: 40000 });
 });
 
+const dbDirs = (p) => p.page.evaluate(async () => {
+  const out = [];
+  for await (const [name] of (await navigator.storage.getDirectory()).entries()) if (name.startsWith('.mp-')) out.push(name);
+  return out.sort();
+});
+
 test('bloquear e desbloquear: conversa continua, guardada cifrada no aparelho', async () => {
+  const before = await dbDirs(ana);
+  assert.equal(before.length, 1, `um banco só: ${before}`);
+  // Apaga uma mensagem só para si e tranca logo: a rotação roda antes de trancar.
+  await ana.page.click('.msg.mine >> text=tudo, Bia 🌙');
+  await ana.page.click('text=Apagar para mim');
+  await ana.page.click('.sheet button.danger');
+  await ana.page.waitForFunction(() => ![...document.querySelectorAll('.msg .text')].some((e) => e.textContent === 'tudo, Bia 🌙'));
   await ana.page.click('[aria-label=Voltar]');
   await ana.page.click('[aria-label=Ajustes]');
   await ana.page.click('text=Bloquear agora');
   await ana.page.waitForSelector('#secret');
   assert.equal(await ana.page.$('.msg'), null, 'nada aparece bloqueado');
+  // Houve exclusão: ao trancar, o banco foi refeito com chave nova em outro
+  // arquivo, e o antigo foi removido (ADR 0012).
+  const after = await dbDirs(ana);
+  assert.equal(after.length, 1, `um banco só depois da rotação: ${after}`);
+  assert.notDeepEqual(after, before, 'arquivo do banco trocado');
   await ana.page.fill('#secret', '000001');
   await ana.page.click('text=Desbloquear');
   await ana.page.waitForFunction(() => /PIN errado/.test(document.querySelector('#toast').textContent));
@@ -121,6 +139,9 @@ test('bloquear e desbloquear: conversa continua, guardada cifrada no aparelho', 
   await ana.page.click('text=Desbloquear');
   await ana.page.click('.row-btn .title');
   await ana.page.waitForFunction(() => [...document.querySelectorAll('.msg .text')].some((e) => e.textContent === 'oi, Ana! tudo cifrado?'));
+  assert.ok(!(await ana.page.textContent('.chat')).includes('tudo, Bia 🌙'), 'apagada para mim não volta depois da rotação');
+  // Bia, que não apagou, continua vendo (apagar para mim não afeta os outros).
+  assert.ok((await bia.page.textContent('.chat')).includes('tudo, Bia 🌙'));
   const errs = [...ana.errors, ...bia.errors].filter((e) => !/status of (4\d\d)/.test(e));
   assert.deepEqual(errs, []);
 });

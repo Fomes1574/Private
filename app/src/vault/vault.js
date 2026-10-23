@@ -51,6 +51,16 @@ export async function createVault({ mode, prf, secret, credentialId = null, prfS
   const kek = await deriveKek(r, { prf, secret });
   const tmp = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
   r.wrapped = b64(new Uint8Array(await subtle.wrapKey('raw', tmp, kek, { name: 'AES-GCM', iv: unb64(r.iv), additionalData: aad(r) })));
+  return { record: r, dek: await unwrap(r, kek), kek };
+}
+
+// Troca a chave do banco (rotação, "os dados morrem"): DEK nova e aleatória,
+// embrulhada pela mesma KEK que já está em memória durante a sessão. A DEK
+// antiga deixa de existir em qualquer registro novo.
+export async function rotateDek(record, kek) {
+  const r = { ...record, iv: b64(random(12)), wrapped: null, failures: 0 };
+  const tmp = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+  r.wrapped = b64(new Uint8Array(await subtle.wrapKey('raw', tmp, kek, { name: 'AES-GCM', iv: unb64(r.iv), additionalData: aad(r) })));
   return { record: r, dek: await unwrap(r, kek) };
 }
 
@@ -61,10 +71,11 @@ export async function openVault(store, { prf, secret }) {
   r.failures += 1;
   await store.save(r);
   try {
-    const dek = await unwrap(r, await deriveKek(r, { prf, secret }));
+    const kek = await deriveKek(r, { prf, secret });
+    const dek = await unwrap(r, kek);
     r.failures = 0;
     await store.save(r);
-    return dek;
+    return { dek, kek };
   } catch (e) {
     if (e instanceof Error && e.message === 'PRF ausente') throw e;
     if (r.failures >= MAX_FAILURES) { r.wrapped = null; await store.save(r); throw new VaultWipedError(); }
