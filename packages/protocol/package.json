@@ -1,0 +1,9 @@
+{
+  "name": "@mp/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Regras decididas na especificação v7, sem dependências, usadas pelo app e pelo servidor",
+  "exports": { ".": "./src/index.js", "./*": "./src/*.js" },
+  "scripts": { "test": "node --test test/*.test.mjs" }
+}
