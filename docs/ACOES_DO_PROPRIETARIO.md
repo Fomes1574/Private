@@ -35,6 +35,9 @@ repositório. Marque aqui conforme for fazendo.
 | 4 | **Versão mínima do iOS** | Trusted Types só no Safari 26; PRF estável no 18.4+ | iOS 26 como mínimo (D-070 sugere 26.4) |
 | 5 | **Framework da interface** (D-074 sugere Svelte 5) | Só afeta tamanho e velocidade, não a segurança | Decidir depois das provas |
 | 6 | Aceitar por escrito o **risco pós-quântico** da vodozemac | Exigido pela própria especificação (D-054) | Aceitar e manter o plano de migração do ADR 0003 |
+| 7 | **Prazo padrão das stories** (§22) | A especificação deixou 24 h como candidato | Manter 24 h (já implementado; dá para escolher de 12 h a 15 d em cada story) |
+| 8 | **Formatos de documento além de texto** (P-12) | PDF, Word etc. precisam de visualizador seguro; abrir fora do app quebra "sem exportação" | Ficar só com texto por enquanto; PDF depois, com visualizador próprio isolado |
+| 9 | **Levar o histórico na troca de celular?** | Hoje o celular novo começa do zero (mais seguro) | Manter do zero; mensagens já somem em até 15 dias |
 
 ## Amanhã, ao configurar a Cloudflare
 
