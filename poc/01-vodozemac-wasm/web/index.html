@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; style-src 'self'; img-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0B1220">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="style.css">
+<title>Prova 1 · vodozemac</title>
+</head>
+<body>
+<header>
+  <h1>Prova 1 · vodozemac em WASM</h1>
+  <p id="status">Carregando…</p>
+</header>
+
+<main id="app" hidden>
+  <section class="people">
+    <article class="person" data-who="alice">
+      <h2>Alice</h2>
+      <ol class="log"></ol>
+      <form>
+        <input name="text" autocomplete="off" placeholder="Mensagem para Bob" maxlength="500">
+        <button>Enviar</button>
+      </form>
+    </article>
+    <article class="person" data-who="bob">
+      <h2>Bob <label class="offline"><input type="checkbox" id="bobOffline"> offline</label></h2>
+      <ol class="log"></ol>
+      <form>
+        <input name="text" autocomplete="off" placeholder="Mensagem para Alice" maxlength="500">
+        <button>Enviar</button>
+      </form>
+      <button id="deliver" class="secondary" hidden>Entregar fila (<span id="queued">0</span>)</button>
+    </article>
+  </section>
+
+  <section class="tools">
+    <button id="selftest">Rodar testes automáticos</button>
+    <button id="copy" class="secondary">Copiar relatório</button>
+    <button id="reset" class="danger">Apagar tudo e recomeçar</button>
+  </section>
+
+  <section>
+    <h2>Diagnóstico</h2>
+    <pre id="diag"></pre>
+  </section>
+
+  <details>
+    <summary>Como testar</summary>
+    <ol>
+      <li>Mande mensagens nos dois sentidos.</li>
+      <li>Marque “Bob offline”, mande 2 ou 3 mensagens da Alice (ficam na fila).</li>
+      <li>Feche o app de verdade (deslize para cima no seletor de apps) e abra de novo.</li>
+      <li>O contador “aberturas” deve subir, as identidades devem ser as mesmas, a fila deve continuar lá. Desmarque offline, toque em “Entregar fila” e continue a conversa.</li>
+      <li>Rode os testes automáticos e toque em “Copiar relatório”.</li>
+      <li>Repita instalado na Tela de Início (Compartilhar → Adicionar à Tela de Início).</li>
+    </ol>
+  </details>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
