@@ -42,4 +42,10 @@ as datas.
 - Limite conhecido: o SQLite do Durable Object tem recuperação de 30 dias;
   quem controla a conta Cloudflare poderia restaurar um S apagado. Ainda
   faltariam PIN e passkey.
-- Esquema 1 do banco local é descartado ao abrir (sem usuários ainda).
+- Atualização sem perda: um cofre v1 abre pelo caminho antigo e, já com a
+  sessão aberta, é reembrulhado como v2 (mesma DEK; registra a parte do
+  servidor). Se o registro falhar, continua v1 e tenta de novo no próximo
+  desbloqueio. O banco no esquema 1 é convertido para o esquema 2 numa
+  transação e o arquivo é refeito pela rotação logo em seguida. Nada é
+  apagado no caminho (teste: `app/test/migration.test.mjs`, que instala com
+  o código antigo e atualiza na mesma origem).

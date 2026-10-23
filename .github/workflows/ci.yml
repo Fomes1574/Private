@@ -134,7 +134,8 @@ jobs:
     needs: [cripto-app]
     steps:
       - uses: actions/checkout@v7
-        with: { persist-credentials: false }
+        # Histórico inteiro: o teste de atualização instala com um commit antigo.
+        with: { persist-credentials: false, fetch-depth: 0 }
       - uses: actions/setup-node@v7
         with: { node-version: "22" }
       - run: npm ci

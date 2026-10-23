@@ -112,7 +112,10 @@ async function openStore(dek, { fresh = false } = {}) {
   const name = fresh ? newPoolName() : (await idbGet('activePool')) ?? 'a';
   await S.store.open(name);
   await S.store.cleanup(name); // restos de uma rotação interrompida
-  await S.store.unlock(dek);
+  const r = await S.store.unlock(dek);
+  // Veio do esquema antigo (metadados em claro): refaz o arquivo inteiro com
+  // chave nova assim que der, para não sobrar página antiga no disco.
+  if (r?.migrated) scheduleRotate();
   return name;
 }
 
@@ -173,7 +176,23 @@ export async function unlock(secret) {
   const pickleKey = vault.unb64(await S.store.get('pickleKey'));
   S.client = makeClient(pickleKey);
   await S.client.open();
-  await afterUnlock();
+  await S.client.login();
+  if (opened.upgrade) await upgradeVault(opened);
+  await afterUnlock({ loggedIn: true });
+}
+
+// Cofre antigo (v1) passa a ter a parte do servidor, sem perder nada: a
+// mesma DEK é reembrulhada. Se o servidor ainda não aceitar (API antiga ou
+// sem rede), continua em v1 e tenta de novo no próximo desbloqueio.
+async function upgradeVault(opened) {
+  try {
+    const { record, kek } = await opened.upgrade((b) => S.client.api.post('/v1/vault/register', { ...b, deadDays: DEFAULT_DEAD_DAYS }));
+    await idbPutMany({ vault: record });
+    S.kek = kek;
+  } catch (e) {
+    opened.forget?.();
+    console.error('migração do cofre adiada', e?.message);
+  }
 }
 
 async function afterUnlock({ loggedIn = false } = {}) {

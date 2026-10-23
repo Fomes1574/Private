@@ -100,9 +100,13 @@ export async function rotateDek(record, kek) {
 // Abrir: o servidor confere o verificador e conta os erros (ADR 0014).
 // release(vaultId, verifier) → { share } | { gone } | { wrong, left }; erro
 // de rede vira OfflineError (falha fechada: sem servidor, nada abre).
+// Cofre v1 (antes da parte do servidor): abre do jeito antigo e devolve
+// `upgrade`, que migra para v2 sem perder nada (ver openLegacy).
 export async function openVault(store, { prf, secret, release }) {
   const r = await store.load();
-  if (!r?.wrapped || !r.vaultId) throw new VaultWipedError();
+  if (!r?.wrapped) throw new VaultWipedError();
+  if (r.v === 1) return openLegacy(store, r, { prf, secret });
+  if (!r.vaultId) throw new Error('cofre v2 sem identificador: não mexo em nada');
   const part = await devicePart(r, { prf, secret });
   try {
     const verifier = await verifierOf(part, r);
@@ -118,4 +122,40 @@ export async function openVault(store, { prf, secret, release }) {
     const kek = await kekOf(part, res.share, r);
     return { dek: await unwrap(r, kek), kek };
   } finally { part.fill(0); }
+}
+
+// Cofre v1: KEK = HKDF(PRF ‖ Argon2id(PIN)), erros contados no aparelho (como
+// era). Depois de aberto, `upgrade(register)` cria o registro v2 (mesmo PIN e
+// mesma passkey, sais novos), registra o verificador no servidor, embrulha a
+// MESMA DEK com a KEK nova e devolve { record, kek }. O banco não muda.
+async function openLegacy(store, r, { prf, secret }) {
+  r.failures = (r.failures ?? 0) + 1;
+  await store.save(r); // conta ANTES de tentar (fechar o app não zera)
+  let part = await devicePart(r, { prf, secret });
+  let kek, dekX;
+  try {
+    kek = await hkdf(part, r, `mp/kek/v${r.v}`, 'key');
+    dekX = await subtle.unwrapKey('raw', unb64(r.wrapped), kek, { name: 'AES-GCM', iv: unb64(r.iv), additionalData: aad(r) }, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+  } catch (e) {
+    part.fill(0);
+    if (r.failures >= MAX_FAILURES) { await store.save({ ...r, wrapped: null }); throw new VaultWipedError(); }
+    throw new WrongSecretError();
+  }
+  r.failures = 0;
+  await store.save(r);
+  const dek = await unwrap(r, kek);
+  async function upgrade(register) {
+    const n = { v: VAULT_VERSION, mode: r.mode, credentialId: r.credentialId, prfSalt: r.prfSalt, secretSalt: r.secretSalt, argon: r.argon,
+      hkdfSalt: b64(random(32)), iv: b64(random(12)), wrapped: null, vaultId: null };
+    const reg = await register({ verifier: await verifierOf(part, n) });
+    const kek2 = await kekOf(part, reg.share, n);
+    n.vaultId = reg.vaultId;
+    n.wrapped = b64(new Uint8Array(await subtle.wrapKey('raw', dekX, kek2, { name: 'AES-GCM', iv: unb64(n.iv), additionalData: aad(n) })));
+    // Confere antes de trocar: o novo embrulho abre a mesma chave.
+    await unwrap(n, kek2);
+    forget();
+    return { record: n, kek: kek2 };
+  }
+  function forget() { part?.fill(0); part = null; dekX = null; }
+  return { dek, kek, upgrade, forget };
 }

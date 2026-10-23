@@ -7,7 +7,9 @@ export async function unlockScreen(go, { again = false } = {}) {
   // Já aberta: não redesenha (apagaria o que a pessoa está digitando).
   if (!again && document.querySelector('#secret')) return;
   const rec = await session.vaultStore.load();
-  if (!rec?.wrapped || !rec.vaultId) { await session.wipeEverything().catch(() => {}); return go('welcome'); }
+  // Sem cofre (ou destruído): começa do zero. Cofre antigo (v1, sem a parte
+  // do servidor) NÃO é apagado: abre e migra (vault.js, openLegacy).
+  if (!rec?.wrapped) { if (rec) await session.wipeEverything().catch(() => {}); return go('welcome'); }
   const pk = rec.mode === 'passkey';
   const input = h('input', { id: 'secret', type: 'password', inputmode: pk ? 'numeric' : 'text', autocomplete: 'current-password' });
   const btn = h('button', { class: 'block', text: 'Desbloquear' });

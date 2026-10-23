@@ -38,8 +38,12 @@ async function openDb(name) {
   db.exec('CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL) STRICT;');
   const v = Number(db.selectValue("SELECT v FROM meta WHERE k = 'schema'") ?? 0);
   if (v > SCHEMA) throw new Error('banco de versão mais nova: não fazer downgrade');
-  // Esquema 1 guardava ids e datas em claro: sai inteiro (sem usuários ainda).
-  if (v < 2) db.exec('DROP TABLE IF EXISTS kv; DROP TABLE IF EXISTS messages;');
+  // Esquema 1 guardava ids e datas em claro. NADA é apagado aqui: as tabelas
+  // antigas só mudam de nome e são convertidas quando a chave chega
+  // (setKey → migrateV1); depois o arquivo inteiro é refeito (rotação).
+  if (v === 1 && db.selectValue("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'kv'")) {
+    db.exec('BEGIN; ALTER TABLE kv RENAME TO kv_v1; ALTER TABLE messages RENAME TO messages_v1; DROP INDEX IF EXISTS messages_room; COMMIT;');
+  }
   db.exec(`CREATE TABLE IF NOT EXISTS kv (k BLOB PRIMARY KEY, iv BLOB NOT NULL, ct BLOB NOT NULL) STRICT;
     CREATE TABLE IF NOT EXISTS messages (id BLOB PRIMARY KEY, room BLOB NOT NULL, iv BLOB NOT NULL, ct BLOB NOT NULL) STRICT;
     CREATE INDEX IF NOT EXISTS messages_room ON messages(room);`);
@@ -115,6 +119,37 @@ async function writeAll(db, key, ikey, kv, msgs) {
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 
+// Converte o esquema 1 (ids e datas em claro, sem preenchimento) para o 2,
+// registro por registro, numa transação. Devolve quantos registros migrou.
+async function migrateV1(db) {
+  if (!db.selectValue("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'kv_v1'")) return 0;
+  const openV1 = async (aad, iv, ct) => JSON.parse(dec.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: enc.encode(aad) }, needKey(), ct)));
+  const kv = [], msgs = [];
+  for (const r of db.selectObjects('SELECT k, iv, ct FROM kv_v1')) kv.push([r.k, await openV1(`mp/app/kv/v1/${r.k}`, r.iv, r.ct)]);
+  for (const r of db.selectObjects('SELECT id, room, iv, ct FROM messages_v1')) {
+    try { msgs.push(await openV1(`mp/app/msg/v1/${r.id}/${r.room}`, r.iv, r.ct)); } catch { /* ilegível: não migra */ }
+  }
+  const rows = [];
+  for (const [k, v] of kv) {
+    const kb = await blind(`kv/${k}`);
+    rows.push(['kv', kb, null, await seal(kvAad(kb), { _k: k, v })]);
+  }
+  for (const m of msgs) {
+    const idb = await blind(`m/${m.msgId}`), roomb = await blind(`r/${m.room}`);
+    rows.push(['m', idb, roomb, await seal(msgAad(idb, roomb), m)]);
+  }
+  db.exec('BEGIN');
+  try {
+    for (const [t, a, b, { iv, ct }] of rows) {
+      if (t === 'kv') db.exec({ sql: 'INSERT OR REPLACE INTO kv(k, iv, ct) VALUES (?, ?, ?)', bind: [a, iv, ct] });
+      else db.exec({ sql: 'INSERT OR REPLACE INTO messages(id, room, iv, ct) VALUES (?, ?, ?, ?)', bind: [a, b, iv, ct] });
+    }
+    db.exec('DROP TABLE kv_v1; DROP TABLE messages_v1;');
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return kv.length + msgs.length;
+}
+
 let staged = null; // { name, db, key, idx } esperando a troca
 
 const ops = {
@@ -123,7 +158,11 @@ const ops = {
     active = { name, db: await openDb(name) };
     return true;
   },
-  async setKey(k) { dek = k; idx = await loadIdx(needDb(), k); return true; },
+  async setKey(k) {
+    dek = k;
+    idx = await loadIdx(needDb(), k);
+    return { migrated: await migrateV1(needDb()) };
+  },
   lock() { dek = null; idx = null; return true; },
 
   async kvGet(k) {
