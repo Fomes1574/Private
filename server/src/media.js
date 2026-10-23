@@ -71,6 +71,14 @@ export class MediaBox extends DurableObject {
     return { ok: true, ...info, last: this.pending() === 0 };
   }
 
+  // Para a cota de documentos: o servidor usa o que ELE registrou, nunca o
+  // que o cliente diz sobre dono, conversa, tamanho ou prazo.
+  describe() {
+    const m = this.meta();
+    if (!m.state) return { error: 'gone' };
+    return { mode: m.mode, room: m.room, sender: m.sender, size: m.size ?? 0, expiresAt: m.expiresAt, state: m.state };
+  }
+
   readChunk(i) { return this.sql.exec('SELECT data FROM chunks WHERE i = ?', i).one().data; }
 
   async purgeIfDone() {

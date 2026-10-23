@@ -134,6 +134,31 @@ export class Room extends DurableObject {
     return { acceptedAt, expiresAt, recipients: to };
   }
 
+  // Identidade removida do círculo sai de todas as conversas (sem precisar
+  // da líder). Se era a líder, a sucessão segue a regra de sempre.
+  async systemRemove(userId) {
+    const s = this.load();
+    if (!s || !isMember(s, userId)) return { ok: true };
+    let next;
+    if (s.kind === 'direct') {
+      // 1:1 com alguém removido do círculo: encerra (como desfazer vínculo).
+      next = { ...s, closed: true, closedBy: userId, members: new Map(s.members) };
+      next.members.set(userId, { ...s.members.get(userId), active: false });
+    } else {
+      next = apply(s, { type: 'leave', actor: userId });
+    }
+    this.save(next);
+    this.sql.exec('INSERT INTO events(at, actor, json) VALUES (?, ?, ?)', Date.now(), userId, JSON.stringify({ type: 'removed_from_circle' }));
+    await this.syncMembership(s, next);
+    return { ok: true };
+  }
+
+  async messageOwner(msgId) {
+    const s = this.load();
+    if (!s) return null;
+    return this.env.DB.prepare('SELECT sender FROM messages WHERE room = ? AND msg_id = ?').bind(s.roomId, msgId).first('sender');
+  }
+
   // Apagar para todos: só o autor (V7-010), ou o sistema quando o 4º documento
   // revoga o mais antigo (V6-020). Revoga entrega na hora e deixa tombstone.
   async deleteForAll(actor, msgId, { system = false } = {}) {

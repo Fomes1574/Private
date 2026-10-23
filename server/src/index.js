@@ -1,6 +1,6 @@
 // Worker da API (Arquitetura A, ADR 0004). Toda decisão que precisa ser
 // atômica fica num Durable Object; aqui só roteamento, autenticação e limites.
-import { json, fail, readJson, HttpError, unwrap, randomId, assertId, SECURITY_HEADERS } from './http.js';
+import { json, fail, readJson, HttpError, unwrap, randomId, assertId, sameBytes, SECURITY_HEADERS } from './http.js';
 import { CHUNK } from './media.js';
 import { MAX_DOC_BYTES } from '../../packages/protocol/src/documents.js';
 
@@ -56,7 +56,7 @@ route('GET', '/v1/time', async () => json(200, { now: Date.now() }), { open: tru
 route('POST', '/v1/bootstrap', async ({ env, request }) => {
   const body = await readJson(request);
   // SETUP_CODE é um segredo de uso único criado pelo proprietário.
-  if (!env.SETUP_CODE || env.SETUP_CODE.length < 16 || body.setupCode !== env.SETUP_CODE) throw new HttpError(401, 'unauthorized');
+  if (!env.SETUP_CODE || env.SETUP_CODE.length < 16 || typeof body.setupCode !== 'string' || !sameBytes(body.setupCode, env.SETUP_CODE)) throw new HttpError(401, 'unauthorized');
   return json(201, unwrap(await circle(env).bootstrap({ device: body.device })));
 }, { open: true });
 
@@ -104,7 +104,17 @@ route('POST', '/v1/admin/freeze', async ({ env, request, me }) => {
   const b = await readJson(request);
   return json(200, unwrap(await circle(env).freeze(me, assertId(b.userId), b.frozen !== false)));
 });
-route('POST', '/v1/admin/remove', async ({ env, request, me }) => json(200, unwrap(await circle(env).removeIdentity(me, assertId((await readJson(request)).userId)))));
+route('POST', '/v1/admin/remove', async ({ env, ctx, request, me }) => {
+  const userId = assertId((await readJson(request)).userId);
+  unwrap(await circle(env).removeIdentity(me, userId));
+  const { results } = await env.DB.prepare('SELECT room FROM room_members WHERE user_id = ?').bind(userId).all();
+  for (const { room: rid } of results) {
+    const r = room(env, rid);
+    await r.systemRemove(userId);
+    ctx.waitUntil(r.mediaIds().then((ids) => Promise.all(ids.map((id) => media(env, id).revokeMember(userId)))));
+  }
+  return json(200, { ok: true, rooms: results.length });
+});
 route('GET', '/v1/security-events', async ({ env, url }) => json(200, { events: await circle(env).securityEvents(Number(url.searchParams.get('after')) || 0) }));
 route('GET', '/v1/push/key', async ({ env }) => json(200, { key: env.VAPID_PUBLIC ?? null }));
 route('POST', '/v1/push', async ({ env, request, me }) => json(200, unwrap(await circle(env).setPush(me.deviceId, (await readJson(request)).endpoint ?? null))));
@@ -169,40 +179,81 @@ route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/media', async ({ env, request, me
   const max = mode === 'doc' ? MAX_DOC_BYTES + 64 * 1024 : MAX_MEDIA_BYTES;
   if (!(len > 0 && len <= max)) throw new HttpError(413, 'too_large');
   const plan = unwrap(await room(env, p[1]).mediaPlan(me.userId, mode));
-  const body = new Uint8Array(await request.arrayBuffer());
-  if (body.byteLength !== len) throw new HttpError(400, 'bad_length');
   const mediaId = randomId(16);
   const box = media(env, mediaId);
   const expiresAt = Date.now() + plan.ttl * 1000;
   unwrap(await box.create({ mediaId, mode, room: p[1], sender: me.userId, recipients: plan.recipients, expiresAt, backend: env.BLOB_BACKEND }));
-  let count = 0;
-  if (env.BLOB_BACKEND === 'r2') await env.MEDIA.put(`m/${mediaId}`, body);
-  else for (let off = 0; off < body.byteLength; off += CHUNK) unwrap(await box.putChunk(count++, body.subarray(off, off + CHUNK)));
-  unwrap(await box.seal({ count, size: body.byteLength }));
+  let count = 0, size = 0;
+  try {
+  if (env.BLOB_BACKEND === 'r2') {
+    const obj = await env.MEDIA.put(`m/${mediaId}`, request.body);
+    size = obj.size;
+  } else {
+    // Lê em fluxo e manda pedaços de 1,9 MB: memória do Worker fica pequena.
+    let buf = new Uint8Array(CHUNK), fill = 0;
+    const reader = request.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      let off = 0;
+      while (off < value.byteLength) {
+        const n = Math.min(CHUNK - fill, value.byteLength - off);
+        buf.set(value.subarray(off, off + n), fill);
+        fill += n; off += n; size += n;
+        if (size > len) throw new HttpError(400, 'bad_length');
+        if (fill === CHUNK) { unwrap(await box.putChunk(count++, buf)); buf = new Uint8Array(CHUNK); fill = 0; }
+      }
+    }
+    if (fill) unwrap(await box.putChunk(count++, buf.subarray(0, fill)));
+  }
+  if (size !== len) throw new HttpError(400, 'bad_length');
+  } catch (e) {
+    // Upload incompleto não fica guardado esperando o prazo: apaga já.
+    await box.revokeAll(me.userId).catch(() => null);
+    throw e;
+  }
+  unwrap(await box.seal({ count, size }));
   await room(env, p[1]).addMedia(me.userId, mediaId, expiresAt);
   return json(201, { mediaId, expiresAt });
 });
-route('POST', '/v1/media/([A-Za-z0-9_-]{8,64})/open', async ({ env, me, p }) => {
+route('POST', '/v1/media/([A-Za-z0-9_-]{8,64})/open', async ({ env, ctx, me, p }) => {
   const box = media(env, p[1]);
   const r = unwrap(await box.open(me.userId));
-  let bytes;
+  const headers = { 'content-type': 'application/octet-stream', 'content-length': String(r.size), ...SECURITY_HEADERS };
   if (r.backend === 'r2') {
     const obj = await env.MEDIA.get(`m/${r.mediaId}`);
     if (!obj) throw new HttpError(404, 'gone');
-    bytes = new Uint8Array(await obj.arrayBuffer());
-  } else {
-    bytes = new Uint8Array(r.size);
-    for (let i = 0, off = 0; i < r.count; i++) { const c = new Uint8Array(await box.readChunk(i)); bytes.set(c, off); off += c.byteLength; }
+    const [a, b] = obj.body.tee();
+    if (r.last) ctx.waitUntil(new Response(b).arrayBuffer().then(() => box.purgeIfDone()));
+    else b.cancel();
+    return new Response(a, { headers });
   }
-  if (r.last) await box.purgeIfDone();
-  return new Response(bytes, { headers: { 'content-type': 'application/octet-stream', ...SECURITY_HEADERS } });
+  // Entrega pedaço por pedaço; o último consumo apaga ao terminar.
+  let i = 0;
+  const stream = new ReadableStream({
+    async pull(controller) {
+      if (i >= r.count) {
+        controller.close();
+        if (r.last) ctx.waitUntil(box.purgeIfDone());
+        return;
+      }
+      controller.enqueue(new Uint8Array(await box.readChunk(i++)));
+    },
+  });
+  return new Response(stream, { headers });
 });
 route('POST', '/v1/media/([A-Za-z0-9_-]{8,64})/revoke', async ({ env, me, p }) => json(200, unwrap(await media(env, p[1]).revokeAll(me.userId))));
 
 // Documento publicado: cota global de 3 por pessoa (V6-019, V6-020).
 route('POST', '/v1/docs/publish', async ({ env, ctx, request, me }) => {
   const b = await readJson(request);
-  const doc = { docId: assertId(b.mediaId), room: assertId(b.room), msgId: assertId(b.msgId), size: Number(b.size), expiresAt: Number(b.expiresAt) };
+  const mediaId = assertId(b.mediaId), msgId = assertId(b.msgId);
+  // Tudo conferido no servidor: o documento é meu, é documento, está na
+  // conversa da mensagem, e a mensagem também é minha.
+  const info = unwrap(await media(env, mediaId).describe());
+  if (info.mode !== 'doc' || info.sender !== me.userId || info.state !== 'active') throw new HttpError(403, 'forbidden');
+  if ((await room(env, info.room).messageOwner(msgId)) !== me.userId) throw new HttpError(403, 'forbidden');
+  const doc = { docId: mediaId, room: info.room, msgId, size: info.size, expiresAt: info.expiresAt };
   const r = unwrap(await quota(env, me.userId).publish(me.userId, doc));
   // Limpeza física depois da transição lógica: mídia e tombstone para todos.
   for (const ev of r.evicted) {

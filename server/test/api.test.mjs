@@ -214,7 +214,7 @@ test('limpeza periódica apaga envelopes vencidos (e o filtro já não entregava
   await people.admin.post(`/v1/rooms/${roomId}/messages`, { msgId: id, kind: 'text', envelopes: { [people.bia.userId]: fakeCt() } });
   d1(api.persist, `UPDATE envelopes SET expires_at = 1 WHERE msg_id = '${id}'`);
   assert.ok(!(await people.bia.get('/v1/sync')).data.envelopes.some((e) => e.msgId === id), 'vencido não é entregue');
-  await fetch(`${api.base}/__scheduled?cron=*/15+*+*+*+*`);
+  await (await fetch(`${api.base}/__scheduled?cron=*/15+*+*+*+*`)).text(); // ler o corpo libera a conexão
   const left = JSON.parse(d1(api.persist, `SELECT count(*) AS n FROM envelopes WHERE msg_id = '${id}'`))[0].results[0].n;
   assert.equal(left, 0);
 });
@@ -226,4 +226,42 @@ test('CORS só para a origem do app; horário do servidor em toda resposta', asy
   assert.equal(bad.headers.get('access-control-allow-origin'), null);
   assert.ok(Number(ok.headers.get('x-mp-time')) > 0);
   assert.equal(ok.headers.get('cache-control'), 'no-store');
+});
+
+test('documento: não dá para "publicar" o documento de outra pessoa', async () => {
+  const up = await people.admin.post(`/v1/rooms/${roomId}/media?mode=doc`, new Uint8Array(500));
+  const m = msgId();
+  await people.admin.post(`/v1/rooms/${roomId}/messages`, { msgId: m, kind: 'media', envelopes: { [people.bia.userId]: fakeCt() } });
+  // bia tenta registrar como dela o documento e a mensagem da administradora
+  const r = await people.bia.post('/v1/docs/publish', { mediaId: up.data.mediaId, room: roomId, msgId: m, size: 1, expiresAt: 1 });
+  assert.equal(r.status, 403);
+  // mídia comum também não vira documento
+  const normal = await people.bia.post(`/v1/rooms/${roomId}/media?mode=media`, new Uint8Array(10));
+  const m2 = msgId();
+  await people.bia.post(`/v1/rooms/${roomId}/messages`, { msgId: m2, kind: 'media', envelopes: { [people.admin.userId]: fakeCt() } });
+  assert.equal((await people.bia.post('/v1/docs/publish', { mediaId: normal.data.mediaId, room: roomId, msgId: m2 })).status, 403);
+});
+
+test('upload com tamanho mentido é recusado e não fica guardado', async () => {
+  const r = await fetch(`${api.base}/v1/rooms/${roomId}/media?mode=media`, {
+    method: 'POST', body: new Uint8Array(100), headers: { authorization: `Bearer ${people.admin.token}`, 'content-length': '100' },
+  });
+  assert.equal(r.status, 201);
+  // tamanho declarado acima do limite
+  const big = await fetch(`${api.base}/v1/rooms/${roomId}/media?mode=doc`, {
+    method: 'POST', body: new Uint8Array(10), headers: { authorization: `Bearer ${people.admin.token}`, 'content-length': String(30 * 1024 * 1024) },
+  }).catch(() => ({ status: 'erro' }));
+  assert.notEqual(big.status, 201);
+});
+
+test('remover do círculo tira a pessoa das conversas', async () => {
+  const dir = (await people.admin.get('/v1/directory')).data.members;
+  const victim = dir.find((m) => ![people.admin.userId, people.bia.userId, people.caio.userId].includes(m.userId));
+  const g = await people.admin.post('/v1/rooms', { kind: 'group', members: [people.bia.userId, victim.userId] });
+  assert.equal((await people.admin.post('/v1/admin/remove', { userId: victim.userId })).status, 200);
+  const view = await people.admin.get(`/v1/rooms/${g.data.roomId}`);
+  assert.equal(view.data.members.find((m) => m.userId === victim.userId).active, false);
+  // fan-out agora sem a pessoa removida
+  const r = await people.admin.post(`/v1/rooms/${g.data.roomId}/messages`, { msgId: msgId(), kind: 'text', envelopes: { [people.bia.userId]: fakeCt() } });
+  assert.equal(r.status, 201);
 });
