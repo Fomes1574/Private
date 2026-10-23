@@ -43,8 +43,8 @@ echo "$UI" | grep -qE 'Tenho um convite|Instalar a primeira pessoa|Primeira inst
 pidof_app=$(adb shell pidof "$PKG" || true)
 [ -n "$pidof_app" ] || fail "app fechou sozinho"
 
-# 4) FLAG_SECURE: a janela é segura e o print sai preto.
-adb shell dumpsys window windows | grep -A30 "$PKG" | grep -qE 'fl=.*SECURE|FLAG_SECURE' || fail "janela sem FLAG_SECURE"
+# 4) FLAG_SECURE. Primeiro o efeito (o print sai preto), depois a flag na
+# janela da MainActivity (não a da tela de abertura, que é outra janela).
 adb exec-out screencap > /tmp/tela.raw
 node -e '
   const b = require("fs").readFileSync("/tmp/tela.raw");
@@ -57,6 +57,10 @@ node -e '
   console.log(`print: ${w}x${h}, pixels acesos no meio: ${(100 * lit / n).toFixed(2)}%`);
   if (lit / n > 0.01) process.exit(1);
 ' || fail "print da tela mostrou o conteúdo"
+WIN=$(adb shell dumpsys window windows | awk -v a="$PKG/com.mensageiro.privado.MainActivity" '/Window #/{p=index($0,a)>0} p')
+echo "janela: $(echo "$WIN" | grep -m1 -E '^[[:space:]]*fl=|[[:space:]]fl=' | tr -s ' ')"
+[ -n "$WIN" ] || fail "janela da MainActivity não encontrada no dumpsys"
+echo "$WIN" | grep -q 'SECURE' || fail "janela da MainActivity sem FLAG_SECURE"
 
 # 5) Sem porta de depuração do WebView aberta.
 adb shell cat /proc/net/unix | grep -q "webview_devtools_remote_$pidof_app" && fail "depuração do WebView ligada"
