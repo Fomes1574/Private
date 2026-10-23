@@ -37,3 +37,10 @@ CREATE TABLE tombstones (
   PRIMARY KEY (recipient, room, msg_id)
 ) WITHOUT ROWID;
 CREATE INDEX tombstones_exp ON tombstones(expires_at);
+
+-- Quem está em qual conversa (necessário para rotear; IDs opacos, sem nomes).
+CREATE TABLE room_members (
+  user_id TEXT NOT NULL,
+  room TEXT NOT NULL,
+  PRIMARY KEY (user_id, room)
+) WITHOUT ROWID;

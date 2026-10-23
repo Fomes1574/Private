@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS challenges (nonce TEXT PRIMARY KEY, device_id TEXT NO
 CREATE TABLE IF NOT EXISTS otks (device_id TEXT NOT NULL, key_id TEXT NOT NULL, key TEXT NOT NULL, PRIMARY KEY (device_id, key_id));
 CREATE TABLE IF NOT EXISTS fallback_keys (device_id TEXT PRIMARY KEY, key_id TEXT NOT NULL, key TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pairings (pairing_id TEXT PRIMARY KEY, code_hash TEXT NOT NULL, auth_pub TEXT NOT NULL, curve TEXT NOT NULL,
-  ed TEXT NOT NULL, expires_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0);
+  ed TEXT NOT NULL, keys_json TEXT NOT NULL DEFAULT '{}', expires_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS recoveries (user_id TEXT PRIMARY KEY, state TEXT NOT NULL, by_admin TEXT, by_guardian TEXT,
   wait_until INTEGER, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS push_subs (device_id TEXT PRIMARY KEY, endpoint TEXT NOT NULL);
@@ -228,10 +228,9 @@ export class Circle extends DurableObject {
     if (this.one('SELECT count(*) AS n FROM pairings').n > 20) return { error: 'rate_limited' };
     const pairingId = randomId(12);
     const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 100_000_000).padStart(8, '0');
-    this.sql.exec('INSERT INTO pairings(pairing_id, code_hash, auth_pub, curve, ed, expires_at) VALUES (?, ?, ?, ?, ?, ?)',
-      pairingId, await sha256b64(code), device.authPub, device.curve, device.ed, this.now() + PAIRING_TTL);
-    this._pendingKeys ??= new Map();
-    this._pendingKeys.set(pairingId, { otks: device.otks, fallback: device.fallback });
+    this.sql.exec('INSERT INTO pairings(pairing_id, code_hash, auth_pub, curve, ed, keys_json, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      pairingId, await sha256b64(code), device.authPub, device.curve, device.ed,
+      JSON.stringify({ otks: device.otks ?? {}, fallback: device.fallback ?? null }).slice(0, 16_000), this.now() + PAIRING_TTL);
     return { pairingId, code, expiresAt: this.now() + PAIRING_TTL };
   }
 
@@ -246,7 +245,8 @@ export class Circle extends DurableObject {
     this.sql.exec('DELETE FROM pairings WHERE pairing_id = ?', pairingId);
     // Atômico: novo ativo e antigo revogado na mesma operação (§25.5).
     this.revokeDevicesOf(actor.userId);
-    const keys = this._pendingKeys?.get(pairingId) ?? {};
+    let keys = {};
+    try { keys = JSON.parse(p.keys_json); } catch {}
     const deviceId = this.addDevice(actor.userId, { authPub: p.auth_pub, curve: p.curve, ed: p.ed, ...keys });
     this.event('device_changed', actor.userId);
     return { userId: actor.userId, deviceId };
@@ -333,6 +333,18 @@ export class Circle extends DurableObject {
     try { u = new URL(endpoint); } catch { return { error: 'bad_endpoint' }; }
     if (u.protocol !== 'https:') return { error: 'bad_endpoint' };
     this.sql.exec('INSERT OR REPLACE INTO push_subs(device_id, endpoint) VALUES (?, ?)', deviceId, endpoint);
+    return { ok: true };
+  }
+  pushTargetsByUser(userIds) {
+    const out = {};
+    if (!userIds.length) return out;
+    const rows = this.q(`SELECT d.user_id, p.endpoint FROM push_subs p JOIN devices d ON d.device_id = p.device_id
+      WHERE d.state = 'active' AND d.user_id IN (${userIds.map(() => '?').join(',')})`, ...userIds);
+    for (const r of rows) (out[r.user_id] ??= []).push(r.endpoint);
+    return out;
+  }
+  dropPushEndpoints(endpoints) {
+    for (const e of endpoints) this.sql.exec('DELETE FROM push_subs WHERE endpoint = ?', e);
     return { ok: true };
   }
   pushTargets(userIds) {

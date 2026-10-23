@@ -1,0 +1,64 @@
+name: deploy-api
+
+# Publica a API (server/). Só à mão e só quando o app existir; ver
+# docs/CLOUDFLARE_PASSO_A_PASSO.md, seção "API".
+on:
+  workflow_dispatch:
+    inputs:
+      confirmar:
+        description: 'Digite PUBLICAR-API para publicar'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event.inputs.confirmar == 'PUBLICAR-API'
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: server } }
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v7
+        with: { node-version: "22" }
+      - name: Conferir segredos e variáveis
+        env:
+          SETUP_CODE: ${{ secrets.MP_SETUP_CODE }}
+          APP_ORIGIN: ${{ vars.MP_APP_ORIGIN }}
+        run: |
+          [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "Faltam segredos da Cloudflare"; exit 1; }
+          [ ${#SETUP_CODE} -ge 16 ] || { echo "MP_SETUP_CODE precisa de 16+ caracteres"; exit 1; }
+          case "$APP_ORIGIN" in https://*) ;; *) echo "MP_APP_ORIGIN precisa ser https://..."; exit 1;; esac
+      - run: npm ci
+      - name: Testes antes de publicar
+        run: npm test
+      - name: Banco D1 (cria se não existir) e migrações
+        run: |
+          id=$(npx wrangler d1 list --json | node -e 'const l=JSON.parse(require("fs").readFileSync(0));const d=l.find(x=>x.name==="mp-db");process.stdout.write(d?d.uuid:"")')
+          if [ -z "$id" ]; then npx wrangler d1 create mp-db >/dev/null; id=$(npx wrangler d1 list --json | node -e 'const l=JSON.parse(require("fs").readFileSync(0));process.stdout.write(l.find(x=>x.name==="mp-db").uuid)'); fi
+          sed -i "s/^database_id = .*/database_id = \"$id\"/" wrangler.toml
+          npx wrangler d1 migrations apply mp-db --remote
+      - name: Publicar
+        env:
+          APP_ORIGIN: ${{ vars.MP_APP_ORIGIN }}
+        run: npx wrangler deploy --var APP_ORIGIN:"$APP_ORIGIN" --var VAPID_SUBJECT:"$APP_ORIGIN"
+      - name: Segredos do Worker (VAPID gerado uma vez, sem aparecer no log)
+        env:
+          SETUP_CODE: ${{ secrets.MP_SETUP_CODE }}
+        run: |
+          printf '%s' "$SETUP_CODE" | npx wrangler secret put SETUP_CODE
+          if ! npx wrangler secret list | grep -q VAPID_PRIVATE_JWK; then
+            node vapid-keys.mjs > /tmp/v.json
+            node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync("/tmp/v.json")).jwk))' | npx wrangler secret put VAPID_PRIVATE_JWK
+            node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("/tmp/v.json")).pub)' | npx wrangler secret put VAPID_PUBLIC
+            shred -u /tmp/v.json
+          fi

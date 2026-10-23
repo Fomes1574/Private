@@ -1,0 +1,11 @@
+{
+  "name": "mp-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler d1 migrations apply mp-db --local && wrangler dev --local --port 8791",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "check": "wrangler deploy --dry-run --outdir .wrangler/dry"
+  },
+  "devDependencies": { "wrangler": "4.149.0" }
+}

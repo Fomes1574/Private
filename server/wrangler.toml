@@ -1,0 +1,47 @@
+# API do Mensageiro Privado (Arquitetura A). Origem separada do app (ADR 0004).
+name = "mp-api"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = true
+preview_urls = false
+
+# Sem logs de requisição (ADR 0008).
+[observability]
+enabled = false
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[vars]
+BLOB_BACKEND = "do"
+# Origem do app (CORS). Trocar pelo endereço definitivo antes do uso real (P-07).
+APP_ORIGIN = "http://localhost:8792"
+VAPID_SUBJECT = "http://localhost:8792"
+# Segredos (wrangler secret put): SETUP_CODE, VAPID_PRIVATE_JWK, VAPID_PUBLIC.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mp-db"
+# Preenchido pelo workflow de deploy depois de criar o banco.
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[durable_objects.bindings]]
+name = "CIRCLE"
+class_name = "Circle"
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+[[durable_objects.bindings]]
+name = "MEDIA_BOX"
+class_name = "MediaBox"
+[[durable_objects.bindings]]
+name = "DOC_QUOTA"
+class_name = "DocQuota"
+[[durable_objects.bindings]]
+name = "LIVE"
+class_name = "Live"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Circle", "Room", "MediaBox", "DocQuota", "Live"]

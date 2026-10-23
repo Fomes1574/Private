@@ -41,3 +41,13 @@ No repositório: **Settings → Secrets and variables → Actions → New reposi
 ## O que o token permite e o que não permite
 Ele publica Workers na sua conta. Não lê DNS, não mexe em cobrança, não cria
 R2. Se vazar: apague em **API Tokens** e crie outro.
+
+## Depois: API do app (não é para amanhã)
+Quando o app existir, a API (`server/`) é publicada por **Actions → deploy-api**.
+Ela precisa, a mais:
+- no token da Cloudflare, a permissão **Account → D1 → Edit**;
+- segredo `MP_SETUP_CODE` (16+ caracteres; você usa uma vez para criar a
+  primeira pessoa, a administradora);
+- variável (não segredo) `MP_APP_ORIGIN` com o endereço `https://` do app.
+As chaves de push (VAPID) são geradas pelo próprio workflow e vão direto para
+o Worker; ninguém precisa ver a privada.
