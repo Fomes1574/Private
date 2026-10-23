@@ -207,8 +207,8 @@ async function handleExtras(received) {
       changed = true;
     }
     if (m.kind === 'room_profile') {
-      const view = await roomView(m.room, true);
-      if (view?.leader === m.sender) { S.rooms[m.room] = { ...(S.rooms[m.room] ?? {}), title: m.body.title }; changed = true; }
+      // Nome do grupo só da líder confirmada de ponta a ponta (não do servidor).
+      if (S.client.trusted[m.room]?.leader === m.sender) { S.rooms[m.room] = { ...(S.rooms[m.room] ?? {}), title: m.body.title }; changed = true; }
     }
     if (m.room !== CIRCLE_ROOM_ID && !S.rooms[m.room]) { S.rooms[m.room] = {}; changed = true; }
   }

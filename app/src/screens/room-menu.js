@@ -38,20 +38,24 @@ export async function roomMenu(go, roomId) {
     if (c === 'add') {
       const out = Object.entries(S.nicknames).filter(([u]) => !active.some((m) => m.userId === u));
       const u = await choiceSheet('Adicionar quem? A pessoa não vê nada do que veio antes.', out.map(([u, n]) => ({ label: n.nickname, value: u })));
-      if (u) { await session.roomEvent(roomId, { type: 'add_member', member: u }); return 'refresh'; }
+      if (u) { const nv = await session.roomEvent(roomId, { type: 'add_member', member: u }); await S.client.announceMembership(roomId, nv); return 'refresh'; }
       return;
     }
     if (c === 'remove') {
       const u = await choiceSheet('Remover quem?', active.filter((m) => m.userId !== me).map((m) => ({ label: session.nameOf(m.userId), value: m.userId, danger: true })));
-      if (u && await confirmSheet(`Remover ${session.nameOf(u)}? Perde o acesso ao que ainda não abriu.`, 'Remover')) { await session.roomEvent(roomId, { type: 'remove_member', member: u }); return 'refresh'; }
+      if (u && await confirmSheet(`Remover ${session.nameOf(u)}? Perde o acesso ao que ainda não abriu.`, 'Remover')) { const nv = await session.roomEvent(roomId, { type: 'remove_member', member: u }); await S.client.announceMembership(roomId, nv); return 'refresh'; }
       return;
     }
     if (c === 'transfer') {
       const u = await choiceSheet('Ceder a liderança para quem? Não dá para desfazer.', active.filter((m) => m.userId !== me).map((m) => ({ label: session.nameOf(m.userId), value: m.userId })));
-      if (u && await confirmSheet(`Ceder a liderança para ${session.nameOf(u)}? Você perde o posto.`, 'Ceder')) { await session.roomEvent(roomId, { type: 'transfer_leader', to: u }); return 'refresh'; }
+      if (u && await confirmSheet(`Ceder a liderança para ${session.nameOf(u)}? Você perde o posto.`, 'Ceder')) { const nv = await session.roomEvent(roomId, { type: 'transfer_leader', to: u }); await S.client.announceMembership(roomId, nv); return 'refresh'; }
       return;
     }
-    if (c === 'leave' && await confirmSheet('Sair do grupo? Se você for a líder, assume quem entrou primeiro.', 'Sair')) { await session.roomEvent(roomId, { type: 'leave' }); return go('chats'); }
+    if (c === 'leave' && await confirmSheet('Sair do grupo? Se você for a líder, assume quem entrou primeiro.', 'Sair')) {
+      if (leader) await S.client.announceMembership(roomId, v, { leaving: true }); // passa a liderança cifrada antes de sair
+      await session.roomEvent(roomId, { type: 'leave' });
+      return go('chats');
+    }
     if (c === 'unlink' && await confirmSheet('Desfazer vínculo? A conversa acaba; o outro lado fica só com leitura até vencer. Uma conversa nova começa do zero.', 'Desfazer')) { await session.roomEvent(roomId, { type: 'unlink' }); return 'refresh'; }
     if (c === 'close' && await confirmSheet('Encerrar o grupo? Ninguém mais envia nada.', 'Encerrar')) { await session.roomEvent(roomId, { type: 'close' }); return 'refresh'; }
   } catch (e) { toast(`Não deu: ${e.message}`); }

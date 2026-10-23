@@ -35,7 +35,8 @@ test('texto cifrado chega a todos e o servidor nunca vê o conteúdo', async () 
   for (const n of ['bia', 'caio']) {
     const r = await p[n].sync();
     assert.deepEqual(r.rejected, []);
-    assert.equal(r.received[0].body.text, 'segredo da ana 🌙');
+    assert.equal(r.received.find((x) => x.kind === 'text').body.text, 'segredo da ana 🌙');
+    assert.ok(r.received.some((x) => x.kind === 'membership'), 'anúncio cifrado de membros veio antes');
     const v = await p[n].view(room);
     assert.equal(v.render[0].text, 'segredo da ana 🌙');
     assert.equal(v.render[0].expiresAt, sent.expiresAt, 'prazo do servidor');
@@ -146,4 +147,35 @@ test('troca de chave de alguém vira aviso de segurança', async () => {
   const r = await novo.sync();
   assert.ok(r.received.some((x) => x.body.text === 'para o aparelho novo'), 'sessão nova com a chave nova');
   p.caio = novo;
+});
+
+test('servidor que inclui "membro fantasma" no grupo: envio recusado, aviso', async () => {
+  // Simula o servidor comprometido acrescentando alguém na lista de membros.
+  const realRoom = p.bia.room.bind(p.bia);
+  p.bia.room = async (id) => {
+    const v = await realRoom(id);
+    return { ...v, members: [...v.members, { userId: 'fantasma00000001', joinSeq: 99, active: true }] };
+  };
+  await assert.rejects(p.bia.sendText(room, 'isto não pode sair'), /não anunciou/);
+  assert.ok(p.bia.warnings.some((w) => w.kind === 'unconfirmed_member'));
+  p.bia.room = realRoom;
+});
+
+test('membros confirmados só pela líder; anúncio de outra pessoa é ignorado', async () => {
+  const g = await p.ana.createRoom('group', [p.bia.userId], { textTtl: 86400 });
+  await p.bia.sync();
+  assert.deepEqual(p.bia.trusted[g.roomId].members.sort(), [p.ana.userId, p.bia.userId].sort());
+  // Caio entra pela líder: anúncio cifrado chega e Bia passa a poder mandar para ele.
+  const nv = await p.ana.roomEvent(g.roomId, { type: 'add_member', member: p.caio.userId });
+  await p.bia.sendText(g.roomId, 'antes do anúncio').then(() => assert.fail('deveria recusar'), (e) => assert.match(e.message, /não anunciou/));
+  await p.ana.announceMembership(g.roomId, nv);
+  await p.bia.sync(); await p.caio.sync();
+  await p.bia.sendText(g.roomId, 'agora vai');
+  assert.ok((await p.caio.sync()).received.some((x) => x.body?.text === 'agora vai'));
+  // Bia (não líder) tenta anunciar membros: os outros ignoram.
+  p.bia.trusted[g.roomId].leader = p.bia.userId; // finge ser líder localmente
+  await p.bia.sendInner(g.roomId, 'membership', { members: [p.ana.userId, p.bia.userId, p.caio.userId], leader: p.bia.userId });
+  await p.caio.sync();
+  assert.equal(p.caio.trusted[g.roomId].leader, p.ana.userId);
+  assert.ok(p.caio.warnings.some((w) => w.kind === 'membership_rejected'));
 });

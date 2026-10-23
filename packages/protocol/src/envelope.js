@@ -47,6 +47,9 @@ export function validateInner(m) {
     case 'edit': if (!ID.test(m.body?.target ?? '') || typeof m.body.text !== 'string' || !Number.isSafeInteger(m.body.version) || m.body.version < 1) fail('edição'); break;
     case 'delete_for_all': if (!ID.test(m.body?.target ?? '')) fail('apagar'); break;
     case 'nickname_change': if (typeof m.body?.nickname !== 'string' || m.body.nickname.trim().length < 2 || m.body.nickname.length > 24) fail('apelido'); break;
+    case 'membership':
+      if (!Array.isArray(m.body?.members) || m.body.members.length < 1 || m.body.members.length > 10 || !m.body.members.every((x) => ID.test(x)) || !ID.test(m.body.leader ?? '') || !m.body.members.includes(m.body.leader)) fail('membros');
+      break;
     case 'room_profile': if (typeof m.body?.title !== 'string' || m.body.title.length > 60) fail('nome do grupo'); break;
     case 'media': if (!ID.test(m.body?.mediaId ?? '') || typeof m.body.key !== 'string' || !['once', 'media', 'doc'].includes(m.body.mode)) fail('mídia'); break;
     default: break;

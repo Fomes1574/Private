@@ -45,3 +45,10 @@ test('apelido, nome de grupo e mídia têm formato conferido', () => {
   assert.throws(() => p.encodeInner({ ...base, kind: 'media', body: { mediaId: 'curto', key: 'k', mode: 'once' } }), /mídia/);
   assert.throws(() => p.encodeInner({ ...base, kind: 'media', body: { mediaId: 'abcdefghij', key: 'k', mode: 'html' } }), /mídia/);
 });
+
+test('anúncio de membros: líder precisa estar na lista; no máximo 10', () => {
+  const ok = { members: ['user_000001', 'user_000002'], leader: 'user_000001' };
+  assert.ok(p.encodeInner({ ...base, kind: 'membership', body: ok }));
+  assert.throws(() => p.encodeInner({ ...base, kind: 'membership', body: { ...ok, leader: 'user_000009' } }), /membros/);
+  assert.throws(() => p.encodeInner({ ...base, kind: 'membership', body: { members: Array.from({ length: 11 }, (_, i) => `user_00000${i}x`), leader: 'user_000001' } }), /membros/);
+});

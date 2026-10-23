@@ -10,6 +10,7 @@
 import { OlmAccount, OlmSession, sealOuter, parseOuter, b64, unb64 } from '../../crypto/index.js';
 import { encodeInner, decodeInner, INNER_VERSION } from '../../protocol/src/envelope.js';
 import { reconcile, applyEdit } from '../../protocol/src/reconcile.js';
+import { CIRCLE_ROOM_ID } from '../../protocol/src/room.js';
 import { encryptMedia, decryptMedia, newMediaKey } from './media-crypto.js';
 
 const OTK_BATCH = 20;
@@ -30,6 +31,9 @@ export class MessengerClient {
     this.hidden = new Map(); // msgId -> quando (apagado para mim)
     this.tombs = new Map(); // msgId -> quando (apagado para todos)
     this.onDestroy = onDestroy;
+    // Membros confirmados por conversa, só mudados por anúncio cifrado da
+    // líder. O servidor não consegue incluir um "membro fantasma" (V7-014 nº 1).
+    this.trusted = {};
   }
 
   // ---------- identidade do aparelho ----------
@@ -79,6 +83,7 @@ export class MessengerClient {
     const saved = (await this.store.get('sessions')) ?? {};
     for (const [peer, list] of Object.entries(saved)) this.sessions.set(peer, list.map((p) => OlmSession.fromPickle(p, this.pickleKey)));
     this.known = (await this.store.get('directory')) ?? {};
+    this.trusted = (await this.store.get('trusted')) ?? {};
     this.hidden = new Map(Object.entries((await this.store.get('hiddenForMe')) ?? {}));
     this.tombs = new Map(Object.entries((await this.store.get('tombstones')) ?? {}));
   }
@@ -136,14 +141,52 @@ export class MessengerClient {
   }
 
   // ---------- conversas ----------
-  createRoom(kind, members, ttls = {}) { return this.api.post('/v1/rooms', { kind, members, ...ttls }); }
+  async createRoom(kind, members, ttls = {}) {
+    const view = await this.api.post('/v1/rooms', { kind, members, ...ttls });
+    // Quem cria escolheu os membros: confirma localmente e anuncia cifrado.
+    this.trusted[view.roomId] = { members: [this.userId, ...members.filter((m) => m !== this.userId)], leader: this.userId };
+    await this.store.put('trusted', this.trusted);
+    await this.announceMembership(view.roomId, view);
+    return view;
+  }
+
+  // A líder anuncia (cifrado) quem está na conversa e quem lidera. Chamar
+  // depois de criar, adicionar, remover, ceder liderança ou antes de sair.
+  async announceMembership(roomId, view = null, { leaving = false } = {}) {
+    view ??= await this.room(roomId);
+    let members = view.members.filter((m) => m.active).sort((a, b) => a.joinSeq - b.joinSeq).map((m) => m.userId);
+    let leader = view.leader;
+    if (leaving) { members = members.filter((u) => u !== this.userId); leader = members[0]; }
+    if (!members.length) return;
+    this.trusted[roomId] = { members, leader };
+    await this.store.put('trusted', this.trusted);
+    if (members.some((u) => u !== this.userId) || leaving) await this.sendInner(roomId, 'membership', { members: leaving ? [...members] : members, leader }, { view });
+  }
+
+  // Confere o que o servidor diz contra o que foi confirmado de ponta a ponta.
+  checkRecipients(roomId, view, to) {
+    if (roomId === CIRCLE_ROOM_ID) return; // conversa do círculo: membros = círculo
+    const t = this.trusted[roomId];
+    if (view.kind === 'direct' && (view.members.length !== 2 || !view.members.some((m) => m.userId === this.userId))) {
+      throw new Error('conversa 1:1 com membros estranhos: envio recusado');
+    }
+    if (!t) throw new Error('membros desta conversa ainda não confirmados pela líder: aguarde a sincronização');
+    const extra = to.filter((u) => !t.members.includes(u));
+    if (extra.length) {
+      this.warnings.push({ kind: 'unconfirmed_member', roomId, userIds: extra, at: this.api.clock.now() });
+      throw new Error('o servidor indicou alguém que a líder não anunciou: envio recusado por segurança');
+    }
+  }
   room(roomId) { return this.api.get(`/v1/rooms/${roomId}`); }
   roomEvent(roomId, ev) { return this.api.post(`/v1/rooms/${roomId}/events`, ev); }
 
   // Envia qualquer tipo de conteúdo interno a todos os membros ativos.
-  async sendInner(roomId, kind, body, { replyTo, msgKind = 'text' } = {}) {
-    const room = await this.room(roomId);
+  async sendInner(roomId, kind, body, { replyTo, msgKind = 'text', view = null } = {}) {
+    await this.checkSecurityEvents(); // nunca cifrar para uma chave que já foi trocada
+    const room = view ?? await this.room(roomId);
     const to = room.members.filter((m) => m.active && m.userId !== this.userId).map((m) => m.userId);
+    if (kind !== 'membership') this.checkRecipients(roomId, room, to);
+    else if (to.some((u) => !this.trusted[roomId]?.members.includes(u))) throw new Error('anúncio para quem não está confirmado: recusado');
     const msgId = newMsgId();
     const inner = { v: INNER_VERSION, kind, msgId, room: roomId, sender: this.userId, policyRev: room.policyRev, body };
     if (replyTo) inner.replyTo = replyTo;
@@ -252,7 +295,20 @@ export class MessengerClient {
     return pt;
   }
 
+  // Eventos de segurança do círculo (troca de aparelho, recuperação, entrada,
+  // remoção): qualquer um deles faz reler o diretório antes de cifrar de novo,
+  // para não mandar nada para uma chave que não vale mais.
+  async checkSecurityEvents() {
+    const after = (await this.store.get('secSeq')) ?? 0;
+    const { events } = await this.api.get(`/v1/security-events?after=${after}`);
+    if (!events.length) return [];
+    if (events.some((e) => ['device_changed', 'recovered', 'joined', 'removed', 'frozen', 'unfrozen'].includes(e.kind))) await this.refreshDirectory();
+    await this.store.put('secSeq', events.at(-1).seq);
+    return events;
+  }
+
   async sync() {
+    await this.checkSecurityEvents();
     const res = await this.api.get('/v1/sync');
     const acks = { envelopes: [], tombstones: [] };
     // 1) tombstones primeiro: nada apagado chega a aparecer (§12).
@@ -294,6 +350,7 @@ export class MessengerClient {
         if (orig) await this.store.putMessage(applyEdit(orig, inner)); // applyEdit exige o mesmo autor
         return;
       }
+      case 'membership': return this.applyMembership(inner);
       case 'reaction': {
         const orig = await this.store.getMessage(inner.body.target);
         if (orig) await this.store.putMessage({ ...orig, reactions: { ...(orig.reactions ?? {}), [inner.sender]: inner.body.emoji } });
@@ -301,6 +358,28 @@ export class MessengerClient {
       }
       default: return; // outros tipos são tratados pela interface (política etc.)
     }
+  }
+
+  // Aceita o anúncio só da líder confirmada; na primeira vez, de quem criou e
+  // se declara líder; se a líder confirmada saiu, do sucessor na ordem
+  // confirmada (membro mais antigo, V6-023).
+  async applyMembership(inner) {
+    const { members, leader } = inner.body;
+    if (!members.includes(this.userId)) {
+      delete this.trusted[inner.room]; // fui removida: nada mais a enviar aqui
+    } else {
+      const t = this.trusted[inner.room];
+      let ok;
+      if (!t) ok = inner.sender === leader;
+      else if (inner.sender === t.leader) ok = true;
+      else {
+        const successor = t.members.find((u) => u !== t.leader && members.includes(u));
+        ok = !members.includes(t.leader) && inner.sender === successor;
+      }
+      if (!ok) { this.warnings.push({ kind: 'membership_rejected', roomId: inner.room, from: inner.sender, at: this.api.clock.now() }); return; }
+      this.trusted[inner.room] = { members, leader };
+    }
+    await this.store.put('trusted', this.trusted);
   }
 
   // O que pode aparecer agora, depois de aplicar tudo (§25.6).
