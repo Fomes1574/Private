@@ -124,7 +124,7 @@ async function start() {
   diag.webLocks = 'locks' in navigator;
 
   const t0 = performance.now();
-  await olm.loadWasm();
+  await olm.loadWasm(globalThis.__POC_WASM__);
   diag.wasmLoadMs = +(performance.now() - t0).toFixed(1);
   diag.library = olm.vodozemacVersion();
 
@@ -181,8 +181,15 @@ async function start() {
     try { await navigator.clipboard.writeText(report); show('Relatório copiado.'); } catch { show('Não deu para copiar: selecione o diagnóstico na mão.'); }
   });
 
-  $('#reset').addEventListener('click', async () => {
-    if (!confirm('Apagar identidades, sessões e fila?')) return;
+  // Confirmação dentro da página: confirm() não aparece em todo lugar.
+  let armed = false;
+  $('#reset').addEventListener('click', async (ev) => {
+    if (!armed) {
+      armed = true;
+      ev.target.textContent = 'Toque de novo para apagar tudo';
+      setTimeout(() => { armed = false; ev.target.textContent = 'Apagar tudo e recomeçar'; }, 4000);
+      return;
+    }
     await store.clearAll();
     location.reload();
   });

@@ -55,6 +55,12 @@ Ainda não é build reproduzível entre máquinas: isso fica para a prova 4.
 
 Preencher com o relatório copiado da página (botão “Copiar relatório”).
 
+Enquanto não há Cloudflare, existe uma cópia de arquivo único (WASM embutido)
+publicada como artefato privado no Claude. Ela serve para o teste em aba do
+Safari e do Chrome, mas **não** para a Tela de Início: o artefato roda dentro
+de um quadro do claude.ai, com CSP e origem que não são as do app. O resultado
+que vale para a Tela de Início só sai do endereço próprio.
+
 ## O que ficou de fora de propósito ou não funciona ainda
 
 - **Chave do estado guardada crua no IndexedDB.** É provisória: a prova 2 troca
