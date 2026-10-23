@@ -38,6 +38,7 @@ export async function settingsScreen(go) {
         h('h2', { text: 'Notificações' }),
         h('p', { class: 'muted small', text: 'O aviso diz só "novas mensagens". Sem nome, grupo, quantidade ou prévia. A Apple ou o Google ainda veem que houve um aviso e quando.' }),
         h('button', { class: 'secondary', text: 'Ativar notificações', onclick: () => session.enablePush().then(() => toast('Notificações ativadas.')).catch((e) => toast(e.message)) })),
+      updateSection(),
       isAdmin ? adminSection(me) : null,
       h('section', { class: 'card' },
         h('h2', { text: 'O que este app não promete' }),
@@ -100,4 +101,42 @@ function adminSection(members) {
           if (c === 'remove' && await confirmSheet(`Remover ${session.nameOf(m.userId)} do círculo?`, 'Remover')) await S.client.api.post('/v1/admin/remove', { userId: m.userId });
         } catch (e) { toast(e.code === 'too_early' ? 'Ainda não passaram as 24 horas.' : `Não deu: ${e.message}`); }
       } })))));
+}
+
+// Atualização (ADR 0006, V7-017): o service worker só troca de versão com
+// aceite, depois de conferir assinatura e hashes. O código curto deve bater
+// com o publicado no GitHub.
+function updateSection() {
+  const ctl = navigator.serviceWorker?.controller;
+  if (!ctl) return null;
+  let seq = 0;
+  const ask = (msg) => new Promise((resolve) => {
+    const id = ++seq + Math.random();
+    const on = (ev) => { if (ev.data?.id === id) { navigator.serviceWorker.removeEventListener('message', on); resolve(ev.data); } };
+    navigator.serviceWorker.addEventListener('message', on);
+    navigator.serviceWorker.controller.postMessage({ id, ...msg });
+  });
+  const fmt = (c) => (c ? `${c.slice(0, 4)} ${c.slice(4, 8)}` : '—');
+  const current = h('p', { class: 'code' });
+  const offer = h('div', { hidden: true });
+  ask({ type: 'status' }).then((r) => { current.textContent = r.pinned ? `v${r.pinned.version} · ${fmt(r.pinned.code)}` : '—'; });
+  return h('section', { class: 'card' },
+    h('h2', { text: 'Atualização' }),
+    h('p', { class: 'muted small', text: 'Versão em uso (compare o código com o publicado no GitHub):' }), current,
+    h('button', { class: 'secondary', text: 'Procurar atualização', onclick: async () => {
+      const r = await ask({ type: 'check', channel: 'estavel' });
+      if (!r.ok) return toast(r.refused ? `Nenhuma atualização aceita: ${r.error}.` : `Erro: ${r.error}`);
+      offer.replaceChildren(
+        h('p', {}, 'Versão nova ', h('strong', { text: `v${r.staged.version}` }), ' · código ', h('strong', { class: 'code', text: fmt(r.staged.code) })),
+        h('p', { class: 'muted small', text: 'Assinatura e arquivos já conferidos. Confira o código antes de aceitar.' }),
+        h('button', { text: 'Aceitar e atualizar', onclick: async () => {
+          if (!await confirmSheet(`Atualizar para v${r.staged.version} (código ${fmt(r.staged.code)})?`, 'Atualizar')) return;
+          const a = await ask({ type: 'apply' });
+          if (!a.ok) return toast(`Erro: ${a.error}`);
+          await session.lock('update');
+          location.reload();
+        } }));
+      offer.hidden = false;
+    } }),
+    offer);
 }

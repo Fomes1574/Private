@@ -57,7 +57,12 @@ export class Room extends DurableObject {
     return this.view(s);
   }
 
+  // O log de eventos da conversa só precisa cobrir o prazo máximo de uma
+  // mensagem; depois, o estado atual basta (P-15).
+  pruneEvents() { this.sql.exec('DELETE FROM events WHERE at < ?', Date.now() - 16 * 86_400_000); }
+
   async event(actor, ev) {
+    this.pruneEvents();
     const s = this.load();
     if (!s) return { error: 'not_found' };
     let next;

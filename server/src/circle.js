@@ -52,7 +52,22 @@ export class Circle extends DurableObject {
   q(query, ...args) { return this.sql.exec(query, ...args).toArray(); }
   one(query, ...args) { return this.q(query, ...args)[0] ?? null; }
   now() { return Date.now(); }
-  event(kind, userId = null) { this.sql.exec('INSERT INTO security_events(at, kind, user_id) VALUES (?, ?, ?)', this.now(), kind, userId); }
+  event(kind, userId = null) {
+    this.sql.exec('INSERT INTO security_events(at, kind, user_id) VALUES (?, ?, ?)', this.now(), kind, userId);
+    this.prune();
+  }
+
+  // Metadados com prazo (P-15, ADR 0012): avisos de segurança por 30 dias,
+  // convites usados ou vencidos por 1 dia, recuperações encerradas por 30 dias.
+  prune() {
+    const now = this.now();
+    this.sql.exec('DELETE FROM security_events WHERE at < ?', now - 30 * DAY);
+    this.sql.exec('DELETE FROM invites WHERE expires_at < ? OR (used_at IS NOT NULL AND used_at < ?)', now - DAY, now - DAY);
+    this.sql.exec("DELETE FROM recoveries WHERE state IN ('done', 'cancelled') AND created_at < ?", now - 30 * DAY);
+    this.sql.exec('DELETE FROM sessions WHERE expires_at <= ?', now);
+    this.sql.exec('DELETE FROM challenges WHERE expires_at <= ?', now);
+    this.sql.exec('DELETE FROM pairings WHERE expires_at <= ?', now);
+  }
 
   activeCount() { return this.one("SELECT count(*) AS n FROM identities WHERE state != 'removed'").n; }
   identity(userId) { return this.one('SELECT * FROM identities WHERE user_id = ?', userId); }
