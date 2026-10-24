@@ -121,17 +121,41 @@ async function openStore(dek, { fresh = false } = {}) {
 }
 
 // Primeira vez: cofre novo, identidade nova (convite ou instalação).
-export async function enroll({ lock, how, token, setupCode }) {
+// Instalação com o círculo já existente: `confirmRecover` pergunta à pessoa
+// se é para recuperar a conta de administradora neste aparelho (R-01).
+export async function enroll({ lock, how, token, setupCode, confirmRecover }) {
   const pool = await openStore(lock.dek, { fresh: true });
   const pickleKey = vault.random(32);
   await S.store.put('pickleKey', vault.b64(pickleKey));
   S.client = makeClient(pickleKey);
-  const r = how === 'bootstrap' ? await S.client.bootstrap(setupCode) : await S.client.redeem(token);
+  let r;
+  try {
+    r = how === 'bootstrap' ? await S.client.bootstrap(setupCode) : await S.client.redeem(token);
+  } catch (e) {
+    if (how !== 'bootstrap' || e.code !== 'exists' || !(await confirmRecover?.())) throw e;
+    return recoverAdmin(lock, pool, setupCode);
+  }
   await S.client.login();
   const record = await registerVault(lock);
   await idbPutMany({ vault: record, activePool: pool, lastRotate: Date.now() }); // só grava o cofre quando a identidade existe
   await afterUnlock({ loggedIn: true });
   return r;
+}
+
+// Recuperação da administradora pelo código de instalação (R-01): mesma
+// conta, aparelho e chaves novos; o cofre já vem registrado do servidor e
+// tudo fica guardado antes de entrar.
+async function recoverAdmin(lock, pool, setupCode) {
+  const device = await S.client.createDevice();
+  const r = await S.client.api.post('/v1/admin/recover', { setupCode, device, vault: { verifier: lock.verifier, deadDays: DEFAULT_DEAD_DAYS } });
+  const { record, kek } = await lock.finish(r.vault);
+  S.kek = kek;
+  Object.assign(S.client, { userId: r.userId, deviceId: r.deviceId });
+  await S.client.saveDevice();
+  await idbPutMany({ vault: record, activePool: pool, lastRotate: Date.now() });
+  await S.client.login();
+  await afterUnlock({ loggedIn: true });
+  return { userId: r.userId, deviceId: r.deviceId, recovered: true };
 }
 
 // Troca de aparelho (V7-015): o aparelho novo mostra código; o antigo aprova.

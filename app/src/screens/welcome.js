@@ -1,7 +1,7 @@
 // Entrada sem conta (§5): "Tenho um convite" e "Já uso em outro celular".
 // Não existe "criar conta". A primeira pessoa (administradora) usa o código
 // de instalação, só pelo endereço com #instalar.
-import { h, mount, toast } from '../ui.js';
+import { h, mount, toast, confirmSheet } from '../ui.js';
 import * as session from '../session.js';
 import { lockSetupForm } from './lock-setup.js';
 
@@ -18,8 +18,9 @@ export function welcome(go) {
         h('button', { class: 'block secondary', text: 'Já uso em outro celular', onclick: () => withLock(go, 'pair') }),
         h('button', { class: 'link', text: 'Perdi meu celular (código de emergência)', onclick: () => emergency(go) }),
         // Também disponível no APK nativo, que não é aberto com #instalar.
-        // O servidor exige SETUP_CODE e permite o bootstrap somente antes do primeiro membro.
-        h('button', { class: 'link', text: 'Primeira instalação (administradora)', onclick: () => withLock(go, 'bootstrap') }),
+        // Exige o código de instalação: antes do primeiro membro, cria o
+        // círculo; depois, recupera a conta de administradora (R-01).
+        h('button', { class: 'link', text: 'Administradora: instalar ou recuperar', onclick: () => withLock(go, 'bootstrap') }),
       ],
     installHint()));
 }
@@ -52,7 +53,8 @@ function tokenScreen(go, how, lock) {
     btn.disabled = true;
     try {
       const v = input.value.trim();
-      await session.enroll({ lock, how, token: v, setupCode: v });
+      await session.enroll({ lock, how, token: v, setupCode: v,
+        confirmRecover: () => confirmSheet('O círculo já existe. Recuperar a conta de administradora neste aparelho? O aparelho antigo deixa de valer, os contatos vão ver que a sua chave de segurança mudou e o histórico do aparelho antigo não volta.', 'Recuperar') });
       go('nickname');
     } catch (err) {
       btn.disabled = false;

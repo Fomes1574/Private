@@ -433,3 +433,32 @@ test('stories: audiência escolhida dentro do círculo, prazo próprio, mídia s
   assert.equal((await people.bia.post(`/v1/rooms/${C}/messages/${id}/delete`)).status, 200);
   assert.ok((await people.caio.get('/v1/sync')).data.tombstones.some((t) => t.msgId === id));
 });
+
+test('administradora perdeu o aparelho: recupera com o código de instalação, mesma conta, aparelho antigo cai', async () => {
+  const dev = await newDevice();
+  const fresh = new Client(api.base);
+  const vault = { verifier: Buffer.from(randomBytes(32)).toString('base64'), deadDays: 15 };
+  assert.equal((await fresh.post('/v1/admin/recover', { setupCode: 'x'.repeat(24), device: dev.public, vault })).status, 401, 'código errado');
+  assert.equal((await fresh.post('/v1/admin/recover', { setupCode: SETUP, device: dev.public })).status, 400, 'sem cofre');
+  // Instalar de novo continua recusado: o círculo já existe.
+  assert.equal((await fresh.post('/v1/bootstrap', { setupCode: SETUP, device: dev.public })).status, 409);
+  const before = (await people.bia.get('/v1/sync')).status;
+  const r = await fresh.post('/v1/admin/recover', { setupCode: SETUP, device: dev.public, vault });
+  assert.equal(r.status, 200, JSON.stringify(r));
+  assert.equal(r.data.userId, people.admin.userId, 'mesma conta');
+  assert.ok(r.data.vault.vaultId && r.data.vault.share, 'cofre do aparelho novo já registrado');
+  assert.equal((await people.admin.get('/v1/sync')).status, 401, 'aparelho antigo caiu');
+  await fresh.login(dev, r.data.deviceId);
+  const me = (await fresh.get('/v1/me')).data;
+  assert.equal(me.isAdmin, true, 'continua administradora');
+  assert.equal(me.pending, false);
+  assert.equal((await fresh.post('/v1/vault/release', { vaultId: r.data.vault.vaultId, verifier: vault.verifier })).data.share, r.data.vault.share);
+  // Contatos veem a troca de chave e o aparelho novo no diretório.
+  const dir = (await people.bia.get('/v1/directory')).data.members;
+  assert.equal(dir.find((m) => m.userId === people.admin.userId).deviceId, r.data.deviceId);
+  assert.ok((await people.bia.get('/v1/security-events')).data.events.some((e) => e.kind === 'recovered' && e.userId === people.admin.userId), 'aviso de segurança para o círculo');
+  assert.equal(before, 200);
+  // Pode criar convites (é administradora de verdade).
+  assert.equal((await fresh.post('/v1/invites', {})).status, 201);
+  people.admin = fresh;
+});

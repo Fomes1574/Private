@@ -165,6 +165,29 @@ export class Circle extends DurableObject {
     return r;
   }
 
+  // ---------- recuperação da administradora (R-01) ----------
+  // Quem chama já provou ter o código de instalação (index.js). Mesma conta
+  // (mesmo user_id, administradora, conversas e membros), aparelho e chaves
+  // NOVOS, histórico local perdido. Na hora, por decisão do proprietário
+  // (24/10/2026); os contatos veem o aviso de chave trocada. O cofre do
+  // aparelho novo nasce aqui, na mesma operação.
+  async adminRecover({ device, vault }) {
+    if (!checkDevice(device)) return { error: 'bad_device' };
+    if (!vault || !B64_32.test(vault.verifier ?? '') || !DEAD_DAYS.includes(vault.deadDays)) return { error: 'bad_request' };
+    const admin = this.one("SELECT * FROM identities WHERE is_admin = 1 AND state != 'removed' ORDER BY joined_seq LIMIT 1");
+    if (!admin) return { error: 'not_found' };
+    this.revokeDevicesOf(admin.user_id);
+    this.sql.exec("UPDATE recoveries SET state = 'cancelled' WHERE user_id = ? AND state IN ('collecting', 'waiting')", admin.user_id);
+    if (admin.state !== 'active') this.sql.exec("UPDATE identities SET state = 'active' WHERE user_id = ?", admin.user_id);
+    const deviceId = this.addDevice(admin.user_id, device);
+    const vaultId = randomId(18);
+    const share = b64(crypto.getRandomValues(new Uint8Array(32)));
+    this.sql.exec('INSERT INTO vaults(vault_id, user_id, device_id, verifier_hash, duress_hash, share, attempts, last_seen, dead_days) VALUES (?, ?, ?, ?, NULL, ?, 0, ?, ?)',
+      vaultId, admin.user_id, deviceId, await sha(vault.verifier), share, this.now(), vault.deadDays);
+    this.event('recovered', admin.user_id); // contatos veem a troca de chave (aviso de segurança)
+    return { userId: admin.user_id, deviceId, vault: { vaultId, share } };
+  }
+
   // ---------- convites ----------
   async createInvite(actorUserId, { kind = 'join', forUser = null } = {}) {
     const actor = this.identity(actorUserId);

@@ -86,6 +86,15 @@ route('POST', '/v1/bootstrap', async ({ env, request }) => {
   return json(201, { ...r, circleRoom: CIRCLE_ROOM_ID });
 }, { open: true });
 
+// Recuperação da administradora com o código de instalação (R-01): só depois
+// que o círculo existe; antes disso, o caminho é o /v1/bootstrap.
+route('POST', '/v1/admin/recover', async ({ env, request }) => {
+  const body = await readJson(request);
+  if (!env.SETUP_CODE || env.SETUP_CODE.length < 16 || typeof body.setupCode !== 'string' || !sameBytes(body.setupCode, env.SETUP_CODE)) throw new HttpError(401, 'unauthorized');
+  const vault = body.vault ? { verifier: body.vault.verifier, deadDays: Number(body.vault.deadDays ?? 15) } : null;
+  return json(200, unwrap(await circle(env).adminRecover({ device: body.device, vault })));
+}, { open: true });
+
 route('POST', '/v1/invites/redeem', async ({ env, ctx, request }) => {
   const body = await readJson(request);
   const r = unwrap(await circle(env).redeem({ token: body.token, device: body.device }));
