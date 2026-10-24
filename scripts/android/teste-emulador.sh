@@ -32,6 +32,11 @@ BUILD="$(adb shell getprop ro.build.type | tr -d '\r') ro.debuggable=$(adb shell
 echo "emulador: $BUILD"
 echo "$BUILD" | grep -q 'ro.debuggable=0' || fail "emulador é build de depuração ($BUILD): o teste não seria válido"
 
+# Imagem com Google Play: o Play Protect pode abrir um diálogo "verificar
+# app?" por cima do app instalado via adb. Desligado só neste emulador de
+# teste (não muda nada no app).
+adb shell settings put global verifier_verify_adb_installs 0 || true
+adb shell settings put global package_verifier_enable 0 || true
 adb install -r "$APK" >/dev/null
 DUMP=$(adb shell dumpsys package "$PKG")
 
@@ -64,13 +69,17 @@ echo "print de controle (tela inicial): $HOME_LIT"
 # 3) Abre o app e espera a interface.
 adb logcat -c
 adb shell am start -W -n "$ACT" >/dev/null
-for i in $(seq 1 40); do
+for i in $(seq 1 60); do
   adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || true
   adb shell cat /sdcard/ui.xml 2>/dev/null | grep -q 'Pacto Talk' && break
   sleep 2
 done
-UI=$(adb shell cat /sdcard/ui.xml)
-echo "$UI" | grep -q 'Pacto Talk' || fail "interface não apareceu"
+UI=$(adb shell cat /sdcard/ui.xml 2>/dev/null || true)
+if ! echo "$UI" | grep -q 'Pacto Talk'; then
+  echo "foco: $(adb shell dumpsys window | grep -m2 -E 'mCurrentFocus|mFocusedApp' | tr -s ' ' | tr '\n' ' ')"
+  echo "textos na tela: $(echo "$UI" | grep -o 'text="[^"]\+"' | head -15 | tr '\n' ' ')"
+  fail "interface não apareceu"
+fi
 echo "$UI" | grep -qE 'Tenho um convite|Instalar a primeira pessoa|Primeira instalação' || fail "tela inicial incompleta"
 pidof_app=$(adb shell pidof "$PKG" || true)
 [ -n "$pidof_app" ] || fail "app fechou sozinho"
