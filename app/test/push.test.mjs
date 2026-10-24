@@ -68,10 +68,16 @@ test('notificações: estados visíveis no navegador e no Android (plugin simula
   // Navegador sem service worker: erro explicado, nunca silêncio.
   await openSettings();
   await waitState('unavailable');
-  assert.match(await stateText(), /^Erro: Este navegador não oferece notificações aqui\./);
+  assert.match(await stateText(), /^Este navegador não oferece notificações aqui\./, 'indisponível explica, sem chamar de erro');
   assert.equal(await page.textContent('#push-btn'), 'Tentar de novo');
 
-  // Android: aguardando permissão → ativado.
+  // APK sem Firebase (o atual): explica que no Android não há aviso com o app fechado.
+  await page.evaluate(() => { globalThis.Capacitor = { isNativePlatform: () => true, Plugins: {} }; });
+  await openSettings();
+  await waitState('unavailable');
+  assert.match(await stateText(), /não usa serviços do Google/);
+
+  // Android com o plugin (APK futuro, simulado): aguardando permissão → ativado.
   await installFake();
   await openSettings();
   await waitState('off');

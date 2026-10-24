@@ -28,34 +28,15 @@
 
         </activity>
 
-        <!-- Aviso de push sem conteúdo: o app desenha "novas mensagens". -->
-        <service
-            android:name=".NovasMensagensService"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-            </intent-filter>
-        </service>
-
-        <!-- Firebase só para entregar o aviso: sem token automático (só quando a
-             pessoa ativa), sem Analytics, sem id de publicidade, sem métricas. -->
-        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
-        <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
-        <meta-data android:name="firebase_analytics_collection_deactivated" android:value="true" />
-        <meta-data android:name="google_analytics_adid_collection_enabled" android:value="false" />
-        <meta-data android:name="google_analytics_ssaid_collection_enabled" android:value="false" />
-        <meta-data android:name="delivery_metrics_exported_to_big_query_enabled" android:value="false" />
-        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="mensagens" />
-
     </application>
 
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Câmera e microfone do próprio app (foto, vídeo, áudio). Pedidos só na
-         hora do uso. Sem armazenamento, localização, contatos ou rede local. -->
+         hora do uso. Sem armazenamento, localização, contatos, rede local nem
+         serviços do Google (sem Firebase: decisão de 24/10/2026). -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />

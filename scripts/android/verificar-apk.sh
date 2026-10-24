@@ -29,13 +29,9 @@ echo "$XML" | grep -Eq 'android:debuggable.*=true' && fail "debuggable=true no m
 ALLOWED="android.permission.INTERNET
 android.permission.USE_BIOMETRIC
 android.permission.USE_FINGERPRINT
-android.permission.POST_NOTIFICATIONS
 android.permission.CAMERA
 android.permission.RECORD_AUDIO
 android.permission.MODIFY_AUDIO_SETTINGS
-android.permission.WAKE_LOCK
-android.permission.ACCESS_NETWORK_STATE
-com.google.android.c2dm.permission.RECEIVE
 $PKG.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
 PERMS=$(echo "$BADGE" | sed -n "s/^uses-permission: name='\([^']*\)'.*/\1/p" | sort -u)
 EXTRA=$(comm -23 <(echo "$PERMS") <(echo "$ALLOWED" | sort -u))

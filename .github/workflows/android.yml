@@ -42,9 +42,8 @@ jobs:
           grep -q 'usesCleartextTraffic="false"' app/src/main/AndroidManifest.xml
           ! grep -q 'FileProvider' app/src/main/AndroidManifest.xml
           grep -q 'Content-Security-Policy' app/src/main/assets/public/index.html
-          # Firebase só para o aviso: nada de Analytics.
-          grep -q 'firebase_analytics_collection_deactivated" android:value="true"' app/src/main/AndroidManifest.xml
-          ! grep -rq 'firebase-analytics\|firebase-bom' app/build.gradle
+          # Sem Firebase/Google no APK (decisão de 24/10/2026).
+          ! grep -rqi 'firebase\|google-services\|play-services' app/build.gradle build.gradle app/src/main/AndroidManifest.xml
           [ ! -e app/google-services.json ]
       - name: Compilar APK de debug
         working-directory: android-app/android

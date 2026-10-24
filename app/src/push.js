@@ -1,6 +1,8 @@
 // Notificações, dois caminhos explícitos (nada é adivinhado):
-// - 'android': APK (Capacitor). FCM nativo pelo plugin NovasMensagens; o
-//   aviso chega vazio e o próprio app mostra "novas mensagens".
+// - 'android': APK (Capacitor). Sem Firebase/Google por decisão (24/10/2026):
+//   no Android não há aviso com o app fechado; com o app aberto as mensagens
+//   chegam pela conexão própria do app. O caminho nativo abaixo só roda se um
+//   APK futuro trouxer o plugin NovasMensagens.
 // - 'web': navegador e iPhone (PWA na Tela de Início). Web Push pelo service
 //   worker, que mostra "novas mensagens".
 // O servidor recebe só o destino DESTE aparelho. Ninguém do círculo fica
@@ -8,6 +10,7 @@
 import { unb64 } from './vault/vault.js';
 
 const TIMEOUT = 20_000;
+const NO_ANDROID_PUSH = 'No Android o app não usa serviços do Google (privacidade): não há aviso com o app fechado. Com o app aberto, as mensagens chegam na hora.';
 const plugin = () => (globalThis.Capacitor?.isNativePlatform?.() ? globalThis.Capacitor.Plugins?.NovasMensagens ?? null : null);
 export const pushEnv = () => (globalThis.Capacitor?.isNativePlatform?.() ? 'android' : 'web');
 
@@ -40,7 +43,7 @@ export async function pushState(enabled) {
   try {
     if (pushEnv() === 'android') {
       const p = plugin();
-      if (!p) return { state: 'unavailable', detail: 'Este APK não tem o módulo de notificações.' };
+      if (!p) return { state: 'unavailable', detail: NO_ANDROID_PUSH };
       const st = await limit(p.status(), 'O Android');
       if (!st.configured) return { state: 'unavailable', detail: 'Este APK foi gerado sem a configuração do Firebase. Peça à administradora um APK novo.' };
       if (st.permission === 'denied') return { state: 'denied' };
@@ -59,7 +62,7 @@ export async function pushState(enabled) {
 export async function enablePush(api, { onWaiting } = {}) {
   if (pushEnv() === 'android') {
     const p = plugin();
-    if (!p) throw new PushError('unavailable', 'Este APK não tem o módulo de notificações.');
+    if (!p) throw new PushError('unavailable', NO_ANDROID_PUSH);
     let st = await limit(p.status(), 'O Android');
     if (!st.configured) throw new PushError('unavailable', 'Este APK foi gerado sem a configuração do Firebase. Peça à administradora um APK novo.');
     if (st.permission !== 'granted') {

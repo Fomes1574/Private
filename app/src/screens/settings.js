@@ -97,7 +97,9 @@ function notificationsBox() {
   const btn = h('button', { id: 'push-btn', class: 'secondary' });
   const show = (state, detail) => {
     status.dataset.state = state;
-    status.textContent = PUSH_TEXT[state] ?? `Erro: ${detail ?? 'não deu para ativar.'}`;
+    // Indisponível (sem service worker, ou Android sem serviços do Google) não
+    // é erro: só explica. Erro de verdade aparece como "Erro: …".
+    status.textContent = PUSH_TEXT[state] ?? (state === 'unavailable' ? detail : `Erro: ${detail ?? 'não deu para ativar.'}`);
     btn.disabled = state === 'waiting' || state === 'checking';
     btn.textContent = state === 'on' ? 'Desativar notificações' : state === 'denied' || state === 'error' || state === 'unavailable' ? 'Tentar de novo' : 'Ativar notificações';
   };

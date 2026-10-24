@@ -51,8 +51,8 @@ RUNAS=$(adb shell run-as "$PKG" id 2>&1 || true)
 echo "run-as: $RUNAS"
 echo "$RUNAS" | grep -q 'uid=' && fail "run-as conseguiu entrar nos dados do app"
 
-# 2) Permissões perigosas começam negadas (pedidas só na hora do uso).
-for p in CAMERA RECORD_AUDIO POST_NOTIFICATIONS; do
+# 2) Câmera e microfone começam negados (pedidas só na hora do uso).
+for p in CAMERA RECORD_AUDIO; do
   echo "$DUMP" | grep -E "android.permission.$p: granted=true" && fail "$p já concedida sem pedir"
 done
 true

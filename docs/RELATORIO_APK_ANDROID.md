@@ -8,14 +8,19 @@ Cada item tem quatro estados, sem misturar:
 
 ## P1 Notificações
 
+**Decisão do proprietário (24/10/2026): sem Firebase.** O APK não tem nenhum
+código ou serviço do Google. Consequência: no Android **não há aviso com o
+app fechado**; com o app aberto, as mensagens chegam na hora pela conexão
+própria do app. O código do servidor para FCM fica inativo (só liga com o
+segredo `FCM_SERVICE_ACCOUNT`, que não será criado).
+
 | Item | Implementado | Teste automático | Android real | Pendente |
 |---|---|---|---|---|
-| FCM nativo no APK, aviso **vazio**; o app escreve "novas mensagens" | Sim (`NovasMensagensService`, `server/src/fcm.js`) | Sim: FCM falso confere a mensagem exata, sem texto, conversa, remetente, id ou cifra (`server/test/fcm.test.mjs`) | Não | Firebase do proprietário (`FIREBASE_MINIMO.md`); cenários 3–5 de `TESTE_EM_CELULAR.md` |
-| iPhone/navegador com Web Push, só para serviços de push conhecidos | Sim | Sim (servidor) | — | Teste no iPhone |
-| Ambiente explícito (`android` × `web`) sem expor o dos outros | Sim (`app/src/push.js`; o tipo fica só no servidor) | Sim | Não | — |
-| Botão: aguardando permissão / ativadas / recusadas / erro | Sim | Sim, com plugin simulado (`app/test/push.test.mjs`) | Não | — |
-| Silenciada, app aberto, token inválido, desativar, troca de aparelho, permissão retirada, apagar tudo | Sim | Sim | Não | — |
-| Firebase mínimo: sem login Google dos membros, sem Analytics, sem id de publicidade, token só ao ativar | Sim (manifesto, dependência só `firebase-messaging`) | Sim: CI confere o manifesto; a verificação do APK confere as permissões | Não | — |
+| APK sem Firebase/Google (sem dependência, sem plugin, sem permissão de notificação) | Sim | Sim: o CI recusa qualquer menção a firebase/google-services/play-services no projeto; a verificação do APK recusa permissões fora da lista | Não | — |
+| Ajustes no Android explicam que não há aviso com o app fechado (não aparece como erro) | Sim | Sim (`app/test/push.test.mjs`) | Não | — |
+| iPhone/navegador com Web Push ("novas mensagens", aviso sem conteúdo), só para serviços de push conhecidos | Sim | Sim (servidor e interface) | — | Teste no iPhone |
+| Botão no iPhone: aguardando permissão / ativadas / recusadas / erro | Sim | Sim | — | Teste no iPhone |
+| Silenciada, app aberto, desativar, troca de aparelho, apagar tudo | Sim | Sim | — | — |
 
 ## P2 Câmera, microfone e anexos
 
@@ -30,10 +35,10 @@ Cada item tem quatro estados, sem misturar:
 | Item | Implementado | Teste automático | Android real | Pendente |
 |---|---|---|---|---|
 | Chave permanente fora do repositório (página offline) | Sim (`tools/gerar-chave-android.html`) | Sim (certificado X.509 conferido) | — | Proprietário gerar a chave e cadastrar segredos |
-| Assinatura v2/v3 + digital conferida + verificação (sem depuração, sem backup, sem tráfego em claro, lista fechada de permissões) | Sim (`android-release.yml`, `verificar-apk.sh`) | Sim: release de teste com chave descartável a cada push. Na execução de 23/10 o APK saiu aprovado com exatamente estas permissões: INTERNET, ACCESS_NETWORK_STATE, USE_BIOMETRIC, USE_FINGERPRINT, POST_NOTIFICATIONS, WAKE_LOCK, c2dm RECEIVE, CAMERA, RECORD_AUDIO, MODIFY_AUDIO_SETTINGS e a permissão interna do próprio pacote | — | — |
+| Assinatura v2/v3 + digital conferida + verificação (sem depuração, sem backup, sem tráfego em claro, lista fechada de permissões) | Sim (`android-release.yml`, `verificar-apk.sh`) | Sim: release de teste com chave descartável a cada push. Desde 24/10 a lista aceita só: INTERNET, USE_BIOMETRIC, USE_FINGERPRINT, CAMERA, RECORD_AUDIO, MODIFY_AUDIO_SETTINGS e a permissão interna do próprio pacote | — | — |
 | versionCode crescente, sem downgrade | Sim | Parcial (o build recebe o número) | Não | Cenário 2 |
 | FLAG_SECURE, recentes sem prévia, WebView sem depuração, backup desligado | Sim | Sim, no emulador (linha seguinte); a prévia dos recentes não é medida no emulador | Não | Cenário 9 |
-| Teste no emulador Android 14 com o APK de release | Sim (`teste-emulador.sh`) | **Passou (24/10, execução 32 do workflow `android`), em emulador `user` (ro.debuggable=0, como celular).** Confirmado: instala; pacote sem DEBUGGABLE e sem ALLOW_BACKUP; `run-as` recusado ("package not debuggable"); câmera, microfone e notificação não vêm concedidos; a interface abre; **FLAG_SECURE**: print de controle da tela inicial com conteúdo, print com o app aberto recusado pelo Android, janela da MainActivity com `SECURE`; nenhuma porta de depuração de WebView (lista de sockets legível); nada do console no logcat; o app sobrevive ao ir para o fundo. Emulador **não** é celular de verdade | Não | Cenários de `TESTE_EM_CELULAR.md` |
+| Teste no emulador Android 14 com o APK de release | Sim (`teste-emulador.sh`) | **Passou (24/10, execução 32 do workflow `android`), em emulador `user` (ro.debuggable=0, como celular).** Confirmado: instala; pacote sem DEBUGGABLE e sem ALLOW_BACKUP; `run-as` recusado ("package not debuggable"); câmera e microfone não vêm concedidos; a interface abre; **FLAG_SECURE**: print de controle da tela inicial com conteúdo, print com o app aberto recusado pelo Android, janela da MainActivity com `SECURE`; nenhuma porta de depuração de WebView (lista de sockets legível); nada do console no logcat; o app sobrevive ao ir para o fundo. Emulador **não** é celular de verdade | Não | Cenários de `TESTE_EM_CELULAR.md` |
 | GitHub Release com APK e SHA-256 | Sim | Não: precisa dos segredos | — | Rodar `android-release` |
 | **APK assinado pronto para instalar** | Pipeline pronto | — | — | **Não existe ainda**: depende da chave do proprietário (`APK_RELEASE.md`) |
 | Migração da administradora do debug sem perder a conta | Sim (pacote novo + troca durável em duas fases) | Sim: debug antigo aprova e se apaga, app novo morto antes e depois (`app/test/pairing.test.mjs`, `server/test/api.test.mjs`) | Não | Cenário 1, com o celular dela |
@@ -70,10 +75,9 @@ Cada item tem quatro estados, sem misturar:
 
 ## O que o proprietário precisa fazer, em ordem
 
-1. Rodar `deploy-api`. A troca durável e o FCM precisam da API nova.
-2. Firebase mínimo (`FIREBASE_MINIMO.md`), se quiser notificação no Android.
-3. Gerar a chave do APK e cadastrar os segredos (`APK_RELEASE.md`).
-4. Rodar `android-release`, conferir SHA-256 e certificado, e instalar.
-5. Migrar a administradora (`MIGRAR_DEBUG_PARA_RELEASE.md`). **Anote o PIN novo antes de aprovar.**
-6. Rodar `TESTE_EM_CELULAR.md` nos dois aparelhos.
-7. Decidir R-01 (recuperação da administradora).
+1. Rodar `deploy-api`. A troca durável precisa da API nova.
+2. Gerar a chave do APK e cadastrar os segredos (`APK_RELEASE.md`).
+3. Rodar `android-release`, conferir SHA-256 e certificado, e instalar.
+4. Migrar a administradora (`MIGRAR_DEBUG_PARA_RELEASE.md`). **Anote o PIN novo antes de aprovar.**
+5. Rodar `TESTE_EM_CELULAR.md` nos dois aparelhos.
+6. Decidir R-01 (recuperação da administradora).

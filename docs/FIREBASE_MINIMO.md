@@ -1,3 +1,8 @@
+> **Não usado.** Decisão do proprietário em 24/10/2026: nenhum serviço do
+> Google no app. O APK não tem Firebase; no Android não há aviso com o app
+> fechado. Este guia fica só como registro do que seria preciso, caso um dia
+> a decisão mude (e ela teria de ser reavaliada de novo).
+
 # Firebase: só o mínimo para a notificação do Android
 
 O APK Android usa o Firebase Cloud Messaging (FCM) **só** para acordar o

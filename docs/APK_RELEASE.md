@@ -29,7 +29,6 @@
 3. No GitHub → Settings → Secrets and variables → Actions:
    - Secrets: `ANDROID_SIGNING_KEY` e `ANDROID_SIGNING_CERT` (copie da página).
    - Variables: `ANDROID_CERT_SHA256` (a impressão digital) e `MP_API_ORIGIN` (`https://…` da API).
-   - Opcional, para notificações: `GOOGLE_SERVICES_JSON` (`docs/FIREBASE_MINIMO.md`).
 4. (Recomendado) Settings → Environments → `release` → **Required reviewers**: você. Assim a chave só é usada depois do seu clique.
 
 ## Publicar uma versão
@@ -38,7 +37,7 @@ GitHub → Actions → **android-release** → Run workflow → digite `PUBLICAR
 
 A Release sai com:
 - `Pacto-Talk-1.0.N.apk` e `Pacto-Talk-1.0.N.apk.sha256`;
-- nas notas: o SHA-256 do APK, a digital do certificado, se tem notificações, e o relatório da verificação.
+- nas notas: o SHA-256 do APK, a digital do certificado e o relatório da verificação.
 
 ## Conferir no celular antes de instalar
 
@@ -55,7 +54,7 @@ seguida, roda a mesma verificação e abre o APK num emulador Android 14
 (`scripts/android/teste-emulador.sh`). O emulador confere:
 - flags reais do pacote: não depurável, sem backup;
 - `run-as` recusado;
-- câmera, microfone e notificação ainda **não** concedidos;
+- câmera e microfone ainda **não** concedidos;
 - a interface abre;
 - janela com FLAG_SECURE e print da tela preto;
 - sem porta de depuração do WebView;
@@ -68,9 +67,8 @@ Emulador não é celular de verdade: veja `docs/TESTE_EM_CELULAR.md`.
 
 | Permissão | Para quê |
 |---|---|
-| INTERNET, ACCESS_NETWORK_STATE | Falar com a API |
+| INTERNET | Falar com a API |
 | USE_BIOMETRIC (USE_FINGERPRINT em Android antigo) | Digital libera o segredo do Keystore |
-| POST_NOTIFICATIONS, WAKE_LOCK, c2dm RECEIVE | Aviso "novas mensagens" (FCM); pedida só ao tocar em Ativar |
 | CAMERA, RECORD_AUDIO, MODIFY_AUDIO_SETTINGS | Câmera do app, áudio e vídeo; pedidas só na hora do uso |
 
 Fora da lista, por decisão:
@@ -78,7 +76,8 @@ Fora da lista, por decisão:
 - localização;
 - contatos;
 - rede local;
-- id de publicidade (removido de propósito).
+- id de publicidade (removido de propósito);
+- serviços do Google/Firebase (sem aviso com o app fechado no Android, por decisão de privacidade).
 
 A câmera e o microfone só são liberados para a própria página do app
 (`https://localhost`). Qualquer outro recurso que o WebView peça é negado.

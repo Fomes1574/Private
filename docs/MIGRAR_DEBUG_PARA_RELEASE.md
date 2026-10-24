@@ -80,7 +80,6 @@ esperado: confira o número de segurança pessoalmente.
 8. No app novo, confira:
    - Ajustes mostra a parte da administradora.
    - Dá para criar um convite (pode descartar).
-   - Ative as notificações.
    - Configure de novo o PIN de coação e o prazo do "homem morto".
 9. Só depois de tudo conferido, desinstale o debug pelo Android.
 

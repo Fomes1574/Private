@@ -6,7 +6,6 @@ name: android-release
 #   segredos ANDROID_SIGNING_KEY e ANDROID_SIGNING_CERT (tools/gerar-chave-android.html)
 #   variável ANDROID_CERT_SHA256 (impressão digital da mesma chave)
 #   variável MP_API_ORIGIN (https://...)
-#   segredo GOOGLE_SERVICES_JSON (opcional; sem ele o APK sai SEM notificações)
 # Nada disso fica no repositório. A chave existe só em memória/arquivo
 # temporário deste job e é apagada no fim.
 on:
@@ -57,18 +56,6 @@ jobs:
           echo "MP_VERSION_NAME=1.0.$code" >> "$GITHUB_ENV"
           echo "Versão 1.0.$code (versionCode $code; último publicado: ${last:-nenhum})"
 
-      - name: Firebase (só o aviso de notificação)
-        env: { GS: "${{ secrets.GOOGLE_SERVICES_JSON }}" }
-        run: |
-          if [ -z "$GS" ]; then echo "PUSH=nao" >> "$GITHUB_ENV"; echo "::warning::Sem GOOGLE_SERVICES_JSON: este APK sai SEM notificações."; exit 0; fi
-          printf '%s' "$GS" > android-app/android/app/google-services.json
-          node -e '
-            const j = JSON.parse(require("fs").readFileSync("android-app/android/app/google-services.json", "utf8"));
-            const ok = (j.client || []).some((c) => c.client_info?.android_client_info?.package_name === process.env.PKG);
-            if (!ok) { console.error("google-services.json não tem o app " + process.env.PKG); process.exit(1); }
-          '
-          echo "PUSH=sim" >> "$GITHUB_ENV"
-
       - name: App web + Capacitor
         working-directory: android-app
         env:
@@ -103,7 +90,6 @@ jobs:
           out="$RUNNER_TEMP/Pacto-Talk-$MP_VERSION_NAME.apk"
           "$BT/apksigner" sign --key "$d/key.der" --cert "$d/cert.pem" --v4-signing-enabled false --out "$out" "$d/aligned.apk"
           bash scripts/android/verificar-apk.sh "$out" "$FP" "$PKG" "$MP_VERSION_CODE" | tee "$RUNNER_TEMP/verificacao.txt"
-          rm -f android-app/android/app/google-services.json
           (cd "$RUNNER_TEMP" && sha256sum "Pacto-Talk-$MP_VERSION_NAME.apk" > "Pacto-Talk-$MP_VERSION_NAME.apk.sha256")
 
       - name: Publicar GitHub Release
@@ -118,7 +104,7 @@ jobs:
             echo "**Antes de instalar, confira:**"
             echo "- SHA-256 do APK: \`$(cut -d' ' -f1 "$RUNNER_TEMP/Pacto-Talk-$MP_VERSION_NAME.apk.sha256")\`"
             echo "- Certificado de assinatura (SHA-256): \`$FP\` — tem que ser SEMPRE este. Se mudar, não instale."
-            echo "- Notificações: $([ "$PUSH" = sim ] && echo 'incluídas (FCM, aviso vazio)' || echo '**NÃO incluídas** (Firebase não configurado)')"
+            echo "- Sem serviços do Google: no Android não há aviso com o app fechado."
             echo
             echo "Primeira vez vindo do APK de debug antigo: siga docs/MIGRAR_DEBUG_PARA_RELEASE.md (não desinstale o antigo antes)."
             echo
