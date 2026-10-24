@@ -40,7 +40,7 @@ segredo `FCM_SERVICE_ACCOUNT`, que não será criado).
 | FLAG_SECURE, recentes sem prévia, WebView sem depuração, backup desligado | Sim | Sim, no emulador (linha seguinte); a prévia dos recentes não é medida no emulador | Não | Cenário 9 |
 | Teste no emulador Android 14 com o APK de release | Sim (`teste-emulador.sh`) | **Passou (24/10, execução 32 do workflow `android`), em emulador `user` (ro.debuggable=0, como celular).** Confirmado: instala; pacote sem DEBUGGABLE e sem ALLOW_BACKUP; `run-as` recusado ("package not debuggable"); câmera e microfone não vêm concedidos; a interface abre; **FLAG_SECURE**: print de controle da tela inicial com conteúdo, print com o app aberto recusado pelo Android, janela da MainActivity com `SECURE`; nenhuma porta de depuração de WebView (lista de sockets legível); nada do console no logcat; o app sobrevive ao ir para o fundo. Emulador **não** é celular de verdade | Não | Cenários de `TESTE_EM_CELULAR.md` |
 | GitHub Release com APK e SHA-256 | Sim | Não: precisa dos segredos | — | Rodar `android-release` |
-| **APK assinado pronto para instalar** | Pipeline pronto | — | — | **Não existe ainda**: depende da chave do proprietário (`APK_RELEASE.md`) |
+| **APK assinado pronto para instalar** | Sim: Release `android-1.0.102` (24/10/2026, commit `7d362d9`), SHA-256 `fd81baa9adef8da50029e9c567c30b2fe50d135b2b4982d4b1b21b7c1a728f93`, certificado `8ff069c6458f4101138f89dd857a736e796f19c76ddf84d7bf63d2d13a619665` | Sim: verificação do workflow aprovou assinatura, flags e permissões (câmera, internet, microfone, biometria) | Não | Instalar, migrar a administradora e rodar `TESTE_EM_CELULAR.md` |
 | Migração da administradora do debug sem perder a conta | Sim (pacote novo + troca durável em duas fases) | Sim: debug antigo aprova e se apaga, app novo morto antes e depois (`app/test/pairing.test.mjs`, `server/test/api.test.mjs`) | Não | Cenário 1, com o celular dela |
 
 ## P4 Funções no Android
@@ -75,7 +75,7 @@ segredo `FCM_SERVICE_ACCOUNT`, que não será criado).
 
 ## O que o proprietário precisa fazer, em ordem
 
-1. Rodar `deploy-api`. A troca durável precisa da API nova.
+1. ~~Rodar `deploy-api`~~ (feito em 24/10).
 2. Gerar a chave do APK e cadastrar os segredos (`APK_RELEASE.md`).
 3. Rodar `android-release`, conferir SHA-256 e certificado, e instalar.
 4. Migrar a administradora (`MIGRAR_DEBUG_PARA_RELEASE.md`). **Anote o PIN novo antes de aprovar.**
