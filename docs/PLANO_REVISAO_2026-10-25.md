@@ -10,6 +10,7 @@ Estado: **planejamento**. Nenhum código, deploy ou APK foi alterado por este do
 | v1 | GPT | Plano de envio de 1 a 5 fotos, achados F01–F18, testes e ordem de entrega |
 | v2 | Claude | Conferência de F01–F18 no código, bugs novos N1–N3, respostas sobre lista e busca, decisões D1–D5 |
 | v3 | Claude | Decisões do proprietário, regra "igual ao WhatsApp", **pesquisa de privacidade e criptografia** (S1–S11), plano e ordem consolidados |
+| v3.1 | Claude | Regra do proprietário: **funcionalidades iguais ao WhatsApp, segurança nossa** (os 50 passos). Comparação completa das funções **dentro da conversa** (seção 2.2). **Confirmação do que o prazo apaga de verdade**, inclusive na Cloudflare (seção 3.6, S12–S13) |
 
 Legenda de evidência: **verificado no código** (lido, sem rodar no celular), **reproduzido** (teste isolado com partes simuladas), **a validar** (mecanismo concreto, precisa de teste). Nada deste documento foi testado em celular de verdade.
 
@@ -25,7 +26,14 @@ Legenda de evidência: **verificado no código** (lido, sem rodar no celular), *
    - a foto de **ver uma vez pode ser gasta sem a pessoa ver** (N1 e S6).
 3. **Fotos íntimas:** dá para trocar com muito mais segurança que no WhatsApp quanto ao servidor e ao celular roubado. Ninguém consegue impedir que quem recebe guarde a imagem. No Android o print fica bloqueado; **no iPhone, não** (seção 3.5).
 4. As decisões D1–D5 foram aprovadas pelo proprietário (seção 1). "Excluir conversa" vale **só para quem exclui**, como no WhatsApp.
-5. **Próximo passo:** a entrega A1 (seção 8). Ela só começa quando o proprietário liberar a implementação.
+5. **Regra do proprietário (25/10):** o app copia as **funcionalidades** do WhatsApp; a **segurança é nossa**, guiada pelos 50 passos (`ANALISE_FORENSE_50.md`) e pelas decisões de privacidade. Quando uma função do WhatsApp fere um dos 50 passos, ela fica de fora ou é adaptada (seção 2.2).
+6. **Prazo de 1 dia apaga de verdade?** Sim:
+   - a mensagem some do celular e é apagada do servidor;
+   - a mídia é apagada do R2 da Cloudflare no minuto do vencimento;
+   - **a chave que abria a mídia deixa de existir**: ela nunca esteve no servidor, e no celular some junto com a troca da chave do banco.
+   
+   Ressalva: a Cloudflare guarda **30 dias de histórico** do banco do servidor. Esse histórico tem só conteúdo cifrado, que não dá mais para abrir, e metadados. Detalhes e a correção proposta na seção 3.6.
+7. **Próximo passo:** a entrega A1 (seção 8). Ela só começa quando o proprietário liberar a implementação.
 
 ---
 
@@ -41,9 +49,11 @@ Legenda de evidência: **verificado no código** (lido, sem rodar no celular), *
 | D4 | Envio de **1 a 5 fotos** de uma vez, com ver uma vez por foto. Vem **depois** das correções A1/A2 |
 | D5 | Nome e ícone disfarçados (aliases): **adiado** |
 
-### 1.2 Novas decisões (recomendação; valem como decididas se o proprietário não mudar)
+### 1.2 Decididas pela regra "funcionalidade do WhatsApp, segurança nossa" (25/10/2026)
 
-| ID | Pergunta | Recomendação |
+D6, D7, D9 e D10 seguem o WhatsApp porque são funcionalidades. D8 e D11 são proteções nossas.
+
+| ID | Pergunta | Decisão |
 |---|---|---|
 | D6 | Ver uma vez: "segurar para ver" (hoje) ou "tocar para abrir", como no WhatsApp? | **Tocar para abrir, como no WhatsApp.** Fica aberta até fechar (X ou voltar) e fecha sozinha se o app sair da tela. Segurar não impede print no iPhone e causa o bug S6 |
 | D7 | Editar mensagem: sem limite (hoje) ou só nos primeiros 15 min, como no WhatsApp? | **15 minutos, como no WhatsApp** |
@@ -54,9 +64,14 @@ Legenda de evidência: **verificado no código** (lido, sem rodar no celular), *
 
 ---
 
-## 2. Regra "igual ao WhatsApp"
+## 2. Regra: funcionalidades do WhatsApp, segurança nossa
 
-**Princípio:** onde não há conflito com privacidade, o app copia o comportamento do WhatsApp: nomes dos botões, ordem, onde fica cada ação e o que acontece. Onde o Pacto Talk é diferente **de propósito**, a diferença está listada abaixo com o motivo e é mantida.
+**Princípio (proprietário, 25/10/2026):**
+- **Funcionalidades:** copiar o WhatsApp, inclusive nomes dos botões, gestos, ordem, onde fica cada ação e o que acontece.
+- **Segurança:** é própria, guiada pelos 50 passos de `ANALISE_FORENSE_50.md` e pelas decisões de privacidade (especificação v7, ADRs, este documento).
+- **Conflito:** quando uma função do WhatsApp fere um dos 50 passos, ela é **adaptada** (mesmo jeito de usar, proteção nossa) ou **fica de fora**, com o passo citado.
+
+### 2.1 Lista de conversas e ações gerais
 
 | Recurso | WhatsApp | Pacto Talk (plano) | Igual? |
 |---|---|---|---|
@@ -82,6 +97,85 @@ Legenda de evidência: **verificado no código** (lido, sem rodar no celular), *
 | Várias fotos de uma vez | Muitas | Até 5 (D4) | Limite próprio |
 
 As referências do WhatsApp estão na seção 10. Antes de implementar cada item, conferir o comportamento atual no próprio WhatsApp: ele muda com o tempo. As páginas oficiais de ajuda não abriram nesta pesquisa, então os números acima (48 h, 15 min, 3 fixadas, 14 dias) vêm de fontes secundárias e precisam dessa conferência.
+
+### 2.2 Funcionalidades dentro da conversa
+
+Inventário do que existe hoje (`chat.js`, `room-menu.js`, `editor.js`, `audio.js`, `viewer.js`) comparado com o WhatsApp. "Passo n" é o item de `ANALISE_FORENSE_50.md` que decide a adaptação.
+
+**a) Já existe e funciona como no WhatsApp**
+
+| Função | Pacto Talk hoje | Ajuste para ficar igual |
+|---|---|---|
+| Texto, emojis | Sim, com painel próprio de emojis | — |
+| Responder (citação) | Sim | Tocar na citação deve levar à mensagem original (falta) |
+| Reações | Sim, os mesmos 6 do WhatsApp (👍 ❤️ 😂 😮 😢 🙏) | Abrir pela barra que aparece ao segurar a mensagem (item b.1) |
+| Editar ("editada") | Sim, sem limite | Limitar a 15 min (D7) |
+| Apagar para mim / para todos | Sim | Para todos: até vencer, sem "Mensagem apagada" (diferença de segurança, seção 2.1) |
+| Buscar na conversa | Sim | — |
+| Rascunho guardado | Sim (cifrado) | — |
+| Foto e vídeo com legenda | Sim (vídeo até 5 min) | Lote de até 5 fotos (D4) |
+| Ver uma vez (foto e vídeo) | Sim, "segurar para ver" | Tocar para abrir (D6) |
+| Editor de foto | Girar, cortar, desenhar, texto, cores | Desenho não pode sumir ao cortar (seção 5.2) |
+| Áudio | Até 1 h, velocidades 1×, 1,5× e 2× | Gravação no estilo WhatsApp (item b.6) |
+| Documento | Texto e PDF dentro do app | — |
+| Silenciar | 1 h, 8 h, 24 h, 7 dias, até reativar | Já cobre as opções do WhatsApp (8 h, 1 semana, sempre) |
+| Fixar, arquivar | Sim | Até 3 fixadas (D9) |
+| Grupo: nome, foto, fundo, adicionar, remover, sair, encerrar | Sim | Excluir grupo depois de sair (seção 6) |
+| Admin do grupo | Uma líder, que pode ceder (V7-004/005) | Mantido: regra de segurança dos membros confirmados |
+| Mensagens temporárias | Sempre ligadas, 12 h a 15 dias | Diferença de segurança (passo 9) |
+| Status | Stories para quem a pessoa escolher | Sem lista de "quem viu" (V6-022) |
+| Perfil | Apelido, foto e recado | — |
+
+**b) Falta e vamos copiar** (com a proteção nossa ao lado)
+
+| # | Função do WhatsApp | Como fica no Pacto Talk | Proteção | Entrega |
+|---|---|---|---|---|
+| 1 | Segurar a mensagem: barra de reações em cima + menu (Responder, Reagir, Editar, Fixar, Favoritar, Apagar, Selecionar) | Igual | — | B |
+| 2 | Deslizar a mensagem para o lado para responder | Igual | — | B |
+| 3 | Selecionar várias mensagens (apagar para mim/todos de uma vez) | Igual | — | B |
+| 4 | Separador de data ("Hoje", "Ontem", data) e faixa "N mensagens não lidas" | Igual | Só local | B |
+| 5 | Botão "↓" com o número de não lidas para descer ao fim | Igual (resolve N1 junto) | — | A1/B |
+| 6 | Áudio: **segurar o microfone** para gravar, **deslizar para cancelar**, **cadeado** para gravar sem segurar, pausar, **ouvir antes de enviar**, onda sonora | Igual | Cancelar solta o microfone na hora (F12); nada vai para arquivo | A1 (cancelamento) + B (gestos) |
+| 7 | Áudio de **ver uma vez** | Igual | Mesmo consumo único no servidor | C |
+| 8 | Estado de envio: relógio (enviando) → ✓ (enviada) e "toque para reenviar" se falhar | Igual até o ✓ simples | **Sem ✓✓ de entregue e sem azul de lida** (V6-022) | B (com F10) |
+| 9 | Formatação: \*negrito\*, \_itálico\_, \~tachado\~, \`\`\`mono\`\`\`, lista e citação | Igual | Mostrado como texto formatado, nunca como HTML | B |
+| 10 | **@menção** no grupo | Igual | Só destaca na tela; sem aviso extra fora do app | B |
+| 11 | **Fixar mensagem** na conversa (até 3) | Igual, por quanto tempo escolher, sem passar do prazo da mensagem | Anúncio cifrado; some quando a mensagem vence | C |
+| 12 | **Favoritar** mensagem (estrela) e lista de favoritas | Igual | Só no aparelho; **a favorita vence junto** (passo 9) | C |
+| 13 | **Mídia e documentos da conversa** (galeria da conversa) | Igual | Miniatura só na memória, nunca em arquivo (passo 22); ver uma vez não aparece | C |
+| 14 | **Busca em todas as conversas** (mensagens) | Igual | Só no aparelho, no banco cifrado | C |
+| 15 | **Responder em particular** (de um grupo para o 1:1) | Igual | — | C |
+| 16 | **Descrição do grupo** | Igual | Cifrada, como o nome do grupo | C |
+| 17 | **Papel de parede** em conversa individual | Igual | Só no aparelho, cifrado | C |
+| 18 | **Enquete** | Igual | Votos cifrados, só para quem está no grupo | D |
+| 19 | **Vídeo redondo** (recado em vídeo) | Igual | Câmera do app (passo 20) | D |
+| 20 | **Conversa comigo mesmo** (anotações) | Igual | Também vence (passo 9) | D |
+| 21 | Foto em **HD** | Opção HD com limite maior | Sempre recodificada, sem EXIF | D |
+
+**c) Adaptadas: mesmo jeito de usar, proteção nossa**
+
+| Função do WhatsApp | Adaptação | Por quê |
+|---|---|---|
+| Copiar mensagem | **Não copia mensagem recebida** (hoje bloqueado no CSS). Copiar a própria mensagem: avaliar | Passo 47 |
+| Links clicáveis com prévia | Link aparece como texto. **Sem prévia** e sem abrir sozinho; se um dia abrir, só com confirmação "Abrir fora do app?" | Buscar a prévia revela o IP e cria miniatura (passos 22 e 36) |
+| Dados da mensagem (lida/entregue por pessoa) | Mostra só "Enviada às … · Some em …" (já aparece no menu) | V6-022 |
+| Ver uma vez | Tocar para abrir (D6), print bloqueado no Android, aviso no iPhone (D8) | Passo 33 |
+| Notificação | Android: nenhuma; iPhone: "novas mensagens" | Passo 25 e decisão de 24/10 |
+
+**d) Ficam de fora** (ferem os 50 passos ou a especificação)
+
+| Função do WhatsApp | Motivo |
+|---|---|
+| Encaminhar, compartilhar, salvar na galeria, exportar conversa | Passos 40 e 47 (nada sai do app) |
+| Backup na nuvem | Passos 26 e 27 |
+| WhatsApp Web / computador / segundo aparelho | Passos 29 e 48 (um aparelho por pessoa) |
+| Confirmação de leitura, online, visto por último, digitando, "quem viu" o status | V6-022 e passo 34 |
+| GIFs e figurinhas de bibliotecas externas | Buscar em serviço externo revela o que se procura; arquivos de fora não passam pela recodificação (V7-016). Figurinha feita no app a partir de foto própria: talvez depois |
+| Localização (atual ou em tempo real) | Dado sensível; fora do escopo (passos 24 e 41) |
+| Contato (cartão) | O app não usa telefone nem e-mail |
+| Chamadas de voz e vídeo | Fora do escopo agora: exigem servidor de mídia e expõem o IP entre as pessoas. Decisão futura, com ADR |
+| Comunidades e listas de transmissão | Círculo de no máximo 10 pessoas |
+| "Mensagem apagada" no lugar da apagada | ADR 0012: não deixar rastro |
 
 ---
 
@@ -125,8 +219,10 @@ Também pesquisei: avisos de segurança do vodozemac (nenhum encontrado para 202
 | S7 | Baixa | Verificado no código | O servidor vê o **tamanho exato** de cada foto, vídeo e áudio. Isso permite distinguir foto de vídeo e estimar a duração | Arredondar o tamanho cifrado em degraus (por exemplo, múltiplos de 256 KB) |
 | S8 | Baixa | Verificado no código | O número de segurança é **de uma pessoa só**: cada um compara o seu. Não há QR nem marca "verificado" | QR de verificação presencial com o número das duas pessoas (como o WhatsApp) e marca "Verificado" na conversa. Faz parte de S1 |
 | S9 | Baixa | Verificado no código | **PIN de 6 dígitos no iPhone:** quem tiver **ao mesmo tempo** o servidor e uma cópia do celular pode testar o milhão de PINs fora do app. No Android, falta ainda o segredo do Keystore (hardware), o que torna isso muito mais difícil | Recomendar, em Ajustes, PIN de 8 ou mais dígitos ou frase-senha para quem troca conteúdo sensível |
-| S10 | Baixa | Comportamento do sistema | Texto copiado vai para a área de transferência do sistema (histórico, sincronização de alguns teclados). O WhatsApp faz igual | Manter; explicar em Ajustes → Privacidade |
+| S10 | Baixa | Verificado no código | Copiar mensagem recebida já está bloqueado (`user-select: none`, passo 47). O que a própria pessoa digita ou cola passa pela área de transferência e pelo teclado do sistema | Coberto por S5. Se um dia "copiar a própria mensagem" entrar (seção 2.2 c), marcar o conteúdo como sensível no Android |
 | S11 | Baixa (a validar) | Plataforma | No iPhone, a cobertura de privacidade é aplicada quando o app sai da tela. É preciso confirmar que a miniatura do seletor de apps não captura a conversa antes disso | Incluir no roteiro de teste do iPhone |
+| **S12** | Média | Documentação da Cloudflare | **A "parte do servidor" destruída volta por 30 dias.** O D1 (Time Travel) e o SQLite dos Durable Objects (recuperação no tempo) guardam 30 dias de histórico. Quem controla a conta da Cloudflare, ou a própria Cloudflare por ordem judicial, pode restaurar uma parte S apagada por 5 erros, coação, emergência ou prazo. Restaurar S tira o limite de 5 tentativas; ainda faltam o PIN e a passkey/Keystore. Já aparece como "limite honesto" em `ANALISE_FORENSE_50.md`, mas tem correção | **Destruição por chave ("crypto-shredding")**: guardar S cifrada por uma chave própria de cada cofre, mantida num objeto do **R2**, que não oferece versionamento. Destruir = apagar o objeto do R2. O histórico de 30 dias passa a ter só S cifrada por uma chave que não existe mais. Confirmar antes, na documentação do R2, que objeto apagado não é recuperável |
+| S13 | Baixa | Verificado nos testes | Falta teste automático de que a **mídia vencida é apagada do R2** pelo alarme (o teste de vencimento só cobre os envelopes de texto) | Teste: enviar mídia com prazo curto, avançar o alarme e conferir que o objeto saiu do R2, o Durable Object está vazio e abrir devolve "expirada" |
 
 **Conferido e sem problema:** as chaves de uso único do Olm não são assinadas, mas um servidor que troque essas chaves só quebra a conversa, sem conseguir ler (o acordo também usa a chave de identidade). Para o PIN de coação, o código de emergência e a recuperação da administradora, confirmei que a recuperação aparece para os outros como troca de chave. Esse aviso depende de S1.
 
@@ -139,7 +235,7 @@ Também pesquisei: avisos de segurança do vodozemac (nenhum encontrado para 202
 | Ver uma vez abre uma única vez | **Sim** no servidor; na tela: N1 e S6 |
 | Quem enviou não reabre o ver uma vez | **Sim** |
 | Print bloqueado | **Android: sim** (exceto celular com root ou outra câmera filmando a tela). **iPhone: não** (limite do sistema, S4) |
-| Os dados morrem (somem no prazo e não sobram) | **Sim**, com a ressalva S2 a confirmar |
+| Os dados morrem (somem no prazo e não sobram) | **Sim**: celular, D1 e R2 apagam no prazo e a chave da mídia é destruída (seção 3.6). Ressalvas: S2 a confirmar e o histórico de 30 dias da Cloudflare (S12) |
 | Fotos sem localização nem dados do aparelho | **Sim** |
 | Apagar para todos | **Texto: sim. Mídia: parcial**: a revogação pode falhar em silêncio (F04) |
 | Desfazer vínculo revoga o que estava pendente | **Não ainda** (F05) |
@@ -170,6 +266,44 @@ Também pesquisei: avisos de segurança do vodozemac (nenhum encontrado para 202
 4. Usar PIN de 8 ou mais dígitos.
 5. Lembrar que **no iPhone o print não é bloqueado**.
 6. Mandar só para quem você confia: a tecnologia protege o caminho, não a pessoa do outro lado.
+
+### 3.6 Prazo de 1 dia: o que é apagado de verdade
+
+Conferido no código: `server/src/index.js` (`scheduled`), `server/src/media.js` (`alarm`, `purge`), `server/src/room.js`, `server/migrations/0001_init.sql`, `deploy-api.yml` (regra do R2), `packages/client/src/client.js`, `app/src/db/db-worker.js` e `app/src/session.js`.
+
+**Como o prazo funciona:**
+- Cada conversa tem **dois prazos**: um para mensagens e outro para mídia (menu ⋮ → "Prazos de mensagens e mídia"). Quem muda é a líder (no 1:1, quem iniciou).
+- **O prazo novo vale só para o que for enviado depois**, como o app avisa: mensagens antigas mantêm o prazo com que foram enviadas.
+- A contagem começa quando o **servidor** aceita a mensagem. O relógio do celular não conta.
+- Stories têm prazo próprio (24 h por padrão).
+
+**Linha do tempo de uma foto enviada com prazo de 1 dia:**
+
+| Quando | Onde | O que acontece | Chave |
+|---|---|---|---|
+| Envio | Celular de quem envia | A foto é cifrada com uma **chave nova só dela** (AES-256). A chave vai dentro do envelope Olm de cada destinatário | Nunca vai ao servidor |
+| Envio | Cloudflare | **R2**: a foto cifrada. **Durable Object da mídia**: quem pode abrir e o prazo, com **alarme marcado para o vencimento**. **D1**: um envelope por destinatário e o registro mínimo (conversa, id, remetente, horários) | O servidor nunca recebe a chave |
+| Destinatário sincroniza | Cloudflare | O envelope do destinatário é **apagado do D1 na hora** (confirmação), sem esperar o prazo | — |
+| Destinatário sincroniza | Celular de quem recebe | A mensagem fica no banco cifrado. O Olm descarta a chave daquele envelope depois de decifrar (sigilo futuro) | A chave da foto fica só dentro do banco cifrado |
+| **24 h depois** | Tela | Some na hora: o app compara com o horário do servidor antes de mostrar | — |
+| **24 h depois** | Celulares | É apagada do banco na próxima sincronização e, **15 s depois, o banco é refeito num arquivo novo com chave nova**; o arquivo antigo é removido (`secure_delete`). O mesmo acontece ao trancar e a cada 24 h | **A chave da foto deixa de existir**: só estava no registro apagado, e o arquivo antigo estava cifrado com uma chave do banco que também foi destruída |
+| **24 h depois** | R2 | O **alarme apaga o objeto do R2** e todo o Durable Object da mídia. Se alguém tentar abrir, recebe "expirada". Rede de segurança: regra do R2 apaga qualquer objeto com mais de 16 dias | — |
+| Até 15 min depois | D1 | A limpeza a cada 15 min apaga envelopes não entregues, o registro da mensagem, marcas de apagado e a reserva de cota | — |
+
+**Resposta: sim, apaga de verdade, e a chave é destruída.** A chave que abre a foto nunca esteve na Cloudflare. Nos celulares, ela some quando o banco é refeito com chave nova. Mesmo que alguém tenha copiado o arquivo do banco antes, a chave desse arquivo já não existe.
+
+**Ressalvas honestas:**
+1. **Histórico de 30 dias da Cloudflare.** O D1 e os Durable Objects guardam 30 dias de histórico, que podem ser restaurados por quem controla a conta ou pela Cloudflare por ordem judicial.
+   - O que daria para restaurar: envelopes **cifrados** e metadados (quem mandou para quem e quando).
+   - O conteúdo continua ilegível, porque as chaves que o abririam já foram destruídas nos celulares.
+   - Única exceção teórica: um envelope **nunca entregue** cujo destinatário ainda tem o celular. A sessão Olm dele ainda poderia abrir esse envelope, mas exigiria também desbloquear o app dessa pessoa (PIN + biometria + servidor).
+   - O R2 não oferece versionamento: o objeto apagado da foto não fica guardado por lá (confirmar na documentação antes de prometer). E mesmo restaurado, seria cifrado sem chave.
+2. **Celular desligado ou app fechado.** O registro vencido continua no banco cifrado até a próxima abertura do app. Ninguém consegue ler sem PIN + biometria + parte do servidor, e o interruptor de inatividade destrói a parte do servidor depois do prazo escolhido.
+3. **Cliente modificado ou print.** Quem recebeu e guardou por fora (print no iPhone, outra câmera, app adulterado) não perde o que guardou. Vale para qualquer app.
+4. **Fotos de perfil e de grupo** não têm prazo. Valem até serem trocadas ou removidas, e só a versão atual existe.
+5. **A "parte do servidor" do cofre** é um caso diferente (S12). Ela pode ser restaurada do histórico de 30 dias; a correção proposta é a destruição por chave no R2.
+
+**O que falta para fechar:** S12 (destruição por chave da parte do servidor), S13 (teste automático do alarme da mídia) e um teste no celular: mandar foto com prazo de 12 h e, depois de vencer, conferir que a mensagem sumiu nos dois aparelhos e o objeto sumiu do R2.
 
 ---
 
@@ -305,11 +439,11 @@ Pessoas removidas não aparecem (N2). Exige trocar a regra V7-006 para "busca lo
 
 | Entrega | Conteúdo | Para avançar |
 |---|---|---|
-| **A1 — urgente** | F12 (microfone), F06 (nada abre depois de trancar), N1 + S6 + D6 (redesenho e ver uma vez por toque), F17 (seletor × bloqueio), F14 (fila do banco), F01 (conversa duplicada), **teste de S2** no APK de depuração | Testes automáticos de cada caminho + **teste no celular** de F12, F17 e S2 |
-| **A2 — privacidade** | S1 + S8 (aviso de chave na conversa, verificado, QR), S3 (círculo assinado), F04, F05, F16, F07, F09, S2 (correção, se confirmado), S5 (teclado anônimo), F13, F18, N2, N3 | Teste de servidor malicioso trocando chave e incluindo membro (V7-022) |
-| **B — conversas** | D3 (limpar/excluir/sair/excluir grupo), F03, D1 (busca), D2 + D10 (prévia, contador, não lida), D7 (editar 15 min), D9 (fixar 3), D8 (aviso iPhone) | Nada ressurge depois de sincronizar ou reiniciar; liderança mantida |
-| **C — anexos** | D4 (lote de 5), F10, F11, F15, S7 (tamanho arredondado) | 62 combinações de modo e falhas parciais testadas |
-| **D** | D5 (aliases), se for aprovado um dia | — |
+| **A1 — urgente** | F12 (microfone), F06 (nada abre depois de trancar), N1 + S6 + D6 (redesenho e ver uma vez por toque), F17 (seletor × bloqueio), F14 (fila do banco), F01 (conversa duplicada), botão "↓" (2.2 b.5), cancelar áudio ao soltar o microfone (2.2 b.6), **teste de S2** no APK de depuração | Testes automáticos de cada caminho + **teste no celular** de F12, F17 e S2 |
+| **A2 — privacidade** | S1 + S8 (aviso de chave na conversa, verificado, QR), S3 (círculo assinado), F04, F05, F16, F07, F09, S2 (correção, se confirmado), S5 (teclado anônimo), **S12 (destruição por chave da parte do servidor)**, S13 (teste do alarme da mídia), F13, F18, N2, N3 | Teste de servidor malicioso trocando chave e incluindo membro (V7-022) |
+| **B — conversas** | D3 (limpar/excluir/sair/excluir grupo), F03, D1 (busca), D2 + D10 (prévia, contador, não lida), D7 (editar 15 min), D9 (fixar 3), D8 (aviso iPhone), funções da conversa 2.2 b.1–b.10 (segurar a mensagem, deslizar para responder, selecionar várias, separadores de data, gestos do áudio, ✓ de enviada, formatação, @menção) | Nada ressurge depois de sincronizar ou reiniciar; liderança mantida |
+| **C — anexos e extras** | D4 (lote de 5), F10, F11, F15, S7 (tamanho arredondado), funções 2.2 b.7 e b.11–b.17 (áudio de ver uma vez, fixar mensagem, favoritas, mídia da conversa, busca global, responder em particular, descrição do grupo, papel de parede) | 62 combinações de modo e falhas parciais testadas |
+| **D** | Funções 2.2 b.18–b.21 (enquete, vídeo redondo, conversa comigo, foto HD); D5 (aliases), se for aprovado um dia | — |
 
 Cada entrega deve trazer o teste automático do caminho corrigido e a documentação atualizada. Nada vira "testado no celular" sem ter sido rodado num celular de verdade, com versão do APK, commit e aparelho anotados.
 
@@ -324,6 +458,8 @@ Cada entrega deve trazer o teste automático do caminho corrigido e a documenta�
 - S5: digitar no app e conferir que o teclado não sugere essas palavras fora dele.
 - S6: tocar no ver uma vez e soltar na hora; cortar a rede no meio do download.
 - Procurar originais, EXIF, legendas, nomes e chaves em claro nos arquivos do app e nos logs.
+- Prazo (seção 3.6): mídia com prazo curto vencida sai do R2 e do Durable Object, e abrir devolve "expirada" (S13). Celular de verdade: foto com prazo de 12 h some nos dois aparelhos depois de vencer.
+- S12: depois da mudança, apagar o objeto do R2 deixa a parte S restaurada do histórico inútil.
 
 **Conversas e exclusão:** abrir o contato repetidas vezes, com toque duplo, os dois criando ao mesmo tempo e resposta perdida, e deve existir uma conversa só. Excluir conversa vazia e com conteúdo, depois reiniciar, sincronizar, trancar e atualizar: nada volta, e o outro continua vendo tudo. Excluir grupo só depois de sair. Abrir conversa nova depois de desfazer vínculo dá id novo. Apagar mídia para todos e tentar abrir pela referência antiga. Revogação no desfazer vínculo e na remoção.
 

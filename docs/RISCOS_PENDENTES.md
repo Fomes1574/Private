@@ -20,6 +20,7 @@ Ordem: do mais grave para o menos grave. "Decisão" = precisa do proprietário.
 | R-14 | Credenciais que podem ter sido expostas em conversas, prints ou logs | Depende | `ROTACAO_DE_CREDENCIAIS.md`: trocar cada uma sem derrubar contas |
 | R-15 | Aviso de troca de chave só na memória e só em Ajustes: some ao fechar o app; o envio segue para a chave nova (S1 de `PLANO_REVISAO_2026-10-25.md`) | Alta | Planejado na entrega A2: aviso cifrado e persistente na conversa, estado "verificado" e pausa de envio |
 | R-16 | Vídeo/áudio grande decifrado pode ser gravado em disco pelo armazenamento de blobs do WebView (S2) | Alta, a validar | Teste no APK de depuração na entrega A1; correção em A2 se confirmado |
+| R-17 | A parte do servidor destruída (erros, coação, emergência, prazo) pode ser restaurada do histórico de 30 dias do D1/Durable Object por quem controla a conta Cloudflare (S12) | Média | Planejado na entrega A2: destruição por chave mantida no R2 |
 
 ## O que foi corrigido nesta rodada (antes era risco)
 

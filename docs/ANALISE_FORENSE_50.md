@@ -108,6 +108,6 @@ sozinho).
 - **Modo de Bloqueio do iPhone:** ele desliga o WebAssembly, e o app depende disso para a criptografia. Há relatos (WebKit bug 273824) de que nem a exceção por site resolve. **Testar no aparelho**; se travar, o app não abre com o Modo de Bloqueio ligado.
 
 ## Limites honestos
-- **Histórico de 30 dias da Cloudflare:** o D1 e o SQLite do Durable Object guardam histórico para restauração. Quem controla a conta (ou a Cloudflare, por ordem judicial) poderia restaurar uma parte S já destruída. Mesmo assim, ainda faltariam o PIN e a passkey (Face ID) da pessoa.
+- **Histórico de 30 dias da Cloudflare:** o D1 e o SQLite do Durable Object guardam histórico para restauração. Quem controla a conta (ou a Cloudflare, por ordem judicial) poderia restaurar uma parte S já destruída. Mesmo assim, ainda faltariam o PIN e a passkey (Face ID) da pessoa. Correção planejada (S12 em `PLANO_REVISAO_2026-10-25.md`): guardar a parte S cifrada por uma chave mantida no R2, que não tem histórico; apagar essa chave torna inútil qualquer cópia restaurada.
 - **Abrir o app exige internet**, por desenho (a especificação já aceitou isso).
 - **Memória:** JavaScript não garante apagar todas as cópias de um dado na memória; por isso o padrão é trancar na hora.
