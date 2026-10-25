@@ -1,9 +1,9 @@
-# Pacto Talk — plano consolidado e revisão de privacidade (v3)
+# Pacto Talk — plano consolidado e revisão de privacidade (versão final)
 
 Data: 25/10/2026  
 Repositório: [Fomes1574/Private](https://github.com/Fomes1574/Private), branch `ccr-de59a90b-gr4vug`  
 Código analisado: commit `03fa5d0` (o código é idêntico em `9965770`; só a documentação mudou)  
-Estado: **planejamento**. Nenhum código, deploy ou APK foi alterado por este documento.
+Estado: **planejamento concluído**: versão final, aguardando o proprietário liberar a entrega A1. Nenhum código, deploy ou APK foi alterado por este documento.
 
 | Versão | Autor | O que trouxe |
 |---|---|---|
@@ -11,6 +11,7 @@ Estado: **planejamento**. Nenhum código, deploy ou APK foi alterado por este do
 | v2 | Claude | Conferência de F01–F18 no código, bugs novos N1–N3, respostas sobre lista e busca, decisões D1–D5 |
 | v3 | Claude | Decisões do proprietário, regra "igual ao WhatsApp", **pesquisa de privacidade e criptografia** (S1–S11), plano e ordem consolidados |
 | v3.1 | Claude | Regra do proprietário: **funcionalidades iguais ao WhatsApp, segurança nossa** (os 50 passos). Comparação completa das funções **dentro da conversa** (seção 2.2). **Confirmação do que o prazo apaga de verdade**, inclusive na Cloudflare (seção 3.6, S12–S13) |
+| Final | Claude | Revisão de consistência; documento fechado para servir de base à implementação |
 
 Legenda de evidência: **verificado no código** (lido, sem rodar no celular), **reproduzido** (teste isolado com partes simuladas), **a validar** (mecanismo concreto, precisa de teste). Nada deste documento foi testado em celular de verdade.
 
