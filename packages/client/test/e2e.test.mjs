@@ -12,8 +12,17 @@ await loadCrypto(await readFile(new URL('../../crypto/pkg/mp_crypto_bg.wasm', im
 
 let api;
 const p = {};
+// O workerd local fecha conexões ociosas; depois de uma pausa longa (d1 pela
+// linha de comando) o fetch do Node pode reaproveitar um socket já fechado.
+// Só no teste, e só para GET: tenta de novo uma vez.
+const testFetch = async (url, opts) => {
+  try { return await fetch(url, opts); } catch (e) {
+    if (opts?.method !== 'GET' || e.cause?.code !== 'UND_ERR_SOCKET') throw e;
+    return fetch(url, opts);
+  }
+};
 const newClient = (store = new MemoryStore(), pickleKey = crypto.getRandomValues(new Uint8Array(32))) =>
-  new MessengerClient({ api: new Api(api.base, new TrustedClock()), store, pickleKey });
+  new MessengerClient({ api: new Api(api.base, new TrustedClock(), { fetchImpl: testFetch }), store, pickleKey });
 
 before(async () => { api = await startApi(8794); });
 after(() => api?.stop());
