@@ -2,13 +2,18 @@
 // aparelho. Entra a foto já recodificada (sem metadados) e sai um JPEG novo.
 // Nada sobreposto automaticamente: só o que a própria pessoa desenhar.
 import { h } from './ui.js';
+import { sensitiveScope } from './sensitive-scope.js';
 
 const COLORS = ['#FFFFFF', '#000000', '#FF5A5A', '#FFD23F', '#3DDC97', '#6CB4FF'];
 const CROPS = [['Original', null], ['Quadrado', 1], ['4:5', 4 / 5], ['16:9', 16 / 9]];
 
 export function editPhoto(bytes, mime = 'image/jpeg') {
-  return new Promise(async (resolve) => {
-    const src = await createImageBitmap(new Blob([bytes], { type: mime }));
+  return new Promise(async (resolve, reject) => {
+    const scope = sensitiveScope();
+    let src;
+    try { src = await createImageBitmap(new Blob([bytes], { type: mime })); }
+    catch (e) { scope.finish(); reject(e); return; }
+    if (!scope.valid()) { src.close(); scope.finish(); resolve(null); return; }
     let rot = 0, crop = null, color = COLORS[2], mode = 'draw';
     let marks = []; // traços e textos, em coordenadas da imagem final
     const canvas = h('canvas', { class: 'editor-canvas', 'aria-label': 'Foto em edição' });
@@ -84,7 +89,8 @@ export function editPhoto(bytes, mime = 'image/jpeg') {
       if (c === color) b.classList.add('on');
       return b;
     });
-    const done = (out) => { overlay.remove(); src.close(); resolve(out); };
+    let finished = false;
+    const done = (out) => { if (finished) { out?.bytes?.fill(0); return; } finished = true; overlay.replaceChildren(); overlay.remove(); canvas.width = 0; canvas.height = 0; marks = []; textIn.value = ''; src.close(); scope.finish(); resolve(out); };
     const overlay = h('div', { class: 'editor', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Editar foto' },
       h('div', { class: 'editor-bar row' },
         tool('Cancelar', () => done(null)),
@@ -97,10 +103,14 @@ export function editPhoto(bytes, mime = 'image/jpeg') {
       h('div', { class: 'editor-bar row' },
         h('button', { type: 'button', class: 'block', text: 'Usar foto', onclick: async () => {
           const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.85));
+          if (!blob) { done(null); return; }
           const out = new Uint8Array(await blob.arrayBuffer());
+          if (!scope.valid()) { out.fill(0); done(null); return; }
           g.clearRect(0, 0, canvas.width, canvas.height);
           done({ bytes: out, mime: 'image/jpeg', width: canvas.width, height: canvas.height });
         } })));
+    scope.onCancel(() => done(null));
+    if (!scope.valid()) { done(null); return; }
     document.body.append(overlay);
     draw();
   });

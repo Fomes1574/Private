@@ -8,6 +8,7 @@ if (!BUILD.testHooks && !BUILD.devBuild) for (const k of ['log', 'info', 'warn',
 import { h, mount, toast, clearOverlays } from './ui.js';
 import { CONFIG } from './config.js';
 import { scriptURL } from './tt.js';
+import { cancelSensitiveOperations } from './sensitive-scope.js';
 import * as session from './session.js';
 import { welcome, pairWaitScreen } from './screens/welcome.js';
 import { unlockScreen } from './screens/unlock.js';
@@ -23,15 +24,20 @@ import { storiesScreen } from './screens/stories.js';
 const lockAfter = () => session.S.prefs?.lockAfter ?? 0;
 const routes = { welcome, pairWait: pairWaitScreen, unlock: unlockScreen, chats: chatsScreen, chat: chatScreen, newGroup: newGroupScreen, nickname: nicknameScreen, settings: settingsScreen, stories: storiesScreen };
 const open = new Set(['welcome', 'unlock', 'pairWait']);
-let cleanup = null;
+let cleanup = null, routeVersion = 0;
 
 export async function go(name, params = {}) {
+  const version = ++routeVersion;
+  cancelSensitiveOperations();
   try { cleanup?.(); } catch {}
   cleanup = null;
   if (!open.has(name) && !session.S.unlocked) name = (await session.hasVault()) ? 'unlock' : 'welcome';
+  if (version !== routeVersion) return;
   try {
     const r = await routes[name](go, params);
+    if (version !== routeVersion) { if (typeof r === 'function') r(); return; }
     if (typeof r === 'function') cleanup = r;
+    if (open.has(name) && !session.S.locking) cover(false);
   } catch (e) {
     console.error(e);
     toast(`Erro: ${e.message}`);
@@ -40,7 +46,7 @@ export async function go(name, params = {}) {
 
 // Capa imediata ao perder o foco: o seletor de apps não mostra conteúdo.
 let hiddenAt = 0;
-function cover(on) { document.documentElement.classList.toggle('covered', on); }
+function cover(on) { document.documentElement.classList.toggle('covered', on || session.S.locking); }
 function setupPrivacy() {
   const hide = () => { cover(true); hiddenAt ||= Date.now(); };
   addEventListener('blur', hide);
@@ -59,9 +65,10 @@ function setupPrivacy() {
     if (session.S.unlocked) session.syncNow().catch(() => {});
   });
   addEventListener('focus', () => { if (!document.hidden) cover(false); });
-  session.onChange((w) => {
+  session.onChange(async (w) => {
+    if (w === 'locking') cover(true);
     if (w?.locked) clearOverlays();
-    if (w?.locked && w.locked !== 'wipe') go('unlock');
+    if (w?.locked && w.locked !== 'wipe') { await go('unlock'); cover(false); }
   });
 }
 

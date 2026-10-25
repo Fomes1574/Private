@@ -48,9 +48,10 @@ fieldset { border: 1px solid var(--in); border-radius: 12px; padding: 8px 12px; 
 .row { display: flex; gap: 8px; align-items: flex-end; }
 
 /* Conversa */
-.chat { display: grid; grid-template-rows: auto auto 1fr auto; min-height: 100vh; }
+.chat { display: flex; flex-direction: column; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
+.chat > .bar, .chat > .policy, .chat > .search-bar, .chat > .composer, .chat > .note { flex-shrink: 0; }
 .policy { text-align: center; padding: 4px 16px; }
-.messages { list-style: none; margin: 0; padding: 8px max(12px, env(safe-area-inset-left)); display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
+.messages { flex: 1; min-height: 0; list-style: none; margin: 0; padding: 8px max(12px, env(safe-area-inset-left)); display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
 .msg { max-width: 82%; background: var(--in); padding: 8px 12px; border-radius: 14px; display: grid; gap: 4px; word-break: break-word; white-space: pre-wrap; -webkit-user-select: none; user-select: none; }
 .msg.mine { align-self: flex-end; background: var(--out); }
 .msg .who { color: var(--accent); font-size: 13px; font-weight: 600; }
@@ -125,3 +126,6 @@ button.small { padding: 6px 10px; min-height: 36px; font-size: 14px; }
 .switch { display: flex; gap: 10px; align-items: flex-start; }
 .msg.pending { opacity: .6; }
 button.link { background: none; border: 0; color: var(--accent, #6CB4FF); text-decoration: underline; padding: 8px; min-height: 0; }
+
+/* A1: não desloca quem está lendo mensagens antigas. */
+.jump-bottom { position: fixed; right: 1rem; bottom: 6rem; border-radius: 2rem; z-index: 3; min-width: 44px; min-height: 44px; }

@@ -14,6 +14,7 @@
 // então nem quem tiver a DEK antiga lê os restos do banco velho.
 import './sqlite-config.js';
 import sqlite3InitModule from '../vendor/sqlite/index.mjs';
+import { operationQueue } from './operation-queue.js';
 
 let sqlite3;
 const pools = new Map(); // nome -> utilitário do pool
@@ -257,9 +258,19 @@ const ops = {
     staged = null;
     if (old) {
       try { old.db.close(); } catch {}
-      await pools.get(old.name)?.removeVfs();
+      // A troca já foi confirmada no cofre. Falha na limpeza antiga não
+      // desfaz a troca; cleanup() retoma a remoção no próximo desbloqueio.
+      await pools.get(old.name)?.removeVfs().catch(() => {});
       pools.delete(old.name);
     }
+    return true;
+  },
+
+  async abortRebuild() {
+    if (!staged) return true;
+    const old = staged; staged = null;
+    try { old.db.close(); } catch {}
+    await pools.get(old.name)?.removeVfs(); pools.delete(old.name);
     return true;
   },
 
@@ -288,10 +299,5 @@ const ops = {
   },
 };
 
-onmessage = async ({ data: { id, op, arg } }) => {
-  try {
-    postMessage({ id, ok: true, result: await ops[op](arg) });
-  } catch (e) {
-    postMessage({ id, ok: false, error: String(e?.message || e) });
-  }
-};
+const enqueue = operationQueue(ops, (result) => postMessage(result));
+onmessage = ({ data }) => { enqueue(data); };

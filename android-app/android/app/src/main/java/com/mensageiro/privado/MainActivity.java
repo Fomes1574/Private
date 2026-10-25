@@ -7,6 +7,7 @@ import android.view.WindowManager;
 import android.webkit.PermissionRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import androidx.activity.OnBackPressedCallback;
 
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebChromeClient;
@@ -18,11 +19,20 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(BiometricSecretPlugin.class);
+        registerPlugin(AttachmentPickerPlugin.class);
         super.onCreate(savedInstanceState);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         if (Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(false);
 
         WebView web = getBridge().getWebView();
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override public void handleOnBackPressed() {
+                web.evaluateJavascript("!!document.querySelector('.viewer')", (open) -> {
+                    if ("true".equals(open)) web.evaluateJavascript("window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))", null);
+                    else { setEnabled(false); getOnBackPressedDispatcher().onBackPressed(); setEnabled(true); }
+                });
+            }
+        });
         WebSettings s = web.getSettings();
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);

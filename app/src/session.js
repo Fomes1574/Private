@@ -13,10 +13,12 @@ import * as vault from './vault/vault.js';
 import * as passkey from './vault/passkey.js';
 import * as native from './vault/native.js';
 import * as push from './push.js';
+import { discardAttachment } from './attachment-picker.js';
+import { setSensitiveSession } from './sensitive-scope.js';
 
 const REANNOUNCE_MS = 7 * 86_400_000;
 const listeners = new Set();
-export const S = { client: null, store: null, clock: null, kek: null, nicknames: {}, rooms: {}, prefs: {}, unlocked: false };
+export const S = { client: null, store: null, clock: null, kek: null, nicknames: {}, rooms: {}, prefs: {}, unlocked: false, locking: false };
 
 export function onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 const emit = (what) => { for (const fn of listeners) { try { fn(what); } catch (e) { console.error(e); } } };
@@ -62,7 +64,13 @@ export function rotate() {
       const { record, dek } = await vault.rotateDek(rec, kek);
       const name = newPoolName();
       await S.store.rebuild(dek, name, S.clock?.now() ?? Date.now());
-      await idbPutMany({ vault: record, activePool: name, lastRotate: Date.now() }); // troca atômica
+      try {
+        await idbPutMany({ vault: record, activePool: name, lastRotate: Date.now() }); // troca atômica
+      } catch (e) {
+        // O cofre ainda aponta para o banco anterior; solte a barreira nele.
+        await S.store.abortRebuild();
+        throw e;
+      }
       await S.store.switchTo(name);
       emit('rotated');
       return true;
@@ -267,6 +275,7 @@ async function afterUnlock({ loggedIn = false } = {}) {
   announceCheck = true;
   if (!loggedIn) await S.client.login();
   S.unlocked = true;
+  setSensitiveSession(true);
   if (Date.now() - ((await idbGet('lastRotate')) ?? 0) > ROTATE_EVERY) scheduleRotate();
   S.nicknames = (await S.store.get('nicknames')) ?? {};
   S.rooms = (await S.store.get('rooms')) ?? {};
@@ -277,12 +286,20 @@ async function afterUnlock({ loggedIn = false } = {}) {
   // Token novo ou permissão retirada nas configurações: acerta no servidor.
   if (pushEnabled()) push.refreshPush(S.client.api, true).catch(() => {});
   else S.client.api.post('/v1/push', { endpoint: null }).catch(() => {});
+  if (native.isNative()) await globalThis.Capacitor?.Plugins?.AttachmentPicker?.authorize();
   emit('unlocked');
 }
 
 // Sair do app esconde na hora e, depois de um tempo, tranca de verdade (§20).
-export async function lock(reason = 'manual') {
-  if (!S.unlocked) return;
+let lockTask = null;
+export function lock(reason = 'manual') {
+  if (lockTask) return lockTask;
+  if (!S.unlocked || S.locking) return Promise.resolve();
+  S.locking = true;
+  emit('locking');
+  lockTask = (async () => {
+  // Pare mídia e microfone antes de esperar disco/rotação/rede.
+  setSensitiveSession(false);
   // Se a rotação começou pelo temporizador, espere sua transação terminar
   // antes de bloquear/apagar. Nunca deixe um rebuild continuar depois da
   // limpeza do cofre; isso pode recriar arquivos que estavam sendo apagados.
@@ -297,14 +314,19 @@ export async function lock(reason = 'manual') {
   S.rooms = {};
   S.prefs = {};
   viewCache.clear();
+  directPending.clear();
   clearVisuals();
   disconnectLive();
   S.client = null;
   await S.store?.lock();
+  S.locking = false;
   emit({ locked: reason });
+  })().finally(() => { lockTask = null; });
+  return lockTask;
 }
 
 export async function wipeEverything() {
+  await discardAttachment();
   // Antes de destruir as chaves: cancela notificações e encerra a sessão no servidor.
   // Mesmo trancado (PIN de coação), o token/assinatura do aparelho some.
   try { await push.disablePush(S.unlocked ? S.client.api : null); } catch {}
@@ -360,7 +382,7 @@ export async function useKillCode(code) {
 // WebSocket) não pode se perder: marca `again` e o laço roda mais uma vez.
 let syncing = null, again = false;
 export function syncNow() {
-  if (!S.unlocked) return Promise.resolve();
+  if (!S.unlocked || S.locking) return Promise.resolve();
   if (syncing) { again = true; return syncing; }
   return (syncing = (async () => {
     try {
@@ -486,12 +508,23 @@ export async function listRooms() {
   return Promise.all(ids.map((id) => roomView(id)));
 }
 
-export async function startDirect(userId) {
-  const v = await S.client.createRoom('direct', [userId]);
-  S.rooms[v.roomId] = {};
-  await S.store.put('rooms', S.rooms);
-  viewCache.set(v.roomId, v);
-  return v;
+const directPending = new Map();
+export function startDirect(userId) {
+  if (!S.unlocked || !S.client) return Promise.reject(new Error('app bloqueado'));
+  if (directPending.has(userId)) return directPending.get(userId);
+  const client = S.client;
+  const task = (async () => {
+    const v = await client.createRoom('direct', [userId]);
+    if (v.created === false) await syncNow();
+    if (!S.unlocked || S.client !== client) throw new Error('sessão encerrada');
+    S.rooms[v.roomId] ??= {};
+    await S.store.put('rooms', S.rooms);
+    viewCache.set(v.roomId, v);
+    return v;
+  })();
+  directPending.set(userId, task);
+  task.finally(() => { if (directPending.get(userId) === task) directPending.delete(userId); }).catch(() => {});
+  return task;
 }
 
 export async function startGroup(title, members, ttls) {

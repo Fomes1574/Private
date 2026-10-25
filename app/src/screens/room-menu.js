@@ -7,7 +7,7 @@ import { pickSquarePhoto } from './settings.js';
 import { pickImage } from '../pick-image.js';
 
 // Fundo: até 1280 px, sem metadados; câmera traseira.
-const pickBackground = () => pickImage({ maxSide: 1280, facing: 'environment' });
+const pickBackground = (roomId) => pickImage({ maxSide: 1280, facing: 'environment', resume: { roomId, target: 'chat', action: 'room-background' } });
 
 export async function roomMenu(go, roomId) {
   const S = session.S;
@@ -69,7 +69,7 @@ export async function roomMenu(go, roomId) {
       const has = !!S.rooms[roomId]?.[c];
       const a = has ? await choiceSheet(`${what} (só quem está no grupo vê, cifrado)`, [{ label: 'Trocar', value: 'set' }, { label: 'Remover', value: 'rm', danger: true }]) : 'set';
       if (a === 'set') {
-        const b = c === 'photo' ? await pickSquarePhoto('environment') : await pickBackground();
+        const b = c === 'photo' ? await pickSquarePhoto('environment', { roomId, target: 'chat', action: 'room-photo' }) : await pickBackground(roomId);
         if (!b) return;
         try { await session.setRoomVisual(roomId, c, b); } finally { b.fill(0); }
         toast(`${what} trocada. A anterior foi apagada.`);

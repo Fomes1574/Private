@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS vaults (vault_id TEXT PRIMARY KEY, user_id TEXT NOT N
   verifier_hash TEXT NOT NULL, duress_hash TEXT, share TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
   last_seen INTEGER NOT NULL, dead_days INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS kill_codes (user_id TEXT PRIMARY KEY, code_hash TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS direct_rooms (pair_key TEXT PRIMARY KEY, room_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS visuals (owner TEXT NOT NULL, slot TEXT NOT NULL, media_id TEXT NOT NULL, PRIMARY KEY (owner, slot));`;
 
 // Serviços de Web Push dos navegadores (Apple, Google, Mozilla, Microsoft).
@@ -77,6 +78,7 @@ function checkDevice(d) {
 export class Circle extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    this.state = ctx;
     this.sql = ctx.storage.sql;
     this.sql.exec(SCHEMA);
     // push_subs ganhou `kind` (webpush no iPhone/navegador, fcm no APK).
@@ -283,6 +285,37 @@ export class Circle extends DurableObject {
   activeUsers(ids) {
     const set = new Set(this.q("SELECT user_id FROM identities WHERE state = 'active'").map((r) => r.user_id));
     return ids.every((id) => set.has(id));
+  }
+
+  // F01: o DO único coordena também dois participantes criando ao mesmo
+  // tempo. IDs continuam aleatórios; após encerrar nunca se reutiliza a sala.
+  async directRoom(actor, peer, ttls = {}) {
+    return this.state.blockConcurrencyWhile(async () => {
+      if (actor === peer || !this.activeUsers([actor, peer])) return { error: 'bad_members' };
+      const pair = [actor, peer].sort().join(':');
+      const ref = (id) => this.env.ROOM.get(this.env.ROOM.idFromName(id));
+      const valid = (v) => !v.error && v.kind === 'direct' && !v.closed && v.members.length === 2
+        && v.members.every((m) => m.active && [actor, peer].includes(m.userId));
+      const saved = this.one('SELECT room_id FROM direct_rooms WHERE pair_key = ?', pair);
+      if (saved) {
+        const v = await ref(saved.room_id).get(actor);
+        if (valid(v)) return { ...v, created: false };
+      } else {
+        // Migração sem fundir/apagar histórico: adota uma sala antiga ativa.
+        const { results } = await this.env.DB.prepare('SELECT a.room FROM room_members a JOIN room_members b ON a.room = b.room WHERE a.user_id = ? AND b.user_id = ? ORDER BY a.room').bind(actor, peer).all();
+        for (const row of results) {
+          const v = await ref(row.room).get(actor);
+          if (!valid(v)) continue;
+          this.sql.exec('INSERT INTO direct_rooms(pair_key, room_id) VALUES (?, ?)', pair, v.roomId);
+          return { ...v, created: false };
+        }
+      }
+      const roomId = randomId(16);
+      const v = await ref(roomId).init(actor, { roomId, kind: 'direct', members: [peer], ...ttls });
+      if (v.error) return v;
+      this.sql.exec('INSERT OR REPLACE INTO direct_rooms(pair_key, room_id) VALUES (?, ?)', pair, roomId);
+      return { ...v, created: true };
+    });
   }
 
   // ---------- chaves de uso único ----------

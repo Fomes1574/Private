@@ -13,14 +13,14 @@ export class Api {
     this.token = null;
   }
 
-  async call(method, path, body, { binary = false, rawResponse = false } = {}) {
+  async call(method, path, body, { binary = false, rawResponse = false, signal } = {}) {
     const headers = {};
     if (this.token) headers.authorization = `Bearer ${this.token}`;
     let payload;
     if (body instanceof Uint8Array) payload = body;
     else if (body !== undefined) { payload = JSON.stringify(body); headers['content-type'] = 'application/json'; }
     const t0 = performance.now();
-    const res = await this.fetch(this.base + path, { method, headers, body: payload });
+    const res = await this.fetch(this.base + path, { method, headers, body: payload, signal });
     const rtt = performance.now() - t0;
     const serverTime = Number(res.headers.get('x-mp-time'));
     if (serverTime > 0) this.clock?.update(serverTime, rtt);

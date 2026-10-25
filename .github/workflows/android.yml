@@ -27,6 +27,8 @@ jobs:
         with: { distribution: temurin, java-version: "21" }
       - name: Página da chave do APK gera certificado válido
         run: node --test tools/chave-android.test.mjs
+      - name: Scanner de resíduos de mídia (dados sintéticos)
+        run: python3 scripts/android/test-verificar-blobs.py
       - name: App web + Capacitor
         working-directory: android-app
         env:

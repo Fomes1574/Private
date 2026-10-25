@@ -9,11 +9,14 @@ import { CIRCLE_ROOM_ID } from '../packages/protocol/src/room.js';
 import { preparePhoto } from '../media.js';
 import { prepareVideo } from '../video-prep.js';
 import { openMedia } from './viewer.js';
+import { sensitiveScope } from '../sensitive-scope.js';
+import { nativePickerAvailable, selectNativeAttachment, readNativeAttachment } from '../attachment-picker.js';
 import { avatar } from '../avatar.js';
 import { openCamera } from '../camera.js';
 
-export async function storiesScreen(go) {
+export async function storiesScreen(go, { attachment = null } = {}) {
   const S = session.S;
+  const owner = sensitiveScope({ transient: false });
   const list = h('ul', { class: 'list' });
   mount(h('div', {},
     header('Stories', { back: () => go('chats'), actions: [h('button', { class: 'icon', 'aria-label': 'Publicar story', text: '+', onclick: () => compose(go) })] }),
@@ -28,7 +31,7 @@ export async function storiesScreen(go) {
       const mine = m.sender === S.client.userId;
       const what = /^video\//.test(m.body.mime) ? 'Vídeo' : 'Foto';
       return h('li', { class: 'story-row' },
-        h('button', { class: 'row-btn open', onclick: () => openMedia(() => S.client.openMedia(m), m.body.mime).catch((e) => toast(`Não abriu: ${errText(e)}`)) },
+        h('button', { class: 'row-btn open', onclick: () => openMedia((options) => S.client.openMedia(m, options), m.body.mime).catch((e) => toast(`Não abriu: ${errText(e)}`)) },
           avatar(session.nameOf(m.sender), session.photoOf(m.sender)),
           h('span', { class: 'grow' },
             h('span', { class: 'title', text: mine ? 'Você' : session.nameOf(m.sender) }),
@@ -45,16 +48,20 @@ export async function storiesScreen(go) {
     }) : [h('li', { class: 'empty', text: 'Nenhuma story no momento.' })]));
   };
   await render().catch((e) => toast(`Não deu para carregar: ${errText(e)}`));
-  return session.onChange((w) => { if (w === 'synced') render().catch(() => {}); });
+  const off = session.onChange((w) => { if (w === 'synced') render().catch(() => {}); });
+  if (attachment?.pick.target === 'stories') {
+    readNativeAttachment(attachment, { signal: owner.signal, allowed: owner.valid }).then((file) => { if (owner.valid()) compose(go, file); }).catch((e) => { if (owner.valid()) toast(`Não abriu: ${errText(e)}`); });
+  }
+  return () => { owner.cancel(); off(); };
 }
 
 // Publicar: escolher arquivo, audiência (padrão: todo o círculo), prazo e legenda.
-function compose(go) {
+function compose(go, selectedFile = null) {
   const S = session.S;
   const people = Object.entries(S.nicknames).filter(([u]) => u !== S.client.userId);
   if (!people.length) return toast('Ainda não há outras pessoas no círculo.');
   // Câmera do app sempre; galeria só com o modo máximo desligado.
-  const file = h('input', { id: 'story-file', type: 'file', accept: 'image/*,video/*', hidden: session.maxMode() });
+  const file = h('input', { id: 'story-file', type: 'file', accept: 'image/*,video/*', hidden: session.maxMode() || nativePickerAvailable() });
   let shot = null;
   const shotInfo = h('p', { class: 'muted small', 'aria-live': 'polite', text: '' });
   const camBtn = (label, mode) => h('button', { type: 'button', class: 'secondary small', text: label, onclick: async () => {
@@ -72,7 +79,7 @@ function compose(go) {
   const close = () => sheet.remove();
   const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' }, h('form', { class: 'sheet-box', onsubmit: async (e) => {
     e.preventDefault();
-    const f = shot ? (shot.blob ?? new Blob([shot.bytes], { type: shot.mime })) : file.files[0];
+    const f = shot ? (shot.blob ?? new Blob([shot.bytes], { type: shot.mime })) : selectedFile ?? file.files[0];
     const audience = boxes.map((b) => b.querySelector('input')).filter((i) => i.checked).map((i) => i.value);
     if (!f) return toast('Escolha uma foto ou um vídeo.');
     if (!audience.length) return toast('Escolha pelo menos uma pessoa.');
@@ -100,7 +107,8 @@ function compose(go) {
   } },
     h('p', { text: 'Nova story' }),
     h('div', { class: 'row' }, camBtn('Câmera: foto', 'photo'), camBtn('Câmera: vídeo', 'video')), shotInfo,
-    session.maxMode() ? null : h('label', { for: 'story-file', text: 'Ou da galeria: foto ou vídeo (até 5 min)' }), file,
+    session.maxMode() ? null : nativePickerAvailable() ? h('button', { type: 'button', class: 'secondary', text: 'Galeria', onclick: async () => { await session.lock('file-picker'); await selectNativeAttachment(null, { media: true, target: 'stories' }); } }) : h('label', { for: 'story-file', text: 'Ou da galeria: foto ou vídeo (até 5 min)' }), file,
+    selectedFile ? h('p', { text: 'Arquivo selecionado. Revise a audiência e a legenda antes de publicar.' }) : null,
     h('fieldset', {}, h('legend', { text: 'Quem pode ver' }), boxes),
     h('label', { for: 'story-ttl', text: 'Some em' }), ttl,
     caption, status,

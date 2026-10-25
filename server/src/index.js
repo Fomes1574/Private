@@ -174,7 +174,14 @@ route('POST', '/v1/rooms', async ({ env, request, me }) => {
   const b = await readJson(request);
   const members = Array.isArray(b.members) ? b.members.map((m) => assertId(m)) : [];
   if (!(await circle(env).activeUsers([me.userId, ...members]))) throw new HttpError(400, 'bad_members');
-  const roomId = randomId(16); // conversa nova sempre com id novo (V7-008)
+  // Opt-in: APKs antigos não sabem reaproveitar a liderança com segurança.
+  if (b.kind === 'direct' && b.reuse === true) {
+    const other = [...new Set(members)].filter((u) => u !== me.userId);
+    if (other.length !== 1) throw new HttpError(400, 'bad_room');
+    const view = unwrap(await circle(env).directRoom(me.userId, other[0], { textTtl: b.textTtl, mediaTtl: b.mediaTtl }));
+    return json(view.created ? 201 : 200, view);
+  }
+  const roomId = randomId(16); // grupo novo ou conversa após encerramento: ID novo (V7-008)
   return json(201, unwrap(await room(env, roomId).init(me.userId, { roomId, kind: b.kind, members, textTtl: b.textTtl, mediaTtl: b.mediaTtl })));
 });
 route('GET', '/v1/rooms', async ({ env, me }) => {

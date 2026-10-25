@@ -2,6 +2,7 @@
 import { h, mount, header, toast } from '../ui.js';
 import * as session from '../session.js';
 import { formatTime } from '../packages/protocol/src/time.js';
+import { pendingAttachment, takeAttachment, discardAttachment } from '../attachment-picker.js';
 import { avatar } from '../avatar.js';
 
 export async function chatsScreen(go) {
@@ -16,13 +17,18 @@ export async function chatsScreen(go) {
         try { const v = await session.startDirect(p.userId); go('chat', { roomId: v.roomId }); } catch (e) { toast(`Não deu: ${e.message}`); }
       } }, avatar(p.nickname, session.photoOf(p.userId)), h('span', { text: p.nickname })))));
   };
+  const selected = pendingAttachment();
+  const attachmentCard = selected ? h('div', { class: 'card' },
+    h('p', { text: 'Anexo selecionado. Continue após desbloquear.' }),
+    h('button', { text: 'Continuar com o anexo', onclick: () => { const attachment = takeAttachment(); if (attachment) go(attachment.pick.target === 'settings' ? 'settings' : attachment.pick.target === 'stories' ? 'stories' : 'chat', { roomId: attachment.roomId, attachment }); } }),
+    h('button', { class: 'secondary', text: 'Descartar anexo', onclick: () => { discardAttachment(); attachmentCard.remove(); } })) : null;
   mount(h('div', {},
     header('Conversas', { actions: [
       h('button', { class: 'icon', 'aria-label': 'Stories', text: '◎', onclick: () => go('stories') }),
       h('button', { class: 'icon', 'aria-label': 'Novo grupo', text: '+', onclick: () => go('newGroup') }),
       h('button', { class: 'icon', 'aria-label': 'Ajustes', text: '⚙', onclick: () => go('settings') }),
     ] }),
-    h('main', {}, search, results, archToggle, list)));
+    h('main', {}, attachmentCard, search, results, archToggle, list)));
 
   const render = async () => {
     const views = (await session.listRooms()).filter(Boolean);

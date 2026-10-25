@@ -3,7 +3,7 @@
 Data: 25/10/2026  
 Repositório: [Fomes1574/Private](https://github.com/Fomes1574/Private), branch `ccr-de59a90b-gr4vug`  
 Código analisado: commit `03fa5d0` (o código é idêntico em `9965770`; só a documentação mudou)  
-Estado: **planejamento concluído**: versão final, aguardando o proprietário liberar a entrega A1. Nenhum código, deploy ou APK foi alterado por este documento.
+Estado: **planejamento concluído; A1 em implementação para revisão**, autorizada pelo proprietário em 25/10/2026. Ver `ENTREGA_A1_2026-10-25.md`. Liberação depende de CI e testes em celular exigidos na seção 8. Nenhum deploy ou APK de produção foi distribuído nesta etapa.
 
 | Versão | Autor | O que trouxe |
 |---|---|---|
@@ -12,6 +12,7 @@ Estado: **planejamento concluído**: versão final, aguardando o proprietário l
 | v3 | Claude | Decisões do proprietário, regra "igual ao WhatsApp", **pesquisa de privacidade e criptografia** (S1–S11), plano e ordem consolidados |
 | v3.1 | Claude | Regra do proprietário: **funcionalidades iguais ao WhatsApp, segurança nossa** (os 50 passos). Comparação completa das funções **dentro da conversa** (seção 2.2). **Confirmação do que o prazo apaga de verdade**, inclusive na Cloudflare (seção 3.6, S12–S13) |
 | Final | Claude | Revisão de consistência; documento fechado para servir de base à implementação |
+| A1 | Codex | Implementação iniciada com autorização do proprietário; relatório e critérios de liberação em `ENTREGA_A1_2026-10-25.md` |
 
 Legenda de evidência: **verificado no código** (lido, sem rodar no celular), **reproduzido** (teste isolado com partes simuladas), **a validar** (mecanismo concreto, precisa de teste). Nada deste documento foi testado em celular de verdade.
 

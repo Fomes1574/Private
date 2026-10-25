@@ -6,20 +6,25 @@ import { formatTime, formatDateTime } from '../packages/protocol/src/time.js';
 import { preparePhoto } from '../media.js';
 import { editPhoto } from '../editor.js';
 import { openCamera } from '../camera.js';
-import { openMedia, holdButton, playAudio, openDoc, isPdf } from './viewer.js';
+import { openMedia, onceButton, playAudio, openDoc, isPdf } from './viewer.js';
 import { MAX_DOC_BYTES } from '../packages/protocol/src/documents.js';
 import { validDocName } from '../packages/protocol/src/envelope.js';
 import { prepareVideo } from '../video-prep.js';
 import { startRecording, fmtDuration } from '../audio.js';
 import { roomMenu } from './room-menu.js';
+import { nativePickerAvailable, selectNativeAttachment, readNativeAttachment } from '../attachment-picker.js';
+import { sensitiveScope } from '../sensitive-scope.js';
 import { normalize } from '../packages/protocol/src/nickname.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 const EMOJIS = ['😀', '😂', '🥲', '😍', '😘', '😎', '🤔', '😴', '😢', '😡', '👍', '👎', '👏', '🙏', '💪', '❤️', '🔥', '✨', '🎉', '🌙', '☀️', '🌧️', '☕', '🍕'];
 
-export async function chatScreen(go, { roomId }) {
+export async function chatScreen(go, { roomId, attachment = null }) {
   const S = session.S;
+  const client = S.client;
+  const scope = sensitiveScope({ transient: false, allowed: () => S.unlocked && S.client === client });
   let view = await session.roomView(roomId, true);
+  if (!scope.valid()) { scope.cancel(); return; }
   if (!view) { toast('Conversa não encontrada.'); return go('chats'); }
   let replyTo = null;
   // Busca local (V7-021): só no que ainda vale, na memória, sem índice salvo.
@@ -35,6 +40,7 @@ export async function chatScreen(go, { roomId }) {
   let pick = { video: false, once: false, doc: false };
   const progressBar = h('div', { class: 'progress', hidden: true });
   let videoJob = null;
+  scope.onCancel(() => videoJob?.abort());
 
   const send = async () => {
     const text = input.value.trim();
@@ -47,7 +53,8 @@ export async function chatScreen(go, { roomId }) {
     log.append(pending);
     pending.scrollIntoView({ block: 'end' });
     try {
-      await S.client.sendText(roomId, text, replyTo ? { replyTo } : {});
+      await client.sendText(roomId, text, replyTo ? { replyTo } : {});
+      pending.remove();
       clearTimeout(draftTimer);
       await session.setDraft(roomId, '');
       setReply(null);
@@ -63,7 +70,7 @@ export async function chatScreen(go, { roomId }) {
   fileIn.onchange = async () => {
     const f = fileIn.files[0];
     fileIn.value = '';
-    if (!f) return;
+    if (!f || !scope.valid()) return;
     const { video, once, doc } = pick;
     if (doc) return sendDoc(f);
     if (video) return sendVideo(f, once);
@@ -78,6 +85,7 @@ export async function chatScreen(go, { roomId }) {
     try {
       const p = await editPhoto(bytes, mime);
       if (!p) return; // cancelou no editor
+      if (!scope.valid()) { p.bytes.fill(0); return; }
       const caption = takeCaption(once);
       await S.client.sendMedia(roomId, p.bytes, { mode: once ? 'once' : 'media', mime: p.mime, caption });
       p.bytes.fill(0);
@@ -120,6 +128,7 @@ export async function chatScreen(go, { roomId }) {
         if (ctl.signal.aborted) return toast('Cancelado. Nada foi enviado.');
         throw e;
       }
+      if (!scope.valid()) return;
       label.textContent = 'Enviando cifrado…';
       bar.removeAttribute('value');
       await S.client.sendMedia(roomId, bytes, { mode: once ? 'once' : 'media', mime: 'video/mp4', duration, caption: takeCaption(once) });
@@ -147,7 +156,8 @@ export async function chatScreen(go, { roomId }) {
       if (q.active >= q.max && !await confirmSheet(`Você já tem ${q.max} documentos ativos no app. Enviar este apaga o mais antigo para todos, em qualquer conversa.`, 'Enviar mesmo assim')) return;
       let name = file.name.replace(/[\u0000-\u001f\u007f/\\]/g, '').trim().slice(0, 100);
       if (!validDocName(name)) name = mime === 'application/pdf' ? 'documento.pdf' : 'documento.txt';
-      const m = await S.client.sendMedia(roomId, bytes, { mode: 'doc', mime, name });
+      if (!scope.valid()) return;
+      const m = await client.sendMedia(roomId, bytes, { mode: 'doc', mime, name });
       if (m.quota?.evicted?.length) toast('Documento enviado. O mais antigo foi apagado para todos (limite de 3).');
       await render();
     } catch (e) { toast(`Não enviou: ${errText(e)}`); }
@@ -173,34 +183,70 @@ export async function chatScreen(go, { roomId }) {
       return video ? sendVideo(shot.blob, once) : sendPhoto(shot.bytes, shot.mime, once);
     }
     pick = { video: c.startsWith('video'), once, doc: c === 'doc' };
+    if (nativePickerAvailable()) {
+      await session.setDraft(roomId, input.value);
+      await session.lock('file-picker');
+      await selectNativeAttachment(roomId, { ...pick });
+      return;
+    }
     fileIn.accept = pick.doc ? '.txt,.md,.csv,text/plain,.pdf,application/pdf' : pick.video ? 'video/*' : 'image/*';
     fileIn.click();
   };
-  // Microfone: tocar para gravar; enviar ou descartar. Até 1 hora.
+  // Segurar grava; soltar desliga e permite confirmar, sem envio automático.
   const recBar = h('div', { class: 'rec-bar', hidden: true });
-  let recording = null;
-  const mic = async () => {
-    if (recording) return;
+  let recording = null, recordPending = null, audioDraft = null;
+  function discardAudio() {
+    recordPending?.abort(); recordPending = null;
+    recording?.cancel(); recording = null;
+    audioDraft?.bytes.fill(0); audioDraft = null;
+    recBar.replaceChildren(); recBar.hidden = true;
+  }
+  scope.onCancel(discardAudio);
+  async function mic() {
+    if (recording || recordPending || audioDraft || !scope.valid()) return;
+    const ctl = new AbortController(); recordPending = ctl;
+    const cancelParent = () => ctl.abort(); scope.signal.addEventListener('abort', cancelParent, { once: true });
     try {
       const timer = h('span', { class: 'code', text: '0:00' });
-      recording = await startRecording({ onTick: (ms) => { timer.textContent = fmtDuration(ms); }, onLimit: () => toast('Limite de 1 hora: gravação encerrada.') });
-      recBar.replaceChildren(h('span', { class: 'rec-dot', 'aria-hidden': 'true' }), h('span', { text: 'Gravando ' }), timer,
-        h('button', { class: 'secondary small', text: 'Descartar', onclick: () => { recording.cancel(); recording = null; recBar.hidden = true; } }),
-        h('button', { class: 'small', text: 'Enviar áudio', onclick: async () => {
-          const r = await recording.stop();
-          recording = null; recBar.hidden = true;
-          if (r.ms < 700) { r.bytes.fill(0); return toast('Áudio curto demais.'); }
-          try { await S.client.sendMedia(roomId, r.bytes, { mode: 'media', mime: r.mime, duration: r.ms }); await render(); }
-          catch (e) { toast(`Não enviou: ${errText(e)}`); } finally { r.bytes.fill(0); }
-        } }));
+      const r = await startRecording({ signal: ctl.signal, onTick: (ms) => { timer.textContent = fmtDuration(ms); }, onLimit: () => finishRecording() });
+      if (!scope.valid() || ctl.signal.aborted) { r.cancel(); return; }
+      recording = r;
+      recBar.replaceChildren(h('span', { class: 'rec-dot', 'aria-hidden': 'true' }), timer,
+        h('button', { class: 'secondary small', text: 'Descartar', onclick: discardAudio }),
+        h('button', { class: 'small', text: 'Parar gravação', onclick: finishRecording }));
       recBar.hidden = false;
-    } catch (e) { recording = null; toast(e.name === 'NotAllowedError' ? 'Microfone negado.' : `Não deu para gravar: ${errText(e)}`); }
-  };
+    } catch (e) { if (scope.valid() && e.name !== 'AbortError') toast(e.name === 'NotAllowedError' ? 'Microfone negado.' : `Não deu para gravar: ${errText(e)}`); }
+    finally { if (recordPending === ctl) recordPending = null; scope.signal.removeEventListener('abort', cancelParent); }
+  }
+  async function finishRecording() {
+    if (recordPending && !recording) return discardAudio();
+    const active = recording; recording = null;
+    if (!active) return;
+    const r = await active.stop();
+    if (!r) { discardAudio(); return; }
+    if (!scope.valid() || r.ms < 700) { r.bytes.fill(0); discardAudio(); return; }
+    audioDraft = r;
+    recBar.replaceChildren(h('span', { text: `Áudio · ${fmtDuration(r.ms)}` }),
+      h('button', { class: 'secondary small', text: 'Descartar', onclick: discardAudio }),
+      h('button', { class: 'small', text: 'Enviar áudio', onclick: async () => {
+        if (!audioDraft || !scope.valid()) return;
+        const draft = audioDraft; audioDraft = null; recBar.hidden = true;
+        try { await client.sendMedia(roomId, draft.bytes, { mode: 'media', mime: draft.mime, duration: draft.ms }); if (scope.valid()) await render(); }
+        catch (e) { if (scope.valid()) toast(`Não enviou: ${errText(e)}`); }
+        finally { draft.bytes.fill(0); }
+      } }));
+  }
+  const micButton = h('button', { class: 'icon', 'aria-label': 'Gravar áudio', text: '🎙',
+    onpointerdown: (e) => { if (e.button !== 0) return; e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); mic(); },
+    onpointerup: (e) => { e.preventDefault(); finishRecording(); },
+    onpointercancel: discardAudio,
+    onclick: (e) => { if (e.detail === 0) { if (recording) finishRecording(); else mic(); } },
+  });
 
   const emojiPanel = h('div', { class: 'emoji-panel', hidden: true }, EMOJIS.map((e) => h('button', { class: 'emoji', type: 'button', text: e, onclick: () => { input.value += e; input.focus(); } })));
 
   mount(h('div', { class: 'chat' },
-    header(session.roomTitle(view), { back: () => go('chats'), actions: [h('button', { class: 'icon', 'aria-label': 'Menu da conversa', text: '⋮', onclick: async () => { const r = await roomMenu(go, roomId); if (r === 'search') { searchBar.hidden = false; searchIn.focus(); return; } if (r === 'refresh') { view = await session.roomView(roomId, true); chatScreen(go, { roomId }); } } })] }),
+    header(session.roomTitle(view), { back: () => go('chats'), actions: [h('button', { class: 'icon', 'aria-label': 'Menu da conversa', text: '⋮', onclick: async () => { const r = await roomMenu(go, roomId); if (r === 'search') { searchBar.hidden = false; searchIn.focus(); return; } if (r === 'refresh') return go('chat', { roomId }); } })] }),
     h('div', { class: 'policy muted small', text: policyLine(view) }),
     searchBar,
     log,
@@ -210,7 +256,7 @@ export async function chatScreen(go, { roomId }) {
           h('button', { class: 'icon', 'aria-label': 'Anexar foto ou vídeo', text: '+', onclick: attach }),
           input,
           h('button', { class: 'icon', 'aria-label': 'Emojis', text: '☺', onclick: () => { emojiPanel.hidden = !emojiPanel.hidden; } }),
-          h('button', { class: 'icon', 'aria-label': 'Gravar áudio', text: '🎙', onclick: mic }),
+          micButton,
           h('button', { class: 'send', 'aria-label': 'Enviar', text: '➤', onclick: send })),
         fileIn)));
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
@@ -268,37 +314,74 @@ export async function chatScreen(go, { roomId }) {
   }
 
   function mediaBlock(m, mine) {
-    const load = () => S.client.openMedia(m);
+    const load = (options) => client.openMedia(m, options);
     const what = mediaName(m);
     if (m.body.mode === 'doc') {
       if (!m.body.key) return h('span', { class: 'media-tag', text: `Documento · ${m.body.name ?? ''}` });
-      return h('button', { class: 'open media-tag', text: `Documento · ${m.body.name ?? 'sem nome'} · abrir`, onclick: () => openDoc(load, m.body.name, m.body.mime).catch((e) => toast(`Não abriu: ${errText(e)}`)) });
+      return h('button', { class: 'open media-tag', text: `Documento · ${m.body.name ?? 'sem nome'} · abrir`, onclick: () => openDoc(load, m.body.name, m.body.mime, { signal: scope.signal }).catch((e) => toast(`Não abriu: ${errText(e)}`)) });
     }
     if (m.body.mode === 'once') {
       const a = what === 'Foto' ? 'a' : 'o';
       if (mine) return h('span', { class: 'media-tag', text: `${what} de ver uma vez (enviad${a})` });
-      if (m.consumed || !m.body.key) return h('span', { class: 'media-tag', text: `${what} de ver uma vez (já vist${a})` });
+      if (m.consumed || !m.body.key) return h('span', { class: 'media-tag', text: `${what} de ver uma vez (abertura encerrada)` });
       // O núcleo do cliente já apaga a chave depois da tentativa; aqui só redesenha.
-      return holdButton('Segure para ver (uma vez)', load, m.body.mime, async (err) => {
-        if (err && !/410|404/.test(err.message)) toast(`Não abriu: ${errText(err)}`);
-        setTimeout(() => render().catch(() => {}), 300);
-      });
+      return onceButton('Abrir uma vez', load, m.body.mime, async (err) => {
+        if (!scope.valid()) return;
+        if (err) toast('Não foi possível abrir. A visualização pode ter sido consumida; ela não será repetida automaticamente.');
+        await render().catch(() => {});
+      }, { signal: scope.signal });
     }
     if (/^audio\//.test(m.body.mime)) {
       const host = h('span', { class: 'audio-host' });
-      return h('span', {}, h('button', { class: 'open media-tag', text: `Áudio · ${fmtDuration(m.body.duration ?? 0)} · tocar`, onclick: () => playAudio(load, m.body.mime, host).catch((e) => toast(`Não tocou: ${errText(e)}`)) }), host);
+      return h('span', {}, h('button', { class: 'open media-tag', text: `Áudio · ${fmtDuration(m.body.duration ?? 0)} · tocar`, onclick: () => playAudio(load, m.body.mime, host, { signal: scope.signal }).catch((e) => toast(`Não tocou: ${errText(e)}`)) }), host);
     }
     const label = what === 'Vídeo' ? `Vídeo · ${fmtDuration(m.body.duration ?? 0)} · tocar para ver` : 'Foto · tocar para ver';
-    return h('button', { class: 'open media-tag', text: label, onclick: () => openMedia(load, m.body.mime).catch((e) => toast(`Não abriu: ${errText(e)}`)) });
+    return h('button', { class: 'open media-tag', text: label, onclick: () => openMedia(load, m.body.mime, { signal: scope.signal }).catch((e) => toast(`Não abriu: ${errText(e)}`)) });
   }
 
+  const nodes = new Map();
+  const unseen = new Set();
+  let rendered = false, rendering = false, renderAgain = false;
+  const down = h('button', { class: 'jump-bottom', hidden: true, 'aria-label': 'Ir para as mensagens novas', text: '↓', onclick: () => {
+    log.scrollTop = log.scrollHeight; unseen.clear(); updateDown();
+  } });
+  log.after(down);
+  const atBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+  function updateDown() { if (atBottom()) unseen.clear(); down.hidden = atBottom(); down.textContent = unseen.size ? `↓ ${unseen.size}` : '↓'; }
+  log.addEventListener('scroll', updateDown, { passive: true });
   async function render() {
-    const r = await S.client.view(roomId);
-    if (r.blocked) { log.replaceChildren(h('li', { class: 'note', text: 'Sem conexão confiável com o servidor: as mensagens ficam escondidas até reconectar.' })); return; }
-    const byId = new Map(r.render.map((m) => [m.msgId, m]));
-    const list = term ? r.render.filter((m) => normalize((m.kind === 'media' ? m.body?.caption ?? m.body?.name ?? '' : m.text) ?? '').includes(term)) : r.render;
-    log.replaceChildren(...(list.length ? list.map((m) => bubble(m, byId)) : [h('li', { class: 'note', text: term ? 'Nada encontrado no que ainda não venceu.' : 'Nenhuma mensagem.' })]));
-    log.lastElementChild?.scrollIntoView({ block: 'end' });
+    if (!scope.valid()) return;
+    if (rendering) { renderAgain = true; return; }
+    rendering = true;
+    try {
+      do {
+        renderAgain = false;
+        const r = await client.view(roomId);
+        if (!scope.valid()) return;
+        if (r.blocked) { log.replaceChildren(h('li', { class: 'note', text: 'Sem conexão confiável com o servidor: as mensagens ficam escondidas até reconectar.' })); nodes.clear(); return; }
+        const bottom = !rendered || atBottom(), top = log.scrollTop;
+        const byId = new Map(r.render.map((m) => [m.msgId, m]));
+        const list = term ? r.render.filter((m) => normalize((m.kind === 'media' ? m.body?.caption ?? m.body?.name ?? '' : m.text) ?? '').includes(term)) : r.render;
+        const wanted = new Set(list.map((m) => m.msgId));
+        for (const [id, entry] of nodes) if (!wanted.has(id)) { entry.el.remove(); nodes.delete(id); unseen.delete(id); }
+        for (const note of log.querySelectorAll('li.note')) note.remove();
+        list.forEach((m, i) => {
+          const signature = JSON.stringify([m.text, m.body?.caption, m.body?.key == null, m.consumed, m.edited, m.reactions, m.replyTo && [byId.has(m.replyTo), byId.get(m.replyTo)?.text]]);
+          let entry = nodes.get(m.msgId);
+          if (!entry || entry.signature !== signature) {
+            const next = { el: bubble(m, byId), signature };
+            if (entry) entry.el.replaceWith(next.el);
+            else if (rendered && !bottom && m.sender !== client.userId) unseen.add(m.msgId);
+            entry = next; nodes.set(m.msgId, entry);
+          }
+          if (log.children[i] !== entry.el) log.insertBefore(entry.el, log.children[i] ?? null);
+        });
+        if (!list.length) log.append(h('li', { class: 'note', text: term ? 'Nada encontrado no que ainda não venceu.' : 'Nenhuma mensagem.' }));
+        rendered = true;
+        log.scrollTop = bottom ? log.scrollHeight : top;
+        updateDown();
+      } while (renderAgain && scope.valid());
+    } finally { rendering = false; }
   }
 
   // Fundo do grupo (cifrado, escolhido pela líder): imagem por CSSOM, sem
@@ -307,9 +390,29 @@ export async function chatScreen(go, { roomId }) {
   if (bg) session.visualURL(bg).then((url) => { if (url) { log.style.backgroundImage = `url("${url}")`; log.classList.add('has-bg'); } });
 
   await render();
+  if (!scope.valid()) return;
+  if (attachment && attachment.roomId === roomId) {
+    (async () => {
+      try {
+        const f = await readNativeAttachment(attachment, { signal: scope.signal, allowed: scope.valid });
+        if (!scope.valid()) return;
+        if (attachment.pick.action?.startsWith('room-')) {
+          const slot = attachment.pick.action === 'room-photo' ? 'photo' : 'background';
+          const p = await preparePhoto(f, { maxSide: slot === 'photo' ? 512 : 1280, square: slot === 'photo' });
+          try { if (scope.valid()) await session.setRoomVisual(roomId, slot, p.bytes); } finally { p.bytes.fill(0); }
+          if (scope.valid()) go('chat', { roomId });
+          return;
+        }
+        const { video, once, doc } = attachment.pick;
+        if (doc) await sendDoc(f);
+        else if (video) await sendVideo(f, once);
+        else { const p = await preparePhoto(f); if (scope.valid()) await sendPhoto(p.bytes, p.mime, once); else p.bytes.fill(0); }
+      } catch (e) { if (scope.valid()) toast(`Não abriu o anexo: ${errText(e)}`); }
+    })();
+  }
   const timer = setInterval(() => render().catch(() => {}), 30_000); // vencidas somem sozinhas
   const off = session.onChange((w) => { if (w === 'synced') render().catch(() => {}); });
-  return () => { clearInterval(timer); off(); if (draftTimer) { clearTimeout(draftTimer); saveDraft(); } };
+  return () => { scope.cancel(); clearInterval(timer); off(); if (draftTimer) { clearTimeout(draftTimer); saveDraft(); } };
 }
 
 function mediaName(m) {

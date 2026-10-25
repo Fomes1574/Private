@@ -4,6 +4,7 @@
 import { h, toast, choiceSheet } from './ui.js';
 import * as session from './session.js';
 import { openCamera } from './camera.js';
+import { nativePickerAvailable, selectNativeAttachment } from './attachment-picker.js';
 import { preparePhoto } from './media.js';
 
 function fromGallery() {
@@ -15,7 +16,7 @@ function fromGallery() {
   });
 }
 
-export async function pickImage({ maxSide = 512, square = false, facing = 'user' } = {}) {
+export async function pickImage({ maxSide = 512, square = false, facing = 'user', resume = { target: 'settings', action: 'profile' } } = {}) {
   let source = 'camera';
   if (!session.maxMode()) {
     source = await choiceSheet('De onde?', [{ label: 'Câmera do app', value: 'camera' }, { label: 'Galeria', value: 'gallery' }]);
@@ -27,6 +28,11 @@ export async function pickImage({ maxSide = 512, square = false, facing = 'user'
     if (!shot) return null;
     file = new Blob([shot.bytes], { type: 'image/jpeg' });
   } else {
+    if (nativePickerAvailable()) {
+      await session.lock('file-picker');
+      await selectNativeAttachment(resume.roomId ?? null, { ...resume, square, maxSide });
+      return null;
+    }
     file = await fromGallery();
     if (!file) return null;
   }

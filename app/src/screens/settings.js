@@ -5,16 +5,21 @@ import * as session from '../session.js';
 import { CONFIG } from '../config.js';
 import { formatDateTime } from '../packages/protocol/src/time.js';
 import { avatar } from '../avatar.js';
+import { readNativeAttachment } from '../attachment-picker.js';
+import { preparePhoto } from '../media.js';
+import { sensitiveScope } from '../sensitive-scope.js';
 import { pickImage } from '../pick-image.js';
 
 // Foto de perfil/grupo: quadrada, 512 px, sem metadados.
-export const pickSquarePhoto = (facing = 'user') => pickImage({ maxSide: 512, square: true, facing });
+export const pickSquarePhoto = (facing = 'user', resume = { target: 'settings', action: 'profile' }) => pickImage({ maxSide: 512, square: true, facing, resume });
 
-export async function settingsScreen(go) {
+export async function settingsScreen(go, { attachment = null } = {}) {
   const S = session.S;
+  const owner = sensitiveScope({ transient: false });
   const me = (await S.client.api.get('/v1/directory')).members;
   const { isAdmin } = await S.client.api.get('/v1/me');
   const fp = await session.myFingerprint();
+  if (!owner.valid()) return;
   const aboutText = h('span', { id: 'about', text: session.aboutOf(S.client.userId) ?? '—' });
   const meAvatar = h('span', {}, avatar(session.myNickname(), session.photoOf(S.client.userId), { big: true }));
   const warnings = S.client.warnings.map((w) => h('li', { class: 'warn', text: warningText(w) }));
@@ -81,6 +86,21 @@ export async function settingsScreen(go) {
         h('button', { class: 'danger block', text: 'Apagar tudo deste aparelho', onclick: async () => {
           if (await confirmSheet('Apagar todas as conversas e chaves deste aparelho? Não dá para desfazer.', 'Apagar tudo')) { await session.wipeEverything(); go('welcome'); }
         } })))));
+  if (attachment?.pick.action === 'profile') {
+    (async () => {
+      let bytes;
+      try {
+        const file = await readNativeAttachment(attachment, { signal: owner.signal, allowed: owner.valid });
+        ({ bytes } = await preparePhoto(file, { maxSide: 512, square: true }));
+        if (!owner.valid()) return;
+        await session.setProfilePhoto(bytes);
+        if (owner.valid()) meAvatar.replaceChildren(avatar(session.myNickname(), session.photoOf(S.client.userId), { big: true }));
+      } catch (e) { if (owner.valid()) toast(`Não abriu a foto: ${errText(e)}`); }
+      finally { bytes?.fill(0); }
+    })();
+  }
+  return () => owner.cancel();
+
 }
 
 // Estado sempre visível: aguardando permissão, ativado, recusado ou erro.
@@ -91,6 +111,7 @@ const PUSH_TEXT = {
   waiting: 'Aguardando permissão… responda à pergunta do sistema.',
   on: 'Ativadas neste aparelho.',
   denied: 'Recusadas. Para ativar, libere as notificações do app nas configurações do sistema e toque em "Tentar de novo".',
+
 };
 function notificationsBox() {
   const status = h('p', { id: 'push-state', class: 'small', role: 'status', 'aria-live': 'polite' });

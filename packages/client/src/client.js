@@ -143,7 +143,22 @@ export class MessengerClient {
 
   // ---------- conversas ----------
   async createRoom(kind, members, ttls = {}) {
-    const view = await this.api.post('/v1/rooms', { kind, members, ...ttls });
+    const view = await this.api.post('/v1/rooms', { kind, members, ...ttls, ...(kind === 'direct' ? { reuse: true } : {}) });
+    const selected = new Set([this.userId, ...members]);
+    if (view.kind !== kind || view.closed || !selected.has(view.leader) || view.members.length !== selected.size || new Set(view.members.map(m => m.userId)).size !== selected.size || view.members.some(m => !m.active || !selected.has(m.userId))) throw new Error('membros retornados diferentes dos escolhidos: criação recusada');
+    if (view.created !== false && view.leader !== this.userId) throw new Error('líder da conversa criada não confere');
+    if (kind === 'direct' && view.created === false) {
+      const expected = new Set([this.userId, ...members]);
+      if (view.kind !== 'direct' || view.closed || view.members.length !== 2 || view.members.some((m) => !m.active || !expected.has(m.userId))) throw new Error('conversa retornada não confere');
+      // Reaproveitar não torna quem abriu a líder. Só aceita confiança já
+      // existente ou o anúncio cifrado original recebido na sincronização.
+      if (view.leader === this.userId && (!this.trusted[view.roomId] || this.trusted[view.roomId].leader === this.userId)) {
+        this.trusted[view.roomId] ??= { members: [...expected], leader: this.userId };
+        await this.store.put('trusted', this.trusted);
+        await this.announceMembership(view.roomId, view);
+      }
+      return view;
+    }
     // Quem cria escolheu os membros: confirma localmente e anuncia cifrado.
     this.trusted[view.roomId] = { members: [this.userId, ...members.filter((m) => m !== this.userId)], leader: this.userId };
     await this.store.put('trusted', this.trusted);
@@ -304,21 +319,29 @@ export class MessengerClient {
     return r.render.filter((m) => m.kind === 'story');
   }
 
-  async openMedia(msg) {
+  async openMedia(msg, { signal } = {}) {
+    signal?.throwIfAborted();
     if (!msg.body?.key) throw new Error('mídia sem chave neste aparelho (já vista ou enviada por você)');
     const once = msg.body.mode === 'once';
-    const forget = async () => {
-      // Ver uma vez: depois da tentativa (dê certo ou não), a chave some do
-      // aparelho e o banco é refeito sem ela (ADR 0012).
-      const stored = await this.store.getMessage(msg.msgId);
-      if (stored) await this.store.putMessage({ ...stored, body: { ...stored.body, key: null }, consumed: true });
-      await this.onDestroy([]);
-    };
-    let blob;
-    try { blob = await this.api.post(`/v1/media/${msg.body.mediaId}/open`, undefined, { binary: true }); }
-    catch (e) { if (once && [404, 410].includes(e.status)) await forget(); throw e; }
     const key = unb64(msg.body.key);
-    try { return await decryptMedia(key, blob); } finally { key.fill(0); if (once) await forget(); }
+    let bytes;
+    try {
+      if (once) {
+        // Uma tentativa tem resultado incerto se a rede cair. Esqueça a chave
+        // persistida ANTES da requisição, inclusive se houver bloqueio no meio.
+        const stored = await this.store.getMessage(msg.msgId);
+        if (!stored?.body?.key || stored.consumed) throw new Error('mídia já aberta ou em abertura');
+        await this.store.putMessage({ ...stored, body: { ...stored.body, key: null }, consumed: true });
+        await this.onDestroy([]);
+      }
+      signal?.throwIfAborted();
+      const blob = await this.api.post(`/v1/media/${msg.body.mediaId}/open`, undefined, { binary: true, signal });
+      signal?.throwIfAborted();
+      bytes = await decryptMedia(key, blob);
+      signal?.throwIfAborted();
+      return bytes;
+    } catch (e) { bytes?.fill(0); throw e; }
+    finally { key.fill(0); }
   }
 
   // ---------- foto de perfil / foto e fundo de grupo (§21) ----------

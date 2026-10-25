@@ -11,6 +11,7 @@ export class EncryptedStore {
     this.pending = new Map();
     this.worker.onmessage = ({ data }) => {
       const p = this.pending.get(data.id);
+      if (!p) return;
       this.pending.delete(data.id);
       data.ok ? p.resolve(data.result) : p.reject(new Error(data.error));
     };
@@ -26,6 +27,7 @@ export class EncryptedStore {
   unlock(dek) { return this.call('setKey', dek); }
   rebuild(newKey, newName, now) { return this.call('rebuild', { newKey, newName, now }); }
   switchTo(name) { return this.call('switchTo', { name }); }
+  abortRebuild() { return this.call('abortRebuild'); }
   cleanup(keep) { return this.call('cleanup', { keep }); }
   lock() { return this.call('lock'); }
   wipe() { return this.call('wipe'); }

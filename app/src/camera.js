@@ -3,6 +3,7 @@
 // nem para a pasta temporária do seletor de arquivos (que guarda o original
 // com GPS e modelo do aparelho). Sair do app desliga a câmera na hora.
 import { h, toast } from './ui.js';
+import { sensitiveScope } from './sensitive-scope.js';
 
 export const MAX_VIDEO_MS = 5 * 60 * 1000; // V6-018
 const VIDEO_TYPES = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
@@ -13,6 +14,8 @@ const fmt = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 
 // Cancelar, sair do app ou negar a permissão → null.
 export function openCamera({ mode = 'photo', facing = 'environment', maxSide = 2048 } = {}) {
   return new Promise((resolve) => {
+    const scope = sensitiveScope();
+    let startVersion = 0;
     let stream = null, recorder = null, parts = [], t0 = 0, tick = null, done = false;
     const preview = h('video', { class: 'camera-preview', playsinline: true, autoplay: true, muted: true, 'aria-label': 'Imagem da câmera' });
     preview.muted = true;
@@ -26,8 +29,8 @@ export function openCamera({ mode = 'photo', facing = 'environment', maxSide = 2
 
     function stopTracks() { for (const t of stream?.getTracks() ?? []) t.stop(); stream = null; preview.srcObject = null; }
     function finish(out) {
-      if (done) return;
-      done = true;
+      if (done) { out?.bytes?.fill(0); return; }
+      done = true; startVersion++; scope.finish();
       clearInterval(tick);
       if (recorder && recorder.state !== 'inactive') { recorder.ondataavailable = null; recorder.onstop = null; recorder.stop(); }
       parts = [];
@@ -41,12 +44,15 @@ export function openCamera({ mode = 'photo', facing = 'environment', maxSide = 2
     const onHide = (e) => { if (document.hidden || e.type === 'pagehide') finish(null); };
 
     async function start() {
+      const version = ++startVersion;
       stopTracks();
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
+        const incoming = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } },
           audio: mode === 'video' ? { echoCancellation: true, noiseSuppression: true } : false,
         });
+        if (!scope.valid() || version !== startVersion) { for (const t of incoming.getTracks()) t.stop(); return; }
+        stream = incoming;
       } catch (e) {
         toast(e.name === 'NotAllowedError' ? 'Câmera negada. Libere nos ajustes do aparelho.' : `Câmera indisponível: ${e.message}`);
         return finish(null);
@@ -91,6 +97,8 @@ export function openCamera({ mode = 'photo', facing = 'environment', maxSide = 2
       }, 250);
     }
 
+    scope.onCancel(() => finish(null));
+    if (!scope.valid()) { finish(null); return; }
     document.addEventListener('visibilitychange', onHide);
     addEventListener('pagehide', onHide);
     document.body.append(overlay);

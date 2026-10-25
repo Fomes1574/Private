@@ -2,6 +2,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { startApi, SETUP } from '../../server/test/helpers.mjs';
 import { browser, virtualAuthenticator, watchErrors } from '../../e2e/helpers.mjs';
 
@@ -122,7 +123,7 @@ async function maxMode(p, on, other) {
   await p.page.waitForSelector('#composer');
 }
 
-test('foto de ver uma vez: segurar para ver, soltar esconde, uma vez só', async () => {
+test('foto de ver uma vez: tocar abre, soltar mantém, fechar consome uma vez só', async () => {
   await maxMode(ana, false, 'Bia');
   const chooser = ana.page.waitForEvent('filechooser');
   await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
@@ -130,24 +131,26 @@ test('foto de ver uma vez: segurar para ver, soltar esconde, uma vez só', async
   await (await chooser).setFiles(new URL('../../poc/01-vodozemac-wasm/web/icon-512.png', import.meta.url).pathname);
   await ana.page.click('.editor >> text=Usar foto');
   await ana.page.waitForSelector('text=Foto de ver uma vez (enviada)', { timeout: 30000 });
-  assert.equal(await ana.page.$('.hold'), null, 'quem enviou não tem botão para reabrir');
+  assert.equal(await ana.page.$('.once-open'), null, 'quem enviou não tem botão para reabrir');
 
-  await bia.page.waitForSelector('.hold', { timeout: 40000 });
-  const box = await (await bia.page.$('.hold')).boundingBox();
-  await bia.page.mouse.move(box.x + 10, box.y + 10);
-  await bia.page.mouse.down();
+  await bia.page.waitForSelector('.once-open', { timeout: 40000 });
+  await bia.page.click('.once-open');
   await bia.page.waitForSelector('.viewer img', { timeout: 15000 });
   const overlayText = await bia.page.textContent('.viewer');
-  assert.equal(overlayText.trim(), '', 'nada escrito sobre a foto (sem marca d\'água, nome, data)');
-  await bia.page.mouse.up();
+  assert.equal(overlayText.trim(), '×', 'só o botão de fechar, sem marca, nome ou data');
+  await bia.page.waitForTimeout(250);
+  assert.ok(await bia.page.$('.viewer img'), 'soltar o dedo não fecha nem perde a imagem');
+  await bia.page.click('.viewer [aria-label=Fechar]');
   await bia.page.waitForSelector('.viewer', { state: 'detached' });
-  await bia.page.waitForSelector('text=Foto de ver uma vez (já vista)', { timeout: 15000 });
+  await bia.page.waitForSelector('text=Foto de ver uma vez (abertura encerrada)', { timeout: 15000 });
 });
 
 test('áudio: gravar, enviar cifrado e tocar do outro lado', async () => {
-  await ana.page.click('[aria-label="Gravar áudio"]');
+  await ana.page.hover('[aria-label="Gravar áudio"]');
+  await ana.page.mouse.down();
   await ana.page.waitForSelector('.rec-bar:not([hidden])');
   await ana.page.waitForTimeout(2200);
+  await ana.page.mouse.up();
   await ana.page.click('text=Enviar áudio');
   await ana.page.waitForSelector('.msg.mine >> text=/Áudio · 0:0[2-3]/', { timeout: 20000 });
   await bia.page.waitForSelector('.msg:not(.mine) >> text=/Áudio · 0:0[2-3]/', { timeout: 40000 });
@@ -177,7 +180,7 @@ const makeVideo = (p) => p.page.evaluate(async () => {
   return btoa(s);
 });
 
-test('vídeo: recodificado no aparelho, enviado cifrado, abre do outro lado; ver uma vez só segurando', async () => {
+test('vídeo: recodificado no aparelho, enviado cifrado, abre do outro lado; ver uma vez por toque', async () => {
   const video = Buffer.from(await makeVideo(ana), 'base64');
   for (const once of [false, true]) {
     const chooser = ana.page.waitForEvent('filechooser');
@@ -201,14 +204,15 @@ test('vídeo: recodificado no aparelho, enviado cifrado, abre do outro lado; ver
   assert.equal(info.pip, true);
   await bia.page.click('.viewer-close');
 
-  await bia.page.waitForSelector('.hold', { timeout: 40000 });
-  const box = await (await bia.page.$('.hold')).boundingBox();
+  await bia.page.waitForSelector('.once-open', { timeout: 40000 });
+  const box = await (await bia.page.$('.once-open')).boundingBox();
   await bia.page.mouse.move(box.x + 10, box.y + 10);
   await bia.page.mouse.down();
-  await bia.page.waitForSelector('.viewer video:not([controls])', { timeout: 15000 });
   await bia.page.mouse.up();
+  await bia.page.waitForSelector('.viewer video[controls]', { timeout: 15000 });
+  await bia.page.click('.viewer [aria-label=Fechar]');
   await bia.page.waitForSelector('.viewer', { state: 'detached' });
-  await bia.page.waitForSelector('text=Vídeo de ver uma vez (já visto)', { timeout: 15000 });
+  await bia.page.waitForSelector('text=Vídeo de ver uma vez (abertura encerrada)', { timeout: 15000 });
 });
 
 test('documento de texto: enviado cifrado, aberto como texto puro (HTML não vira página)', async () => {
@@ -270,6 +274,7 @@ test('PDF: aberto dentro do app, só desenhado; JavaScript, ação automática e
   await bia.page.click('.msg:not(.mine) >> text=/Documento · contrato.pdf/');
   await bia.page.waitForSelector('.viewer.pdf canvas.pdf-page', { timeout: 30000 });
   await bia.page.waitForFunction(() => /1 página/.test(document.querySelector('.pdf-status')?.textContent ?? ''));
+  await bia.page.waitForFunction(() => { const c=document.querySelector('canvas.pdf-page'); if (!c) return false; const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data; for(let i=0;i<d.length;i+=4) if(d[i]+d[i+1]+d[i+2]<100 && d[i+3]>0) return true; return false; });
   const ink = await bia.page.evaluate(() => {
     const c = document.querySelector('canvas.pdf-page');
     const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
@@ -294,6 +299,74 @@ test('PDF: aberto dentro do app, só desenhado; JavaScript, ação automática e
   await ana.page.click('text=Documento: texto ou PDF (até 20 MB)');
   await (await c2).setFiles({ name: 'falso.pdf', mimeType: 'application/pdf', buffer: Buffer.from([0x50, 0x4b, 3, 4, 0, 0, 0xff, 0xfe]) });
   await ana.page.waitForFunction(() => /Não enviou: só texto \(UTF-8\) ou PDF/.test(document.querySelector('#toast').textContent));
+});
+
+test('APK: seletor retorna só token e só lê a foto depois de desbloquear', async () => {
+  const encoded = readFileSync(new URL('../../poc/01-vodozemac-wasm/web/icon-512.png', import.meta.url)).toString('base64');
+  await ana.page.evaluate((encoded) => {
+    window.pickerCalls=[];
+    window.Capacitor={isNativePlatform:()=>true,Plugins:{BiometricSecret:{},AttachmentPicker:{
+      pick:async()=>{pickerCalls.push('pick');return {token:'selected-file'};},
+      authorize:async()=>{pickerCalls.push('authorize');},
+      describe:async()=>{pickerCalls.push('describe');return {name:'foto.png',mime:'image/png',size:atob(encoded).length};},
+      read:async()=>{pickerCalls.push('read');return {data:encoded};},
+      clear:async()=>{pickerCalls.push('clear');}
+    }}};
+  }, encoded);
+  await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
+  await ana.page.click('.sheet >> text=Galeria: foto', { exact: true });
+  await ana.page.waitForSelector('#secret');
+  assert.deepEqual(await ana.page.evaluate(()=>pickerCalls),['pick']);
+  await ana.page.fill('#secret',PIN);await ana.page.click('form button');
+  await ana.page.waitForSelector('text=Continuar com o anexo');
+  assert.equal(await ana.page.evaluate(()=>pickerCalls.includes('read')),false);
+  await ana.page.click('text=Continuar com o anexo');
+  await ana.page.waitForSelector('.editor');
+  const calls=await ana.page.evaluate(()=>pickerCalls);
+  assert.ok(calls.indexOf('authorize')<calls.indexOf('describe'));assert.ok(calls.includes('read'));
+  await ana.page.click('.editor >> text=Cancelar');
+  await ana.page.evaluate(()=>{delete window.Capacitor;delete window.pickerCalls;});
+});
+
+test('rotação real do SQLite não perde escrita entre rebuild e troca', async () => {
+  await ana.page.evaluate(() => {
+    const {S,rotate}=globalThis.__mpTest;
+    window.savedRebuild=S.store.rebuild.bind(S.store);
+    window.rotationGate=new Promise(r=>window.finishRotation=r);
+    S.store.rebuild=async(...args)=>{const r=await savedRebuild(...args);window.rebuilt=true;await rotationGate;return r;};
+    window.rotationTask=rotate();
+  });
+  await ana.page.waitForFunction(()=>window.rebuilt===true);
+  await ana.page.evaluate(()=>{window.raceWrite=globalThis.__mpTest.S.store.put('rotation-race',{text:'escrita concorrente'});window.finishRotation();});
+  const saved=await ana.page.evaluate(async()=>{
+    await Promise.all([rotationTask,raceWrite]);const {S}=globalThis.__mpTest;
+    S.store.rebuild=savedRebuild;
+    const r=await S.store.get('rotation-race');await S.store.put('rotation-race',undefined);
+    delete window.rotationTask;delete window.raceWrite;delete window.rebuilt;return r;
+  });
+  assert.deepEqual(saved,{text:'escrita concorrente'});
+});
+
+test('sincronizar mantém posição e botão de ver uma vez; seta desce sem consumir', async()=>{
+  await ana.page.evaluate(async()=>{
+    const {S}=globalThis.__mpTest;const now=S.clock.now();
+    const room=Object.keys(S.rooms).find(id=>S.client.trusted[id]?.members.length===2);
+    window.scrollRoom=room;window.scrollIds=[];
+    for(let i=0;i<45;i++){
+      const msgId='scrolltest'+String(i).padStart(3,'0');scrollIds.push(msgId);
+      await S.store.putMessage({msgId,room,sender:S.client.userId,kind:'text',text:'histórico de rolagem '+i,acceptedAt:now-60000+i,expiresAt:now+3600000});
+    }
+    const msgId='scrolltestonce';scrollIds.push(msgId);
+    await S.store.putMessage({msgId,room,sender:'friend-test',kind:'media',body:{mode:'once',mime:'image/jpeg',mediaId:'scrollmedia',key:'unused'},acceptedAt:now+1,expiresAt:now+3600000});
+  });
+  await ana.page.click('[aria-label=Voltar]');await ana.page.click('.row-btn:has-text("Bia")');
+  await ana.page.waitForSelector('.once-open');
+  await ana.page.evaluate(()=>{window.stableOnce=document.querySelector('.once-open');document.querySelector('.messages').scrollTop=0;});
+  await ana.page.evaluate(()=>globalThis.__mpTest.syncNow());
+  assert.equal(await ana.page.evaluate(()=>document.querySelector('.messages').scrollTop),0);
+  assert.equal(await ana.page.evaluate(()=>stableOnce===document.querySelector('.once-open')),true);
+  await ana.page.click('.jump-bottom');assert.ok(await ana.page.evaluate(()=>document.querySelector('.messages').scrollTop)>0);
+  await ana.page.evaluate(async()=>{await globalThis.__mpTest.S.store.deleteMessages(scrollIds);delete window.scrollIds;delete window.stableOnce;await globalThis.__mpTest.syncNow();});
 });
 
 test('rascunho: fica no aparelho ao sair da conversa e some ao enviar', async () => {
