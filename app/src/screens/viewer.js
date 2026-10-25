@@ -35,20 +35,24 @@ async function loadBytes(load, entry) {
     return bytes;
   } catch (e) { if (usable(entry)) { entry.scope.cancel(); throw e; } return null; }
 }
-function show(bytes, mime, entry, once = false) {
+function show(bytes, mime, entry, once = false, round = false) {
   if (!usable(entry)) { bytes.fill(0); return; }
   entry.url = URL.createObjectURL(new Blob([bytes], { type: mime })); bytes.fill(0);
-  const media = /^video\//.test(mime)
+  // Áudio de ver uma vez (b.7): toca aqui dentro, sem baixar nem compartilhar.
+  const media = /^audio\//.test(mime)
+    ? h('audio', { src: entry.url, autoplay: true, controls: true, controlslist: 'nodownload noplaybackrate noremoteplayback', disableremoteplayback: true, 'aria-label': once ? 'Áudio de visualização única' : 'Áudio' })
+    : /^video\//.test(mime)
     ? h('video', { src: entry.url, playsinline: true, autoplay: true, disablepictureinpicture: true, disableremoteplayback: true,
       controls: true, controlslist: 'nodownload noremoteplayback', preload: 'auto', 'aria-label': once ? 'Vídeo de visualização única' : 'Vídeo' })
     : h('img', { src: entry.url, alt: once ? 'Foto de visualização única' : 'Foto', draggable: 'false' });
+  if (round) media.classList.add('round'); // vídeo redondo (D)
   entry.overlay = h('div', { class: 'viewer', role: 'dialog', 'aria-modal': 'true', oncontextmenu: (e) => e.preventDefault() }, media,
     h('button', { class: 'viewer-close', 'aria-label': 'Fechar', text: '×', onclick: closeMedia }));
   document.body.append(entry.overlay);
 }
 export async function openPhoto(load, mime, options) {
   const entry = begin(options); const bytes = await loadBytes(load, entry);
-  if (bytes) show(bytes, mime, entry);
+  if (bytes) show(bytes, mime, entry, false, !!options?.round);
 }
 export const openMedia = openPhoto;
 export function onceButton(label, load, mime, onConsumed, options) {
@@ -126,16 +130,43 @@ export async function openPdf(load, name, options) {
     const n = Math.min(doc.numPages, MAX_PAGES);
     status.textContent = doc.numPages > MAX_PAGES ? `Mostrando as primeiras ${MAX_PAGES} de ${doc.numPages} páginas.` : `${n} página${n > 1 ? 's' : ''}`;
     const width = Math.min(entry.overlay.clientWidth || 360, 1200) - 16, dpr = Math.min(devicePixelRatio || 1, 2);
-    for (let i = 1; i <= n && usable(entry); i++) {
-      const page = await doc.getPage(i);
-      if (!usable(entry)) { page.cleanup(); break; }
-      const viewport = page.getViewport({ scale: (width / page.getViewport({ scale: 1 }).width) * dpr });
+    // F15: só desenha as páginas perto da tela e solta as que ficaram longe,
+    // para PDF grande não segurar centenas de canvas na memória.
+    const first = await doc.getPage(1);
+    const base = first.getViewport({ scale: 1 });
+    first.cleanup();
+    const cssH = Math.floor(width * base.height / base.width);
+    const slots = [];
+    for (let i = 1; i <= n; i++) {
       const canvas = h('canvas', { class: 'pdf-page', 'aria-label': `Página ${i}` });
-      canvas.width = Math.floor(viewport.width); canvas.height = Math.floor(viewport.height); canvas.style.width = `${Math.floor(viewport.width / dpr)}px`;
+      canvas.style.width = `${width}px`; canvas.style.height = `${cssH}px`;
+      slots.push({ i, canvas, state: 'empty' });
       pages.append(canvas);
-      await page.render({ canvas, canvasContext: canvas.getContext('2d'), viewport, annotationMode: AnnotationMode.DISABLE }).promise;
-      page.cleanup();
     }
+    const KEEP = 6;
+    const drawn = [];
+    async function draw(slot) {
+      if (slot.state !== 'empty' || !usable(entry)) return;
+      slot.state = 'drawing';
+      const page = await doc.getPage(slot.i);
+      if (!usable(entry)) { page.cleanup(); return; }
+      const viewport = page.getViewport({ scale: (width / page.getViewport({ scale: 1 }).width) * dpr });
+      slot.canvas.width = Math.floor(viewport.width); slot.canvas.height = Math.floor(viewport.height);
+      slot.canvas.style.height = `${Math.floor(viewport.height / dpr)}px`;
+      await page.render({ canvas: slot.canvas, canvasContext: slot.canvas.getContext('2d'), viewport, annotationMode: AnnotationMode.DISABLE }).promise;
+      page.cleanup();
+      slot.state = 'drawn';
+      drawn.push(slot);
+      while (drawn.length > KEEP) { const old = drawn.shift(); old.canvas.width = 0; old.canvas.height = 0; old.state = 'empty'; }
+    }
+    let queue = Promise.resolve();
+    const io = new IntersectionObserver((list) => {
+      for (const e of list) if (e.isIntersecting) { const slot = slots[Number(e.target.getAttribute('aria-label').replace(/\D/g, '')) - 1]; queue = queue.then(() => draw(slot)).catch(() => {}); }
+    }, { root: entry.overlay.querySelector('.pdf-scroll'), rootMargin: '600px 0px' });
+    for (const sl of slots) io.observe(sl.canvas);
+    const prev = entry.cleanup;
+    entry.cleanup = () => { io.disconnect(); prev?.(); };
+    await draw(slots[0]);
   } catch (e) { if (!usable(entry)) return; entry.scope.cancel(); throw e; }
 }
 if (globalThis.addEventListener) addEventListener('keydown', (e) => { if (e.key === 'Escape' && current) { e.preventDefault(); closeMedia(); } });

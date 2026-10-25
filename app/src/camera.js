@@ -12,12 +12,12 @@ const fmt = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 
 
 // mode 'photo' → { bytes, mime: 'image/jpeg' } · mode 'video' → { blob, mime }
 // Cancelar, sair do app ou negar a permissão → null.
-export function openCamera({ mode = 'photo', facing = 'environment', maxSide = 2048 } = {}) {
+export function openCamera({ mode = 'photo', facing = 'environment', maxSide = 2048, maxMs = MAX_VIDEO_MS, round = false } = {}) {
   return new Promise((resolve) => {
     const scope = sensitiveScope();
     let startVersion = 0;
     let stream = null, recorder = null, parts = [], t0 = 0, tick = null, done = false;
-    const preview = h('video', { class: 'camera-preview', playsinline: true, autoplay: true, muted: true, 'aria-label': 'Imagem da câmera' });
+    const preview = h('video', { class: round ? 'camera-preview round' : 'camera-preview', playsinline: true, autoplay: true, muted: true, 'aria-label': 'Imagem da câmera' });
     preview.muted = true;
     const timer = h('span', { class: 'camera-timer', hidden: true, text: '0:00' });
     const shutter = h('button', { class: 'camera-shutter', 'aria-label': mode === 'photo' ? 'Tirar foto' : 'Gravar', onclick: () => (mode === 'photo' ? snap() : toggleRec()) });
@@ -93,7 +93,7 @@ export function openCamera({ mode = 'photo', facing = 'environment', maxSide = 2
       tick = setInterval(() => {
         const ms = Date.now() - t0;
         timer.textContent = fmt(ms);
-        if (ms >= MAX_VIDEO_MS) { toast('Limite de 5 minutos.'); recorder.stop(); }
+        if (ms >= maxMs) { toast(maxMs < MAX_VIDEO_MS ? 'Limite de 60 segundos.' : 'Limite de 5 minutos.'); recorder.stop(); }
       }, 250);
     }
 

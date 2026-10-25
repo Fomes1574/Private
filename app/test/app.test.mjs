@@ -103,9 +103,11 @@ test('apagar para todos some do outro lado', async () => {
   await bia.page.fill('#composer', 'vou apagar isto');
   await bia.page.click('[aria-label=Enviar]');
   await ana.page.waitForFunction(() => [...document.querySelectorAll('.msg .text')].some((e) => e.textContent === 'vou apagar isto'), null, { timeout: 40000 });
-  await bia.page.click('.msg.mine >> text=vou apagar isto');
+  // Como no WhatsApp: segurar a mensagem abre reações e menu.
+  await bia.page.click('.msg.mine >> text=vou apagar isto', { delay: 700 });
+  await bia.page.waitForSelector('.sheet .react-bar');
+  await bia.page.click('.sheet button:text-is("Apagar")');
   await bia.page.click('text=Apagar para todos');
-  await bia.page.click('.sheet button.danger');
   await ana.page.waitForFunction(() => ![...document.querySelectorAll('.msg .text')].some((e) => e.textContent === 'vou apagar isto'), null, { timeout: 40000 });
 });
 
@@ -119,7 +121,7 @@ async function maxMode(p, on, other) {
   if (on) await box.check(); else await box.uncheck();
   await p.page.waitForFunction((v) => /Modo máximo (ligado|desligado)/.test(document.querySelector('#toast').textContent), on);
   await p.page.click('[aria-label=Voltar]');
-  await p.page.click(`.row-btn:has-text("${other}")`);
+  await p.page.click(`.row-btn:has(.title:has-text("${other}"))`);
   await p.page.waitForSelector('#composer');
 }
 
@@ -359,7 +361,7 @@ test('sincronizar mantém posição e botão de ver uma vez; seta desce sem cons
     const msgId='scrolltestonce';scrollIds.push(msgId);
     await S.store.putMessage({msgId,room,sender:'friend-test',kind:'media',body:{mode:'once',mime:'image/jpeg',mediaId:'scrollmedia',key:'unused'},acceptedAt:now+1,expiresAt:now+3600000});
   });
-  await ana.page.click('[aria-label=Voltar]');await ana.page.click('.row-btn:has-text("Bia")');
+  await ana.page.click('[aria-label=Voltar]');await ana.page.click('.row-btn:has(.title:has-text("Bia"))');
   await ana.page.waitForSelector('.once-open');
   await ana.page.evaluate(()=>{window.stableOnce=document.querySelector('.once-open');document.querySelector('.messages').scrollTop=0;});
   await ana.page.evaluate(()=>globalThis.__mpTest.syncNow());
@@ -431,8 +433,8 @@ test('grupo: foto e fundo só da líder, cifrados, chegam a quem está no grupo'
     await ana.page.waitForFunction((re) => new RegExp(re).test(document.querySelector('#toast').textContent), msg.source, { timeout: 20000 });
   }
   await bia.page.click('[aria-label=Voltar]');
-  await bia.page.waitForSelector('.row-btn:has-text("Família") .avatar img', { timeout: 40000 });
-  await bia.page.click('.row-btn:has-text("Família")');
+  await bia.page.waitForSelector('.row-btn:has(.title:has-text("Família")) .avatar img', { timeout: 40000 });
+  await bia.page.click('.row-btn:has(.title:has-text("Família"))');
   await bia.page.waitForSelector('.messages.has-bg', { timeout: 15000 });
   assert.match(await bia.page.$eval('.messages', (e) => e.style.backgroundImage), /^url\("blob:/, 'fundo decifrado no aparelho');
   // Quem não é líder não tem as opções.
@@ -441,7 +443,7 @@ test('grupo: foto e fundo só da líder, cifrados, chegam a quem está no grupo'
   await bia.page.click('.sheet >> text=Fechar');
   for (const [p, other] of [[ana, 'Bia'], [bia, 'Ana']]) {
     await p.page.click('[aria-label=Voltar]');
-    await p.page.click(`.row-btn:has-text("${other}")`);
+    await p.page.click(`.row-btn:has(.title:has-text("${other}"))`);
     await p.page.waitForSelector('#composer');
   }
 });
@@ -465,27 +467,94 @@ test('menu da conversa: buscar, silenciar, fixar, arquivar e apagar conversa só
   await bia.page.waitForSelector('.row-btn .title >> text=/📌 Ana 🔕/');
   assert.match(await bia.page.textContent('.list:not(.results) li:first-child'), /Ana/, 'fixada no topo');
   // Arquivar o grupo e apagá-lo só deste aparelho.
-  await bia.page.click('.row-btn:has-text("Família")');
+  await bia.page.click('.row-btn:has(.title:has-text("Família"))');
   await bia.page.fill('#composer', 'mensagem do grupo');
   await bia.page.click('[aria-label=Enviar]');
   await bia.page.waitForSelector('.msg.mine >> text=mensagem do grupo');
-  await menu(bia, 'Apagar conversa (só para mim)');
+  await menu(bia, 'Limpar conversa');
   await bia.page.click('.sheet button.danger');
   await bia.page.waitForSelector('text=Nenhuma mensagem.');
   await menu(bia, 'Arquivar');
   await bia.page.click('[aria-label=Voltar]');
   await bia.page.waitForSelector('text=Arquivadas (1)');
-  assert.equal(await bia.page.$('.list:not(.results) .row-btn:has-text("Família")'), null, 'arquivada sai da lista principal');
+  assert.equal(await bia.page.$('.list:not(.results) .row-btn:has(.title:has-text("Família"))'), null, 'arquivada sai da lista principal');
   await bia.page.click('text=Arquivadas (1)');
-  await bia.page.waitForSelector('.row-btn:has-text("Família")');
+  await bia.page.waitForSelector('.row-btn:has(.title:has-text("Família"))');
   await bia.page.click('text=Voltar às conversas');
   // Para a Ana, a mensagem do grupo continua (apagar para mim não apaga dos outros).
   await ana.page.click('[aria-label=Voltar]');
-  await ana.page.click('.row-btn:has-text("Família")');
+  await ana.page.click('.row-btn:has(.title:has-text("Família"))');
   await ana.page.waitForSelector('.msg >> text=mensagem do grupo', { timeout: 40000 });
   for (const [p, other] of [[ana, 'Bia'], [bia, 'Ana']]) {
     if (p === ana) await p.page.click('[aria-label=Voltar]');
-    await p.page.click(`.row-btn:has-text("${other}")`);
+    await p.page.click(`.row-btn:has(.title:has-text("${other}"))`);
+    await p.page.waitForSelector('#composer');
+  }
+});
+
+test('como no WhatsApp: prévia e não lidas na lista, busca por trecho, formatação e reação ao segurar', async () => {
+  await bia.page.click('[aria-label=Voltar]');
+  await ana.page.fill('#composer', 'novidade *forte*');
+  await ana.page.click('[aria-label=Enviar]');
+  await bia.page.waitForSelector('.list:not(.results) .row-btn:has(.title:has-text("Ana")) .badge', { timeout: 40000 });
+  assert.match(await bia.page.textContent('.list:not(.results) .row-btn:has(.title:has-text("Ana")) .preview'), /novidade/);
+  // D1: "na" acha "Ana" (trecho no meio do nome).
+  await bia.page.fill('#search', 'na');
+  await bia.page.waitForSelector('.results .row-btn:has-text("Ana")');
+  await bia.page.fill('#search', '');
+  await bia.page.click('.list:not(.results) .row-btn:has(.title:has-text("Ana"))');
+  await bia.page.waitForSelector('.msg:not(.mine) strong >> text=forte');
+  await bia.page.waitForSelector('.unread-sep');
+  await bia.page.click('.msg:not(.mine) >> text=novidade', { delay: 700 });
+  await bia.page.click('.sheet .react-bar button[aria-label="Reagir com 👍"]');
+  await ana.page.waitForSelector('.msg.mine .reacts >> text=👍', { timeout: 40000 });
+  // Voltou da conversa: lida, sem contador.
+  await bia.page.click('[aria-label=Voltar]');
+  await bia.page.waitForSelector('.list:not(.results) .row-btn:has(.title:has-text("Ana"))');
+  assert.equal(await bia.page.$('.list:not(.results) .row-btn:has(.title:has-text("Ana")) .badge'), null);
+  await bia.page.click('.list:not(.results) .row-btn:has(.title:has-text("Ana"))');
+  await bia.page.waitForSelector('#composer');
+  // S8: o número de segurança da dupla é o mesmo nos dois celulares.
+  const number = async (p) => {
+    await p.page.click('[aria-label="Menu da conversa"]');
+    await p.page.click('.sheet >> text=Participantes e verificação');
+    await p.page.click('.sheet button:text-is("Verificar")');
+    await p.page.waitForSelector('.code.safety');
+    return p.page.textContent('.code.safety');
+  };
+  const [nb, na] = [await number(bia), await number(ana)];
+  assert.match(nb, /^(\d{5} ){11}\d{5}$/);
+  assert.equal(nb, na);
+  await bia.page.click('.sheet >> text=Os números batem: marcar como verificado');
+  await bia.page.waitForSelector('.sheet >> text=✓ Verificado.');
+  for (const p of [bia, ana]) await p.page.click('.sheet button.block:text-is("Fechar")');
+});
+
+test('enquete no grupo (voto cifrado) e anotações só neste aparelho', async () => {
+  for (const p of [ana, bia]) await p.page.click('[aria-label=Voltar]');
+  await ana.page.click('.row-btn:has(.title:has-text("Família"))');
+  await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
+  await ana.page.click('.sheet >> text=Enquete');
+  await ana.page.fill('#poll-q', 'Pizza ou sushi?');
+  const opts = await ana.page.$$('.poll-opt');
+  await opts[0].fill('pizza'); await opts[1].fill('sushi');
+  await ana.page.click('text=Enviar enquete');
+  await ana.page.waitForSelector('.poll >> text=Pizza ou sushi?');
+  await bia.page.click('text=Arquivadas (1)');
+  await bia.page.click('.row-btn:has(.title:has-text("Família"))');
+  await bia.page.waitForSelector('.poll >> text=Pizza ou sushi?', { timeout: 40000 });
+  await bia.page.click('.poll-option:has-text("sushi")');
+  await ana.page.waitForSelector('.poll-option:has-text("sushi") >> text=1', { timeout: 40000 });
+  // Anotações: só neste aparelho, nada vai ao servidor.
+  await bia.page.click('[aria-label=Voltar]');
+  await bia.page.click('[aria-label=Anotações]');
+  await bia.page.fill('#note-text', 'lembrar do *pão*');
+  await bia.page.click('[aria-label="Salvar anotação"]');
+  await bia.page.waitForSelector('.msg strong >> text=pão');
+  await bia.page.click('[aria-label=Voltar]');
+  await ana.page.click('[aria-label=Voltar]');
+  for (const [p, other] of [[ana, 'Bia'], [bia, 'Ana']]) {
+    await p.page.click(`.row-btn:has(.title:has-text("${other}"))`);
     await p.page.waitForSelector('#composer');
   }
 });
@@ -513,7 +582,7 @@ test('legenda vai cifrada com a foto; recado aparece para o círculo', async () 
   await bia.page.waitForSelector('.sheet >> text=de férias até sexta');
   await bia.page.click('.sheet >> text=Fechar');
   await ana.page.click('[aria-label=Voltar]');
-  await ana.page.click('.row-btn:has-text("Bia")');
+  await ana.page.click('.row-btn:has(.title:has-text("Bia"))');
   await ana.page.waitForSelector('#composer');
 });
 
@@ -540,7 +609,7 @@ test('stories: audiência escolhida, sem contagem de quem viu, apagar some para 
   await bia.page.waitForSelector('text=Nenhuma story no momento.', { timeout: 40000 });
   for (const [p, other] of [[ana, 'Bia'], [bia, 'Ana']]) {
     await p.page.click('[aria-label=Voltar]');
-    await p.page.click(`.row-btn:has-text("${other}")`);
+    await p.page.click(`.row-btn:has(.title:has-text("${other}"))`);
     await p.page.waitForSelector('#composer');
   }
 });
@@ -635,7 +704,7 @@ test('câmera do app (modo máximo, padrão): foto e vídeo sem galeria nem arqu
   assert.equal(await bia.page.evaluate(() => globalThis.__mpTest.S.unlocked), false);
   await bia.page.fill('#secret', PIN);
   await bia.page.click('text=Desbloquear');
-  await bia.page.click('.row-btn:has-text("Ana")', { timeout: 15000 })
+  await bia.page.click('.row-btn:has(.title:has-text("Ana"))', { timeout: 15000 })
     .catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} | tela: ${(await bia.page.textContent('#root')).slice(0, 200)} | aviso: ${await status(bia)} | erros: ${bia.errors.slice(-3).join(' / ')}`); });
   await bia.page.waitForSelector('#composer');
 });
@@ -669,7 +738,7 @@ test('bloquear e desbloquear: conversa continua, guardada cifrada no aparelho', 
   await ana.page.waitForFunction(() => /PIN errado/.test(document.querySelector('#toast').textContent));
   await ana.page.fill('#secret', PIN);
   await ana.page.click('text=Desbloquear');
-  await ana.page.click('.row-btn:has-text("Bia")');
+  await ana.page.click('.row-btn:has(.title:has-text("Bia"))');
   await ana.page.waitForFunction(() => [...document.querySelectorAll('.msg .text')].some((e) => e.textContent === 'oi, Ana! tudo cifrado?'));
   assert.ok(!(await ana.page.textContent('.chat')).includes('tudo, Bia 🌙'), 'apagada para mim não volta depois da rotação');
   // Bia, que não apagou, continua vendo (apagar para mim não afeta os outros).

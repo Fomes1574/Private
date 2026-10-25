@@ -13,6 +13,7 @@ export function warningText(w) {
     case 'unconfirmed_circle': return 'O servidor indicou no círculo alguém que a administradora não confirmou. Essa pessoa não recebe apelido, foto nem stories.';
     case 'ttl_clamped': return 'O servidor tentou dar a uma mensagem um prazo maior que o combinado. O aparelho manteve o prazo certo.';
     case 'membership_rejected': return `Um anúncio de membros de ${session.nameOf(w.from)} não veio da líder confirmada e foi ignorado.`;
+    case 'send_failed': return 'Uma mensagem que estava na fila não pôde ser enviada (a conversa mudou ou passou muito tempo). Ela não foi entregue.';
     case 'circle_joined': return `${who} entrou no círculo.`;
     case 'circle_removed': return `${who} saiu do círculo.`;
     case 'circle_device_changed': return `${who} trocou de aparelho.`;

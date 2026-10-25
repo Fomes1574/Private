@@ -146,3 +146,36 @@ button.link { background: none; border: 0; color: var(--accent, #6CB4FF); text-d
 .fmt-quote { display: block; border-left: 3px solid rgba(127,127,127,.6); padding-left: 8px; opacity: .9; }
 .fmt-li { display: block; padding-left: 4px; }
 .mention { color: #53BDEB; font-weight: 600; }
+/* Conversa como no WhatsApp (entrega B). */
+.msg { touch-action: pan-y; transition: transform .12s; }
+.msg.selected { outline: 2px solid #53BDEB; background: rgba(83,189,235,.18); }
+.msg.flash { animation: flash 1.2s; }
+@keyframes flash { 0%, 60% { box-shadow: 0 0 0 3px #53BDEB; } 100% { box-shadow: none; } }
+.day-sep, .unread-sep { list-style: none; align-self: center; text-align: center; margin: 6px 0; }
+.day-sep span { background: var(--card); border-radius: 8px; padding: 3px 10px; font-size: 12px; color: var(--muted, #9AA4B2); }
+.unread-sep { align-self: stretch; background: rgba(127,127,127,.15); font-size: 12px; padding: 3px 0; }
+.select-bar { padding: 6px 12px; background: var(--bar); }
+.react-bar { justify-content: space-around; }
+.react-bar .emoji { font-size: 26px; background: transparent; }
+.tick { opacity: .8; }
+.mention-box { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 0; }
+.rec-level { display: inline-block; width: 60px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #25D366 calc(var(--lvl, 0) * 100%), rgba(127,127,127,.3) 0); }
+.quote[role=button] { cursor: pointer; }
+/* Lote de até 5 fotos (D4). */
+.batch { gap: 8px; }
+.batch-main { max-width: 100%; max-height: 52vh; object-fit: contain; align-self: center; }
+.batch-strip { gap: 6px; overflow-x: auto; }
+.batch-strip .thumb { position: relative; padding: 0; width: 56px; height: 56px; border-radius: 8px; overflow: hidden; border: 2px solid transparent; background: #000; }
+.batch-strip .thumb.on { border-color: #25D366; }
+.batch-strip .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.thumb-n { position: absolute; left: 3px; top: 1px; font-size: 12px; font-weight: 700; color: #fff; text-shadow: 0 0 3px #000; }
+.once-toggle { width: 36px; height: 36px; border-radius: 50%; border: 2px dashed currentColor; background: transparent; font-weight: 700; }
+.once-toggle.on { background: #25D366; color: #0B1220; border-style: solid; }
+#batch-caption { flex: 1; }
+/* Vídeo redondo (D). */
+.camera-preview.round, video.round { border-radius: 50%; aspect-ratio: 1; object-fit: cover; width: min(80vw, 420px); }
+/* Enquete (D). */
+.poll { display: grid; gap: 6px; min-width: 220px; }
+.poll-option { display: flex; gap: 8px; text-align: left; background: rgba(127,127,127,.15); color: inherit; font-weight: 400; }
+.poll-option.on { outline: 2px solid #25D366; }
+.poll-opts { display: grid; gap: 6px; }

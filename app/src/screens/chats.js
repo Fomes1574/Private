@@ -17,8 +17,9 @@ export async function chatsScreen(go) {
   let showArchived = false, rows = [];
   const archToggle = h('button', { class: 'secondary small', hidden: true, onclick: () => { showArchived = !showArchived; draw(); } });
   // D1: qualquer trecho do nome, pessoas e grupos, só no aparelho.
-  search.oninput = () => {
-    const term = search.value;
+  let searchSeq = 0;
+  search.oninput = async () => {
+    const term = search.value, seq = ++searchSeq;
     const people = session.searchPeople(term).map((p) => ({ label: p.nickname, person: p }));
     const groups = rows.filter((r) => r.v.kind === 'group' && !r.hidden).map((r) => ({ label: session.roomTitle(r.v), room: r.v }));
     const found = term.trim() ? [...people, ...searchByText(groups, term)] : [];
@@ -27,6 +28,12 @@ export async function chatsScreen(go) {
         try { const v = await session.startDirect(f.person.userId); go('chat', { roomId: v.roomId }); } catch (e) { toast(`Não deu: ${e.message}`); }
       } }, avatar(f.person.nickname, session.photoOf(f.person.userId)), h('span', { text: f.person.nickname }))
       : h('button', { class: 'row-btn', onclick: () => go('chat', { roomId: f.room.roomId }) }, avatar(f.label, session.roomPhoto(f.room)), h('span', { text: `${f.label} · grupo` })))));
+    // b.14: mensagens de todas as conversas, só no aparelho.
+    const msgs = await session.searchMessages(term);
+    if (seq !== searchSeq || !msgs.length) return;
+    const title = (id) => { const r = rows.find((x) => x.v.roomId === id); return r ? session.roomTitle(r.v) : 'Conversa'; };
+    results.append(h('li', { class: 'muted small', text: 'Mensagens' }), ...msgs.map((x) => h('li', {}, h('button', { class: 'row-btn', onclick: () => go('chat', { roomId: x.roomId, find: term }) },
+      h('span', { class: 'grow' }, h('span', { class: 'title', text: title(x.roomId) }), h('span', { class: 'muted small preview', text: x.text.slice(0, 80) }))))));
   };
   const selected = pendingAttachment();
   const attachmentCard = selected ? h('div', { class: 'card' },
@@ -44,6 +51,7 @@ export async function chatsScreen(go) {
   }).catch(() => {});
   mount(h('div', {},
     header('Conversas', { actions: [
+      h('button', { class: 'icon', 'aria-label': 'Anotações', text: '✎', onclick: () => go('notes') }),
       h('button', { class: 'icon', 'aria-label': 'Stories', text: '◎', onclick: () => go('stories') }),
       h('button', { class: 'icon', 'aria-label': 'Novo grupo', text: '+', onclick: () => go('newGroup') }),
       h('button', { class: 'icon', 'aria-label': 'Ajustes', text: '⚙', onclick: () => go('settings') }),

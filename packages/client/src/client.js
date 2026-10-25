@@ -254,7 +254,7 @@ export class MessengerClient {
   roomEvent(roomId, ev) { return this.api.post(`/v1/rooms/${roomId}/events`, ev); }
 
   // Envia qualquer tipo de conteúdo interno a todos os membros ativos.
-  async sendInner(roomId, kind, body, { replyTo, msgKind = 'text', view = null, audience = null, ttl, mediaId } = {}) {
+  async sendInner(roomId, kind, body, { replyTo, msgKind = 'text', view = null, audience = null, ttl, mediaId, localBody = null } = {}) {
     // Os dois pedidos vão juntos (menos idas e voltas em rede lenta, ex.: Tor);
     // a conferência de segurança termina antes de qualquer cifra.
     const [, room] = await Promise.all([
@@ -295,16 +295,98 @@ export class MessengerClient {
     const fillLen = Object.values(envelopes)[0]?.length ?? 400;
     for (const u of decoys) envelopes[u] = b64(crypto.getRandomValues(new Uint8Array(Math.floor(fillLen * 3 / 4))));
     await this.persistCrypto(); // ratchet salvo antes de transmitir
-    // mediaId liga a mensagem à mídia (F04/F16): apagar para todos revoga no
-    // servidor, e o documento entra na cota no mesmo envio.
-    const r = await this.api.post(`/v1/rooms/${roomId}/messages`, { msgId, kind: msgKind, envelopes, ...(ttl ? { ttl } : {}), ...(mediaId ? { mediaId } : {}) });
-    const local = { msgId, room: roomId, sender: this.userId, kind, body, replyTo, acceptedAt: r.acceptedAt, expiresAt: r.expiresAt, mine: true };
-    if (kind === 'text' || kind === 'media' || kind === 'story') await this.store.putMessage({ ...local, text: body.text });
+    // F10: o envelope já cifrado fica na fila (banco cifrado) antes de sair.
+    // Se a rede cair sem resposta, a nova tentativa reenvia O MESMO id e o
+    // mesmo envelope: o servidor reconhece e não duplica.
+    const payload = { msgId, kind: msgKind, envelopes, ...(ttl ? { ttl } : {}), ...(mediaId ? { mediaId } : {}) };
+    const draft = { msgId, room: roomId, sender: this.userId, kind, body: localBody ?? body, replyTo, mine: true, ...(localBody ? { consumed: true } : {}) };
+    const stored = ['text', 'media', 'story', 'poll'].includes(kind);
+    await this.queue(roomId, payload, stored ? draft : null);
+    return this.deliver(roomId, msgId);
+  }
+
+  // ---------- fila de envio (F10) ----------
+  static OUTBOX_TTL = 15 * 86_400_000;
+  async outbox() { return (await this.store.get('outbox')) ?? []; }
+  async queue(roomId, payload, local) {
+    const all = await this.outbox();
+    all.push({ roomId, payload, local, at: Date.now() });
+    await this.store.put('outbox', all);
+  }
+  async dequeue(msgId) { await this.store.put('outbox', (await this.outbox()).filter((o) => o.payload.msgId !== msgId)); }
+  async deliver(roomId, msgId) {
+    const item = (await this.outbox()).find((o) => o.payload.msgId === msgId);
+    if (!item) throw new Error('envio não encontrado');
+    let r;
+    try {
+      // mediaId liga a mensagem à mídia (F04/F16): apagar para todos revoga no
+      // servidor, e o documento entra na cota no mesmo envio.
+      r = await this.api.post(`/v1/rooms/${roomId}/messages`, item.payload);
+    } catch (e) {
+      if (e.status) { await this.dequeue(msgId); throw e; } // recusado: não adianta repetir
+      const p = new Error('sem conexão: a mensagem fica na fila e vai sozinha quando a rede voltar');
+      p.code = 'pending'; p.msgId = msgId;
+      throw p;
+    }
+    const local = item.local ? { ...item.local, acceptedAt: r.acceptedAt, expiresAt: r.expiresAt } : { msgId, room: roomId, acceptedAt: r.acceptedAt, expiresAt: r.expiresAt };
+    if (item.local) await this.store.putMessage({ ...local, text: local.body?.text });
+    await this.dequeue(msgId);
     if (r.quota) local.quota = r.quota;
     return local;
   }
+  // Tenta de novo o que ficou na fila. Devolve o que foi e o que falhou.
+  async retryOutbox() {
+    const out = { sent: [], failed: [] };
+    for (const item of await this.outbox()) {
+      if (Date.now() - item.at > MessengerClient.OUTBOX_TTL) { await this.dequeue(item.payload.msgId); out.failed.push(item); continue; }
+      try { out.sent.push(await this.deliver(item.roomId, item.payload.msgId)); }
+      catch (e) { if (e.code === 'pending') break; out.failed.push(item); this.warn({ kind: 'send_failed', roomId: item.roomId, at: Date.now() }); }
+    }
+    return out;
+  }
 
   sendText(roomId, text, opts) { return this.sendInner(roomId, 'text', { text }, opts); }
+
+  // ---------- enquete (D), fixar (C) e favoritas (C) ----------
+  sendPoll(roomId, question, options, multi = false) {
+    return this.sendInner(roomId, 'poll', { question: question.trim(), options: options.map((o) => o.trim()).filter(Boolean), multi: !!multi });
+  }
+  async vote(roomId, target, choices) {
+    await this.sendInner(roomId, 'vote', { target, choices });
+    const orig = await this.store.getMessage(target);
+    if (orig?.kind === 'poll') await this.store.putMessage({ ...orig, votes: { ...(orig.votes ?? {}), [this.userId]: choices } });
+  }
+  // Fixar mensagem na conversa (até 3, como no WhatsApp). until = 0 desafixa.
+  async pin(roomId, target, until) {
+    await this.sendInner(roomId, 'pin', { target, until });
+    await this.applyPin({ room: roomId, sender: this.userId, body: { target, until } });
+  }
+  async pinsOf(roomId) {
+    const now = this.api.clock.now() ?? Date.now();
+    const all = (await this.store.get('pins')) ?? {};
+    const list = [];
+    for (const p of all[roomId] ?? []) {
+      const m = await this.store.getMessage(p.target);
+      if (m && p.until > now && m.expiresAt > now && !this.hidden.has(p.target) && !this.tombs.has(p.target)) list.push({ ...p, message: m });
+    }
+    return list;
+  }
+  async applyPin(inner) {
+    const { target, until } = inner.body;
+    const orig = await this.store.getMessage(target);
+    if (!orig || orig.room !== inner.room) return;
+    const all = (await this.store.get('pins')) ?? {};
+    let list = (all[inner.room] ?? []).filter((p) => p.target !== target);
+    // Nunca passa do prazo da própria mensagem.
+    if (until > 0) list = [...list, { target, until: Math.min(until, orig.expiresAt), by: inner.sender, at: Date.now() }].slice(-3);
+    all[inner.room] = list;
+    await this.store.put('pins', all);
+  }
+  // Favoritas: só neste aparelho, e vencem junto com a mensagem (passo 9).
+  async star(msgId, on) {
+    const m = await this.store.getMessage(msgId);
+    if (m) await this.store.putMessage({ ...m, starred: !!on });
+  }
   react(roomId, target, emoji) { return this.sendInner(roomId, 'reaction', { target, emoji }); }
 
   async edit(roomId, target, text) {
@@ -362,24 +444,29 @@ export class MessengerClient {
   }
 
   // ---------- mídia ----------
-  async sendMedia(roomId, bytes, { mode = 'media', mime = 'application/octet-stream', caption, duration, name } = {}) {
+  async sendMedia(roomId, bytes, { mode = 'media', mime = 'application/octet-stream', caption, duration, name, round, hd } = {}) {
     // Confere antes de subir qualquer byte (nada fica órfão no servidor).
     const view = await this.room(roomId);
     this.assertMediaAllowed(view.members.filter((m) => m.active && m.userId !== this.userId).map((m) => m.userId));
     const key = await newMediaKey();
-    const blob = await encryptMedia(key, bytes);
+    // S7: foto, vídeo e áudio sobem em degraus de tamanho (documento não).
+    const blob = await encryptMedia(key, bytes, { pad: mode !== 'doc' });
     const up = await this.api.post(`/v1/rooms/${roomId}/media?mode=${mode}`, blob);
     // A chave vai só dentro do envelope Olm de cada destinatário.
-    const body = { mediaId: up.mediaId, key: b64(key), mime, mode, size: bytes.byteLength, ...(caption ? { caption } : {}), ...(duration ? { duration: Math.round(duration) } : {}), ...(name ? { name } : {}) };
+    const body = { mediaId: up.mediaId, key: b64(key), mime, mode, size: bytes.byteLength, ...(caption ? { caption } : {}), ...(duration ? { duration: Math.round(duration) } : {}), ...(name ? { name } : {}), ...(round ? { round: true } : {}), ...(hd ? { hd: true } : {}) };
     key.fill(0);
-    const msg = await this.sendInner(roomId, 'media', body, { msgKind: 'media', mediaId: up.mediaId });
-    if (mode === 'once') {
-      // Quem enviou não reabre (§15.6): a chave não fica nem no aparelho dele.
-      const stored = await this.store.getMessage(msg.msgId);
-      if (stored) await this.store.putMessage({ ...stored, body: { ...stored.body, key: null }, consumed: true });
-      msg.body = { ...msg.body, key: null };
-      await this.onDestroy([]);
+    // Quem enviou não reabre ver uma vez (§15.6): a chave não fica nem no
+    // aparelho dele, nem na fila de envio.
+    const localBody = mode === 'once' ? { ...body, key: null } : null;
+    let msg;
+    try { msg = await this.sendInner(roomId, 'media', body, { msgKind: 'media', mediaId: up.mediaId, localBody }); }
+    catch (e) {
+      // F11: recusado de vez → a mídia que subiu é revogada (não fica órfã).
+      // Sem rede → fica na fila e a mídia continua esperando o reenvio.
+      if (e.code !== 'pending') await this.api.post(`/v1/media/${up.mediaId}/revoke`).catch(() => null);
+      throw e;
     }
+    if (mode === 'once') { msg.body = localBody; await this.onDestroy([]); }
     // Servidor antigo (sem F16): publica a cota pela rota separada.
     if (mode === 'doc' && !msg.quota) msg.quota = await this.api.post('/v1/docs/publish', { mediaId: up.mediaId, msgId: msg.msgId });
     return msg;
@@ -396,7 +483,7 @@ export class MessengerClient {
     if (roster && audience.some((u) => !roster.includes(u))) throw new Error('audiência inválida: alguém não foi confirmado pela administradora');
     this.assertMediaAllowed(audience);
     const key = await newMediaKey();
-    const blob = await encryptMedia(key, bytes);
+    const blob = await encryptMedia(key, bytes, { pad: true });
     const q = new URLSearchParams({ mode: 'media', story: '1', audience: audience.join(','), ...(ttl ? { ttl: String(ttl) } : {}) });
     const up = await this.api.post(`/v1/rooms/${CIRCLE_ROOM_ID}/media?${q}`, blob);
     const body = { mediaId: up.mediaId, key: b64(key), mime, ...(caption ? { caption } : {}), ...(duration ? { duration: Math.round(duration) } : {}) };
@@ -488,6 +575,8 @@ export class MessengerClient {
     // Juntos: avisos de segurança e caixa de entrada. Os avisos são
     // aplicados (diretório relido) antes de decifrar qualquer envelope.
     const [security, res] = await Promise.all([this.checkSecurityEvents(), this.api.get('/v1/sync')]);
+    // F10: com a rede de volta, o que ficou na fila vai (mesmo id, sem duplicar).
+    const retried = await this.retryOutbox().catch(() => ({ sent: [], failed: [] }));
     const acks = { envelopes: [], tombstones: [] };
     // 1) tombstones primeiro: nada apagado chega a aparecer (§12).
     for (const t of res.tombstones) {
@@ -526,7 +615,7 @@ export class MessengerClient {
     await this.saveMarks();
     await this.saveWarnings();
     if (acks.envelopes.length || acks.tombstones.length) await this.api.post('/v1/ack', acks);
-    return { received, rejected, tombstones: res.tombstones.length, more: res.more, security };
+    return { received, rejected, tombstones: res.tombstones.length, more: res.more, security, retried };
   }
 
   async apply(inner, e) {
@@ -545,6 +634,20 @@ export class MessengerClient {
         return;
       }
       case 'membership': return this.applyMembership(inner);
+      case 'poll': return this.store.putMessage({ ...base, kind: 'poll', body: inner.body, votes: {} });
+      case 'vote': {
+        // Voto só de membro confirmado, na mesma conversa, com opções válidas.
+        const orig = await this.store.getMessage(inner.body.target);
+        if (!orig || orig.kind !== 'poll' || orig.room !== inner.room) return;
+        if (!this.trusted[inner.room]?.members.includes(inner.sender)) return;
+        const choices = [...new Set(inner.body.choices)].filter((c) => c < orig.body.options.length);
+        if (!orig.body.multi && choices.length > 1) return;
+        return this.store.putMessage({ ...orig, votes: { ...(orig.votes ?? {}), [inner.sender]: choices } });
+      }
+      case 'pin': {
+        if (!this.trusted[inner.room]?.members.includes(inner.sender)) return;
+        return this.applyPin(inner);
+      }
       case 'reaction': {
         // F09: só na mesma conversa, só de quem é membro confirmado, nunca em
         // ver uma vez.
@@ -565,7 +668,9 @@ export class MessengerClient {
     const { members, leader } = inner.body;
     if (inner.room === CIRCLE_ROOM_ID) {
       // Lista do círculo: só da administradora fixada (S3).
-      const admin = await this.circleAdminId();
+      let admin = await this.circleAdminId();
+      // Diretório antigo (sem ordem de entrada): relê antes de decidir.
+      if (!admin) { await this.refreshDirectory(); admin = await this.circleAdminId(); }
       if (!admin || inner.sender !== admin || leader !== admin) { this.warn({ kind: 'membership_rejected', roomId: inner.room, from: inner.sender, at: this.api.clock.now() }); return; }
       this.trusted[CIRCLE_ROOM_ID] = { members, leader };
       this.circleRosterChanged = true;

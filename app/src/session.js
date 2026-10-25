@@ -429,7 +429,7 @@ async function handleExtras(received) {
       // F03: conversa excluída por mim não recupera nome/foto por anúncio velho.
       if (S.client.trusted[m.room]?.leader === m.sender && !S.rooms[m.room]?.deleted) {
         const prev = S.rooms[m.room] ?? {};
-        const next = { ...prev, title: m.body.title };
+        const next = { ...prev, title: m.body.title, description: m.body.description ?? null };
         for (const k of ['photo', 'background']) if (k in m.body) { next[k] = m.body[k]; if (prev[k] && prev[k].mediaId !== m.body[k]?.mediaId) forgetVisual(prev[k]); }
         S.rooms[m.room] = next;
         changed = true;
@@ -559,7 +559,7 @@ export async function setRoomTitle(roomId, title) {
 // Reenviado também quando entra alguém, para a pessoa nova ver.
 export async function sendRoomProfile(roomId) {
   const r = S.rooms[roomId] ?? {};
-  await S.client.sendInner(roomId, 'room_profile', { title: r.title ?? '', photo: r.photo ?? null, background: r.background ?? null });
+  await S.client.sendInner(roomId, 'room_profile', { title: r.title ?? '', photo: r.photo ?? null, background: r.background ?? null, ...(r.description ? { description: r.description } : {}) });
   await S.store.put('rooms', S.rooms);
 }
 
@@ -651,6 +651,60 @@ export const isDeleted = (roomId, lastAt = 0) => !!S.rooms[roomId]?.deleted && l
 export async function undeleteRoom(roomId) {
   if (S.rooms[roomId]?.deleted) { const { deleted, deletedAt, ...rest } = S.rooms[roomId]; S.rooms[roomId] = { ...rest, readAt: deletedAt }; await S.store.put('rooms', S.rooms); }
 }
+// Busca nas mensagens de todas as conversas (b.14): só no aparelho, sobre o
+// que ainda não venceu; nada é indexado nem guardado.
+export async function searchMessages(term, limit = 30) {
+  const t = normalize(term ?? '');
+  if (t.length < 2) return [];
+  const out = [];
+  for (const id of Object.keys(S.rooms)) {
+    if (S.rooms[id]?.deleted) continue;
+    const r = await S.client.view(id).catch(() => null);
+    for (const m of r?.render ?? []) {
+      const text = m.kind === 'text' ? m.text : m.kind === 'poll' ? m.body?.question : m.body?.mode === 'once' ? '' : m.body?.caption ?? m.body?.name ?? '';
+      if (text && normalize(text).includes(t)) out.push({ roomId: id, msg: m, text });
+    }
+  }
+  return out.sort((a, b) => b.msg.acceptedAt - a.msg.acceptedAt).slice(0, limit);
+}
+
+// Anotações (D, "conversa comigo"): só neste aparelho, nunca vão ao servidor
+// e vencem como qualquer mensagem (passo 9).
+export async function notes() {
+  const now = S.clock?.now() ?? Date.now();
+  const all = ((await S.store.get('notes')) ?? []).filter((n) => n.expiresAt > now);
+  return all;
+}
+export async function addNote(text, ttlSec) {
+  const now = S.clock?.now() ?? Date.now();
+  const all = await notes();
+  all.push({ id: crypto.randomUUID(), text: text.slice(0, 4000), at: now, expiresAt: now + ttlSec * 1000 });
+  await S.store.put('notes', all);
+}
+export async function deleteNote(id) {
+  await S.store.put('notes', (await notes()).filter((n) => n.id !== id));
+  scheduleRotate(); // o texto apagado sai do arquivo do banco
+}
+
+// Papel de parede só deste aparelho (b.17), cifrado no banco.
+export async function setWallpaper(roomId, bytes) {
+  const all = (await S.store.get('wallpapers')) ?? {};
+  if (bytes) { let s = ''; for (const b of bytes) s += String.fromCharCode(b); all[roomId] = btoa(s); } else delete all[roomId];
+  await S.store.put('wallpapers', all);
+  if (!bytes) scheduleRotate();
+}
+export async function wallpaperURL(roomId) {
+  const b = ((await S.store.get('wallpapers')) ?? {})[roomId];
+  if (!b) return null;
+  return URL.createObjectURL(new Blob([Uint8Array.from(atob(b), (c) => c.charCodeAt(0))], { type: 'image/jpeg' }));
+}
+
+// Descrição do grupo (b.16): cifrada, como o nome; só a líder muda.
+export async function setRoomDescription(roomId, description) {
+  S.rooms[roomId] = { ...(S.rooms[roomId] ?? {}), description: description || null };
+  await sendRoomProfile(roomId);
+}
+
 // Saiu do grupo: continua na lista só para leitura até excluir (WhatsApp).
 export const markLeft = (roomId) => setRoomFlag(roomId, { left: true });
 export const imActive = (view) => !!view?.members.some((m) => m.userId === S.client.userId && m.active);

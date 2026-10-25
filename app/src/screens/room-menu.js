@@ -6,6 +6,7 @@ import { TTL_OPTIONS, describeTtl } from '../packages/protocol/src/ttl.js';
 import { pickSquarePhoto } from './settings.js';
 import { pickImage } from '../pick-image.js';
 import { verifySheet } from './verify.js';
+import { formatDateTime } from '../packages/protocol/src/time.js';
 
 // Fundo: até 1280 px, sem metadados; câmera traseira.
 const pickBackground = (roomId) => pickImage({ maxSide: 1280, facing: 'environment', resume: { roomId, target: 'chat', action: 'room-background' } });
@@ -17,12 +18,14 @@ export async function roomMenu(go, roomId) {
   const leader = v.leader === me;
   const flags = S.rooms[roomId] ?? {};
   const opts = [{ label: 'Buscar nesta conversa', value: 'search' }, { label: 'Participantes e verificação', value: 'members' },
+    { label: 'Mídia, documentos e favoritas', value: 'gallery' },
+    ...(v.kind === 'direct' ? [{ label: 'Papel de parede (só neste aparelho)', value: 'wallpaper' }] : []),
     { label: session.isMuted(roomId) ? 'Reativar avisos' : 'Silenciar', value: 'mute' },
     { label: flags.pinned ? 'Desafixar' : 'Fixar no topo', value: 'pin' },
     { label: flags.archived ? 'Desarquivar' : 'Arquivar', value: 'archive' }];
   if (leader && !v.closed) {
     opts.push({ label: 'Prazos de mensagens e mídia', value: 'ttl' });
-    if (v.kind === 'group') opts.push({ label: 'Nome do grupo', value: 'title' }, { label: 'Foto do grupo', value: 'photo' }, { label: 'Fundo da conversa', value: 'background' }, { label: 'Adicionar pessoa', value: 'add' }, { label: 'Remover pessoa', value: 'remove' });
+    if (v.kind === 'group') opts.push({ label: 'Nome do grupo', value: 'title' }, { label: 'Descrição do grupo', value: 'description' }, { label: 'Foto do grupo', value: 'photo' }, { label: 'Fundo da conversa', value: 'background' }, { label: 'Adicionar pessoa', value: 'add' }, { label: 'Remover pessoa', value: 'remove' });
     opts.push({ label: 'Ceder liderança', value: 'transfer' });
   }
   // D3, como no WhatsApp: limpar e excluir valem só neste aparelho. Grupo só
@@ -38,6 +41,25 @@ export async function roomMenu(go, roomId) {
   const active = v.members.filter((m) => m.active);
   try {
     if (c === 'members') return membersSheet(v);
+    if (c === 'gallery') return gallerySheet(roomId);
+    if (c === 'wallpaper') {
+      const has = !!(await session.wallpaperURL(roomId));
+      const a = has ? await choiceSheet('Papel de parede (só neste aparelho, cifrado)', [{ label: 'Trocar', value: 'set' }, { label: 'Remover', value: 'rm', danger: true }]) : 'set';
+      if (a === 'rm') { await session.setWallpaper(roomId, null); toast('Papel de parede removido.'); return 'refresh'; }
+      if (a !== 'set') return;
+      const b = await pickBackground(roomId);
+      if (!b) return;
+      try { await session.setWallpaper(roomId, b); } finally { b.fill(0); }
+      toast('Papel de parede trocado.');
+      return 'refresh';
+    }
+    if (c === 'description') {
+      const t = await prompt('Descrição do grupo (só quem está no grupo vê, cifrada)', S.rooms[roomId]?.description ?? '', 512);
+      if (t === null) return;
+      await session.setRoomDescription(roomId, t.trim());
+      toast('Descrição salva.');
+      return;
+    }
     if (c === 'search') return 'search';
     if (c === 'mute') {
       if (session.isMuted(roomId)) { await session.muteRoom(roomId, 0); toast('Avisos reativados.'); return; }
@@ -138,19 +160,38 @@ async function membersSheet(v) {
       me ? null : h('button', { class: 'secondary small', text: 'Verificar', onclick: () => { sheet.remove(); verifySheet(m.userId); } })));
   }
   const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'sheet-box' },
+    S.rooms[v.roomId]?.description ? h('p', { class: 'muted', text: S.rooms[v.roomId].description }) : null,
     h('p', { text: 'Para verificar alguém, encontrem-se e leiam o QR ou comparem o número de segurança. Se baterem, ninguém está no meio.' }),
     h('ul', { class: 'list' }, rows),
     h('button', { class: 'block', text: 'Fechar', onclick: () => sheet.remove() })));
   document.body.append(sheet);
 }
 
-function prompt(label, value) {
+function prompt(label, value, max = 60) {
   return new Promise((resolve) => {
-    const input = h('input', { maxlength: '60', value, 'aria-label': label });
+    const input = h('input', { maxlength: String(max), value, 'aria-label': label });
     const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' }, h('form', { class: 'sheet-box', onsubmit: (e) => { e.preventDefault(); sheet.remove(); resolve(input.value.trim()); } },
       h('p', { text: label }), input,
       h('div', { class: 'row' }, h('button', { type: 'button', class: 'secondary', text: 'Cancelar', onclick: () => { sheet.remove(); resolve(null); } }), h('button', { text: 'Salvar' }))));
     document.body.append(sheet);
     input.focus();
   });
+}
+
+// Mídia, documentos e favoritas da conversa (b.12, b.13), como no WhatsApp.
+// Sem miniaturas (passo 22): só a lista; tocar abre na conversa. Ver uma vez
+// não aparece aqui.
+async function gallerySheet(roomId) {
+  const r = await session.S.client.view(roomId);
+  const media = r.render.filter((m) => m.kind === 'media' && m.body?.mode !== 'once').reverse();
+  const starred = r.render.filter((m) => m.starred).reverse();
+  const label = (m) => m.kind === 'media' ? `${m.body.mode === 'doc' ? `📄 ${m.body.name ?? 'Documento'}` : /^audio\//.test(m.body.mime) ? '🎤 Áudio' : /^video\//.test(m.body.mime) ? '🎥 Vídeo' : '📷 Foto'}` : (m.text ?? m.body?.question ?? '').slice(0, 80);
+  const row = (m) => h('li', { class: 'small' }, `${label(m)} · ${session.nameOf(m.sender)} · ${formatDateTime(m.acceptedAt)}`);
+  const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'sheet-box' },
+    h('h2', { text: 'Mídia e documentos' }),
+    media.length ? h('ul', { class: 'list' }, media.map(row)) : h('p', { class: 'muted small', text: 'Nada por aqui.' }),
+    h('h2', { text: 'Favoritas ⭐' }),
+    starred.length ? h('ul', { class: 'list' }, starred.map(row)) : h('p', { class: 'muted small', text: 'Segure uma mensagem e toque em Favoritar. Favoritas ficam só neste aparelho e somem quando a mensagem vence.' }),
+    h('button', { class: 'block', text: 'Fechar', onclick: () => sheet.remove() })));
+  document.body.append(sheet);
 }

@@ -53,7 +53,7 @@ test('anúncio de membros: líder precisa estar na lista; no máximo 10', () => 
   assert.throws(() => p.encodeInner({ ...base, kind: 'membership', body: { members: Array.from({ length: 11 }, (_, i) => `user_00000${i}x`), leader: 'user_000001' } }), /membros/);
 });
 
-test('mídia: só formatos que o app gera (V7-016); ver uma vez só foto/vídeo', () => {
+test('mídia: só formatos que o app gera (V7-016); ver uma vez só foto, vídeo ou áudio', () => {
   const media = (body) => ({ ...base, kind: 'media', body: { mediaId: 'media_0000001', key: 'k', mode: 'media', ...body } });
   for (const mime of ['image/jpeg', 'image/webp', 'video/mp4', 'audio/webm;codecs=opus', 'audio/mp4', 'audio/aac', 'audio/ogg; codecs="opus"']) {
     assert.ok(p.encodeInner(media({ mime })), mime);
@@ -61,7 +61,9 @@ test('mídia: só formatos que o app gera (V7-016); ver uma vez só foto/vídeo'
   for (const mime of ['image/svg+xml', 'text/html', 'image/png', 'video/quicktime', 'application/pdf', '', undefined, 'video/mp4\nx']) {
     assert.throws(() => p.encodeInner(media({ mime })), /tipo de mídia/, String(mime));
   }
-  assert.throws(() => p.encodeInner(media({ mime: 'audio/mp4', mode: 'once' })), /ver uma vez/);
+  assert.ok(p.encodeInner(media({ mime: 'audio/mp4', mode: 'once' })), 'áudio de ver uma vez (b.7), como no WhatsApp');
+  assert.throws(() => p.encodeInner(media({ mime: 'audio/mp4', round: true })), /redondo/);
+  assert.ok(p.encodeInner(media({ mime: 'video/mp4', round: true })));
   assert.ok(p.encodeInner(media({ mime: 'video/mp4', mode: 'once', duration: 300000 })));
   assert.throws(() => p.encodeInner(media({ mime: 'audio/mp4', duration: 4e6 })), /duração/);
   assert.throws(() => p.encodeInner(media({ mime: 'audio/mp4', duration: -1 })), /duração/);
@@ -108,4 +110,15 @@ test('story: só foto ou vídeo (até 5 min), legenda opcional', () => {
 test('prazo dentro do envelope: só valores da faixa 12 h–15 d', () => {
   assert.ok(p.encodeInner({ ...base, kind: 'text', ttl: 86400, body: { text: 'a' } }));
   for (const ttl of [0, 60, 16 * 86400, 1.5, '86400']) assert.throws(() => p.encodeInner({ ...base, kind: 'text', ttl, body: { text: 'a' } }), /prazo/);
+});
+
+test('fixar, enquete e voto: estrutura conferida', () => {
+  const m = (kind, body) => ({ ...base, kind, body });
+  assert.ok(p.encodeInner(m('pin', { target: 'msg_00000002', until: 0 })));
+  assert.throws(() => p.encodeInner(m('pin', { target: 'x', until: 1 })), /fixar/);
+  assert.ok(p.encodeInner(m('poll', { question: 'Pizza?', options: ['sim', 'não'], multi: false })));
+  assert.throws(() => p.encodeInner(m('poll', { question: 'só uma', options: ['a'], multi: false })), /opções/);
+  assert.ok(p.encodeInner(m('vote', { target: 'msg_00000002', choices: [1] })));
+  assert.throws(() => p.encodeInner(m('vote', { target: 'msg_00000002', choices: [99] })), /voto/);
+  assert.throws(() => p.encodeInner(m('room_profile', { title: 'g', description: 'x'.repeat(600) })), /descrição/);
 });

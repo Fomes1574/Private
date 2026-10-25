@@ -27,3 +27,20 @@ test('cortar, trocar a ordem, emendar ou mudar 1 bit falha', async () => {
   const extra = new Uint8Array(blob.byteLength + 5); extra.set(blob);
   await assert.rejects(decryptMedia(k, extra), 'bytes a mais');
 });
+
+test('S7: versão com degrau esconde o tamanho exato e abre igual', async () => {
+  const { encryptMedia, decryptMedia, newMediaKey, paddedSize } = await import('../src/media-crypto.js');
+  const key = await newMediaKey();
+  for (const n of [0, 1, 5000, 70_000, 300_001]) {
+    const data = rnd(n);
+    const blob = await encryptMedia(key, data, { pad: true });
+    assert.equal(blob[3], 2);
+    const plainLen = paddedSize(8 + n);
+    assert.equal(blob.byteLength, 16 + plainLen + Math.ceil(plainLen / 65536) * 16, 'só o degrau aparece');
+    assert.deepEqual(await decryptMedia(key, blob), data);
+  }
+  const a = await encryptMedia(key, new Uint8Array(10_000), { pad: true });
+  const b = await encryptMedia(key, new Uint8Array(40_000), { pad: true });
+  assert.equal(a.byteLength, b.byteLength, 'tamanhos diferentes caem no mesmo degrau');
+  assert.ok(paddedSize(95 * 2 ** 20) <= 100 * 2 ** 20, 'vídeo máximo cabe no limite do servidor');
+});

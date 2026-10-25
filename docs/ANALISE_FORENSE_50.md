@@ -72,12 +72,12 @@ só reduzir o estrago.
 | 30 | Mensagens no aparelho do destinatário | 🟡 | Valem as mesmas proteções do lado dele, e tudo vence em até 15 dias. "Apagar para todos" e "ver uma vez" valem lá também. Se o celular dele for aberto à força, o PIN de coação dele protege. |
 | 31 | Participante entrega as mensagens | 🔴 | Ninguém impede alguém da conversa de mostrar ou fotografar a tela. Reduz: grupo pequeno de confiança, prazos curtos, ver uma vez, FLAG_SECURE no Android. |
 | 32 | Arquivos e mídias trocados | 🟢 | Só ciphertext no servidor; no aparelho, mídia decifrada só na memória, sem salvar; foto e vídeo recodificados, sem metadados. |
-| 33 | Capturas de tela | 🟡 | Android: bloqueadas. iPhone: o sistema não deixa bloquear; o app avisa e oferece "segurar para ver". |
+| 33 | Capturas de tela | 🟡 | Android: bloqueadas. iPhone: o sistema não deixa bloquear; o app avisa ao escolher "ver uma vez" (D8). Desde 25/10 o ver uma vez abre com um toque, como no WhatsApp (D6). |
 | 34 | Correlação de horários | 🟡 | O servidor vê quando chegou algo e para quem (não o quê). Tor/VPN tiram o IP. Os horários somem com a mensagem (até 15 dias). |
 | 35 | Pedido judicial ao provedor | 🟡 | A Cloudflare só tem ciphertext com prazo, sem logs. Ela tem o "histórico" de 30 dias do D1 e do Durable Object: dá para restaurar ciphertext e metadados de até 30 dias, mas nunca o conteúdo. |
 | 36 | Metadados de conexão | 🟡 | IP visível para a Cloudflare; com Orbot/VPN, não (ver REDE_TOR_VPN.md). |
-| 37 | Interceptação judicial | 🟢 | TLS + cifra de ponta a ponta (Olm). Quem intercepta ou controla o servidor não lê. Troca de chave vira aviso de segurança, e membro fantasma é recusado. |
-| 38 | Monitoramento de grupo por participante | 🟡 | Ninguém entra escondido: a líder confirma de ponta a ponta quem está, e entrada de membro é visível. Um participante legítimo vê o que o grupo vê. |
+| 37 | Interceptação judicial | 🟢 | TLS + cifra de ponta a ponta (Olm). Quem intercepta ou controla o servidor não lê. Troca de chave vira aviso guardado e mostrado na conversa; contato verificado pausa a mídia até conferir de novo (S1/S8). Membro fantasma é recusado nos grupos e no círculo (S3). |
+| 38 | Monitoramento de grupo por participante | 🟡 | Ninguém entra escondido: a líder confirma de ponta a ponta quem está no grupo e a administradora confirma quem está no círculo (S3); entradas e trocas de aparelho aparecem na atividade de segurança. Um participante legítimo vê o que o grupo vê. |
 | 39 | Artefatos residuais | 🟢 | Rotação de arquivo + chave, OPFS apagado por inteiro em "apagar tudo"/coação/emergência; sem localStorage. |
 | 40 | Cópias em sistemas externos | 🟢 | Não há cópia fora: sem backup, sem nuvem, sem encaminhar/exportar. No R2, regra apaga mídia com mais de 16 dias. |
 | 41 | Correlação entre fontes | 🟡 | Quanto menos fontes, menos correlação: sem telefone, e-mail, nome real ou localização. O IP fica com a Cloudflare (Tor resolve). |
@@ -108,6 +108,6 @@ sozinho).
 - **Modo de Bloqueio do iPhone:** ele desliga o WebAssembly, e o app depende disso para a criptografia. Há relatos (WebKit bug 273824) de que nem a exceção por site resolve. **Testar no aparelho**; se travar, o app não abre com o Modo de Bloqueio ligado.
 
 ## Limites honestos
-- **Histórico de 30 dias da Cloudflare:** o D1 e o SQLite do Durable Object guardam histórico para restauração. Quem controla a conta (ou a Cloudflare, por ordem judicial) poderia restaurar uma parte S já destruída. Mesmo assim, ainda faltariam o PIN e a passkey (Face ID) da pessoa. Correção planejada (S12 em `PLANO_REVISAO_2026-10-25.md`): guardar a parte S cifrada por uma chave mantida no R2, que não tem histórico; apagar essa chave torna inútil qualquer cópia restaurada.
+- **Histórico de 30 dias da Cloudflare:** o D1 e o SQLite do Durable Object guardam histórico para restauração. Desde 25/10/2026 (S12) a parte S fica cifrada por uma chave guardada no R2 e apagada junto com o cofre: uma cópia restaurada não abre. Envelopes e metadados restaurados continuam cifrados por chaves que os celulares já destruíram. (Implementado: S12 em `PLANO_REVISAO_2026-10-25.md`, ADR 0016.)
 - **Abrir o app exige internet**, por desenho (a especificação já aceitou isso).
 - **Memória:** JavaScript não garante apagar todas as cópias de um dado na memória; por isso o padrão é trancar na hora.

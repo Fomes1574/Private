@@ -7,6 +7,8 @@ export const INNER_VERSION = 1;
 export const KINDS = new Set([
   'text', 'reaction', 'edit', 'delete_for_all', 'media', 'story', 'policy', 'leader_transfer',
   'nickname_change', 'membership', 'unlink', 'room_profile',
+  // Entregas C e D: fixar mensagem, enquete e voto (como no WhatsApp).
+  'pin', 'poll', 'vote',
 ]);
 
 // Escada de tamanhos: o texto cifrado só revela em qual degrau o conteúdo cai.
@@ -74,6 +76,7 @@ export function validateInner(m) {
       break;
     case 'room_profile':
       if (typeof m.body?.title !== 'string' || m.body.title.length > 60) fail('nome do grupo');
+      if (m.body.description !== undefined && m.body.description !== null && (typeof m.body.description !== 'string' || m.body.description.length > 512)) fail('descrição do grupo');
       if (!visualRef(m.body.photo) || !visualRef(m.body.background)) fail('foto ou fundo do grupo');
       break;
     case 'media': {
@@ -83,7 +86,10 @@ export function validateInner(m) {
       // outro tipo é recusado antes de chegar perto de um decodificador.
       if (!(b.mode === 'doc' ? DOC_MIME : MEDIA_MIME).test(b.mime ?? '')) fail('tipo de mídia');
       if (b.name !== undefined && (b.mode !== 'doc' || !validDocName(b.name))) fail('nome do documento');
-      if (b.mode === 'once' && !/^(image|video)\//.test(b.mime)) fail('ver uma vez só para foto ou vídeo');
+      // Ver uma vez: foto, vídeo ou áudio (b.7), como no WhatsApp.
+      if (b.mode === 'once' && !/^(image|video|audio)\//.test(b.mime)) fail('ver uma vez só para foto, vídeo ou áudio');
+      if (b.round !== undefined && (b.round !== true || !/^video\//.test(b.mime))) fail('vídeo redondo');
+      if (b.hd !== undefined && (b.hd !== true || !/^image\//.test(b.mime))) fail('foto HD');
       if (b.caption !== undefined && (typeof b.caption !== 'string' || b.caption.length > 1000 || b.mode === 'once')) fail('legenda');
       if (b.duration !== undefined && !(Number.isSafeInteger(b.duration) && b.duration >= 0 && b.duration <= 3_600_000 + 5_000)) fail('duração');
       break;
@@ -96,6 +102,19 @@ export function validateInner(m) {
       if (b.duration !== undefined && !(Number.isSafeInteger(b.duration) && b.duration >= 0 && b.duration <= 300_000 + 5_000)) fail('duração');
       break;
     }
+    case 'pin': // fixar (until > 0) ou desafixar (until = 0) uma mensagem
+      if (!ID.test(m.body?.target ?? '') || !Number.isSafeInteger(m.body.until) || m.body.until < 0) fail('fixar');
+      break;
+    case 'poll': {
+      const b = m.body;
+      if (typeof b?.question !== 'string' || !b.question.trim() || b.question.length > 255) fail('pergunta da enquete');
+      if (!Array.isArray(b.options) || b.options.length < 2 || b.options.length > 12 || b.options.some((o) => typeof o !== 'string' || !o.trim() || o.length > 100)) fail('opções da enquete');
+      if (typeof b.multi !== 'boolean') fail('enquete');
+      break;
+    }
+    case 'vote':
+      if (!ID.test(m.body?.target ?? '') || !Array.isArray(m.body.choices) || m.body.choices.length > 12 || m.body.choices.some((c) => !Number.isInteger(c) || c < 0 || c > 11)) fail('voto');
+      break;
     default: break;
   }
   if (m.replyTo !== undefined && !ID.test(m.replyTo)) fail('replyTo');

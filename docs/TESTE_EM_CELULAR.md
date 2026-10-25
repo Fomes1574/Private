@@ -35,6 +35,12 @@ Legenda: ✅ ok · ❌ falhou (anote o que viu) · — não se aplica
 | 8 | Mídia pesada | Vídeo de 5 min; vídeo 4K da galeria (modo máximo desligado); foto grande | Comprime antes de enviar; mostra erro claro se não der; nada sai sem cifra | | |
 | 9 | Privacidade ao minimizar | Abra uma conversa e vá aos recentes; tente print e gravar a tela; espelhe a tela (Cast) | Recentes sem conteúdo; print e gravação pretos ou bloqueados; app trancado ao voltar | | |
 | 10 | Prazos, apagar, ver uma vez, documentos | Mensagem de 12 h; apagar para todos; foto de ver uma vez; documento de texto e PDF | Somem no prazo (horário de Brasília); ver uma vez abre uma vez só; documento abre dentro do app, sem chamar outro app | | |
+| 11 | Seletor de arquivos (F17) e lote de fotos (D4) | Modo máximo desligado: anexar → "Galeria: várias fotos (até 5)", escolha 6; desbloqueie e "Continuar com o anexo" | App tranca ao abrir o seletor; ao voltar pede PIN; aceita só 5 e avisa; cada foto com edição, "1" e legenda próprios | | |
+| 12 | Microfone (F12) e áudio (b.6) | Segure o microfone, deslize para a esquerda; segure e deslize para cima (cadeado), pause, pare, "Ouvir"; saia do app no meio | Cancelar e sair desligam o microfone na hora (ícone do sistema some); nada é enviado sozinho | | |
+| 13 | Teclado anônimo (S5) | Digite uma palavra rara no app; depois tente no teclado de outro app | O teclado do sistema não sugere a palavra fora do app | | |
+| 14 | Verificar contato (S8) | Menu da conversa → Participantes → Verificar; um lê o QR do outro (Android) ou comparam os números | Números iguais nos dois; "✓ Verificado". Depois que um trocar de aparelho: aviso na conversa e mídia pausada até conferir de novo | | |
+| 15 | Vídeo grande no disco (S2) | `ENTREGA_A1_2026-10-25.md`, roteiro S2, no pacote `.debug` | Registrar o resultado do `verificar-blobs.py` | | |
+| 16 | Prazo de 12 h no servidor | Foto com prazo de 12 h; depois de vencer | Some dos dois aparelhos; abrir a referência antiga não funciona | | |
 
 ## Também anotar
 

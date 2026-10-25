@@ -111,7 +111,7 @@ Origem: decisões explícitas do proprietário em 22/10/2026 e pontos negociados
 | V7-003 | **Versão e algoritmo explícitos** em todo formato criptográfico desde o primeiro envelope, com **plano de migração pós-quântica** registrado | [DECIDIDO] |
 | V7-004 | **Conversa 1:1:** quem iniciou é o **líder**; define apenas políticas **futuras** (prazos de texto e mídia); nunca estende TTL já aceito | [DECIDIDO] |
 | V7-005 | **Ceder liderança** (1:1 e grupo): evento assinado e irreversível; quem cede perde o posto | [DECIDIDO] |
-| V7-006 | **Busca por apelido** para iniciar conversa (ex.: "Lua"), só entre membros do círculo. A lista cifrada de membros fica **no aparelho** e a busca é **local, por prefixo**; o servidor nunca recebe o termo digitado. Apelido **único no círculo**, comparação normalizada (sem acento, minúsculas), resolve para `user_id`; **nunca** é identificador criptográfico; troca de apelido é evento assinado | [DECIDIDO] |
+| V7-006 | **Busca por apelido** para iniciar conversa (ex.: "Lua"), só entre membros do círculo. A lista cifrada de membros fica **no aparelho** e a busca é **local, por trecho** (qualquer parte do nome, sem acento nem maiúscula, com ordem de relevância; decisão D1 de 25/10/2026, ADR 0016); o servidor nunca recebe o termo digitado. Apelido **único no círculo**, comparação normalizada (sem acento, minúsculas), resolve para `user_id`; **nunca** é identificador criptográfico; troca de apelido é evento assinado | [DECIDIDO] |
 | V7-007 | **Apagar conversa** = só para quem apagou; o outro lado mantém tudo até o prazo, salvo "apagar para todos" | [DECIDIDO] |
 | V7-008 | **Desfazer vínculo:** encerra a room, revoga pendências, descarta estado e chaves (sem reuso). Para o outro lado, a conversa antiga fica **somente leitura até vencer**. Nova conversa = **novo identificador**, e quem a inicia é o líder | [DECIDIDO] |
 | V7-009 | **Editar mensagem** permitido enquanto ela existir. Evento assinado e versionado pelo autor; mostra **"*editado"** embaixo; preserva o `expires_at` original; a versão anterior é substituída e sua chave destruída no aparelho, **sem histórico visível de versões** (não se promete apagamento forense) | [DECIDIDO] — encerra P-20 quanto à edição |
@@ -805,7 +805,7 @@ Essas referências servem à **pesquisa e validação de futuras implementaçõe
 |---|---|
 | Código | Fechado (V7-001); vodozemac + fan-out como direção (V7-002); versão e migração pós-quântica (V7-003) |
 | Conversa 1:1 | Líder é quem iniciou; ceder liderança; apagar conversa; desfazer vínculo (V7-004 a V7-008) |
-| Busca | Por apelido, local e por prefixo, apelido único no círculo (V7-006) |
+| Busca | Por apelido, local e por trecho, apelido único no círculo (V7-006, D1) |
 | Edição | Permitida com "*editado", sem mudar o prazo (V7-009) |
 | Exclusão | Apagar para todos só pelo autor; líder não apaga conteúdo alheio (V7-010) |
 | Segurança | Gate online criptográfico (V7-011), recuperação com guardião e 24 h (V7-012), uma instância (V7-013), ordem de ameaças (V7-014), troca só por QR (V7-015), mídia restrita (V7-016), cadeia de atualização (V7-017), metadados (V7-018), desbloqueio (V7-019) |

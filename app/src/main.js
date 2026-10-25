@@ -18,11 +18,12 @@ import { newGroupScreen } from './screens/new-group.js';
 import { nicknameScreen } from './screens/nickname.js';
 import { settingsScreen } from './screens/settings.js';
 import { storiesScreen } from './screens/stories.js';
+import { notesScreen } from './screens/notes.js';
 
 // Tranca de verdade (chaves saem da memória) ao sair do app: na hora por
 // padrão; em Ajustes dá para escolher 1 ou 5 minutos.
 const lockAfter = () => session.S.prefs?.lockAfter ?? 0;
-const routes = { welcome, pairWait: pairWaitScreen, unlock: unlockScreen, chats: chatsScreen, chat: chatScreen, newGroup: newGroupScreen, nickname: nicknameScreen, settings: settingsScreen, stories: storiesScreen };
+const routes = { welcome, pairWait: pairWaitScreen, unlock: unlockScreen, chats: chatsScreen, chat: chatScreen, newGroup: newGroupScreen, nickname: nicknameScreen, settings: settingsScreen, stories: storiesScreen, notes: notesScreen };
 const open = new Set(['welcome', 'unlock', 'pairWait']);
 let cleanup = null, routeVersion = 0;
 
