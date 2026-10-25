@@ -18,6 +18,8 @@ Ordem: do mais grave para o menos grave. "Decisão" = precisa do proprietário.
 | R-12 | Histórico não passa na troca de aparelho | Baixa | De propósito (V7-015). Decisão se algum dia quiser transferir (exigiria canal direto entre os dois celulares) |
 | R-13 | Android sem aviso com o app fechado (escolha de privacidade: nenhum serviço do Google) | Baixa | Alternativa futura sem Google: UnifiedPush/ntfy próprio; decidir se vale |
 | R-14 | Credenciais que podem ter sido expostas em conversas, prints ou logs | Depende | `ROTACAO_DE_CREDENCIAIS.md`: trocar cada uma sem derrubar contas |
+| R-15 | Aviso de troca de chave só na memória e só em Ajustes: some ao fechar o app; o envio segue para a chave nova (S1 de `PLANO_REVISAO_2026-10-25.md`) | Alta | Planejado na entrega A2: aviso cifrado e persistente na conversa, estado "verificado" e pausa de envio |
+| R-16 | Vídeo/áudio grande decifrado pode ser gravado em disco pelo armazenamento de blobs do WebView (S2) | Alta, a validar | Teste no APK de depuração na entrega A1; correção em A2 se confirmado |
 
 ## O que foi corrigido nesta rodada (antes era risco)
 
