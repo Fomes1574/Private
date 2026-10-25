@@ -83,7 +83,7 @@ Antes de programar: revisar o documento, transformar pendências P0 em decisões
 | V6-014 | Apagar **para todos** revoga acessos imediatamente no servidor e inicia limpeza local/remota, sem esperar TTL | [DECIDIDO] |
 | V6-015 | **Visualização única por destinatário**; remetente não reabre; pessoas ainda pendentes mantêm o direito até abrir ou expirar | [DECIDIDO] |
 | V6-016 | **Sem marca d'água**, sobreposição de apelido/ID do visualizador, data ou hora em mídia. Proposta anterior REVOGADA | [DECIDIDO] |
-| V6-017 | Visualização única padrão: **pressionar/segurar para ver a mídia inteira**, ocultar ao soltar/perder foco, uma abertura autorizada | [DECIDIDO] |
+| V6-017 | Visualização única: **tocar para abrir a mídia inteira**, manter até fechar (X/voltar), ocultar ao perder foco/sair da tela; uma abertura autorizada | [DECIDIDO — atualizado por D6 do plano de 25/10/2026] |
 | V6-018 | Vídeo no máximo **5 minutos**; áudio no máximo **1 hora**; fotos compactadas antes do envio | [DECIDIDO] |
 | V6-019 | Documento genérico: até **20 MB por arquivo**, **três documentos ativos por remetente no app INTEIRO** | [DECIDIDO] |
 | V6-020 | Quarto documento enviado **com sucesso** revoga o documento ativo mais antigo do remetente, em qualquer conversa, para todos | [DECIDIDO] |
@@ -392,7 +392,7 @@ Gravar pressionando o ícone, deslizar para cancelar, permitir travar gravação
 
 **Regra central aprovada:** quem enviou **não pode reabrir** o próprio visto único dentro do chat. Para cada destinatário elegível existe um direito de abertura independente. Um membro que já consumiu **perde seu acesso**; um membro que não viu continua podendo abrir enquanto não expirar. Quando todos os direitos elegíveis estiverem consumidos/revogados, o objeto R2 é eliminado, mesmo antes do TTL. Se TTL vencer primeiro, expira para todos.
 
-**Interface aprovada:** mídia em tamanho grande quase tela inteira, **pressionar e segurar para ver**, conteúdo ocultado ao soltar, perder foco ou encerrar a visualização. O primeiro ato de abertura consome a autorização de uso único. Limite técnico de duração da sessão é aceitável; duração exata pendente de teste/UX.
+**Interface aprovada (D6, 25/10/2026):** mídia em tamanho grande quase tela inteira, **tocar para abrir**, mantida até fechar por X/voltar e ocultada ao perder foco, sair da tela ou encerrar a sessão. Soltar o dedo não encerra a abertura. O primeiro pedido de abertura consome a autorização de uso único; falha de rede pode perder a visualização, sem repetição automática. A transição de interface não altera o consumo atômico no servidor nem cria recibos ao remetente.
 
 **PROIBIDO NESTE PRODUTO:** marca d’água, sobreposição ou carimbo contendo apelido do destinatário, identificador, nome, data, hora ou texto de rastreabilidade. Essas técnicas foram recusadas pelo proprietário. Não adicionar nem como “proteção opcional padrão” sem nova autorização explícita.
 
@@ -706,7 +706,7 @@ Nenhuma caixa abaixo implica testes realizados. São **portões futuros de aprov
 | P-24 | **P0** | Abertura online de TEXTO: evitar decriptação offline por clientes alterados | Direção aprovada em V7-011 (gate online criptográfico); falta especificação formal e revisão independente |
 | P-06 | **P0** | Android empacotado, canal de distribuição e proteção global de tela | Prova em APK assinado real; regras brasileiras verificadas na implementação |
 | P-07 | **P0** | Endereço/origem HTTPS e `manifest.id` antes do onboarding real | Identidade técnica imutável/migrável; **não** exige escolher marca visível agora |
-| P-08 | **P1** | Duração exata da sessão de “segurar para ver” | Definir após ensaio UX e segurança; sem marca d’água |
+| P-08 | **P1** | Duração da sessão de visualização única por toque (D6, 25/10/2026) | Definir após ensaio UX e segurança; sem marca d’água |
 | P-09 | **P1** | Política de stories: TTL próprio, padrão, audiência, reações | Privacidade alta sem relatório de visualizadores |
 | P-10 | ~~P1~~ | Líder/admin em chat 1:1 e poderes de alterar prazo | **RESOLVIDO na v7** (V7-004, V7-005) |
 | P-11 | **P1** | Exceções para aparelhos sem biometria, PIN esquecido e recuperação de conta | Recuperação detalhada em V7-012; falta definir aparelho sem biometria e PIN esquecido |
@@ -791,7 +791,7 @@ Essas referências servem à **pesquisa e validação de futuras implementaçõe
 
 > Estou planejando o **Mensageiro Privado** para até **10 pessoas**. O arquivo `PROJETO_MENSAGEIRO_PRIVADO_ARQUITETURA_v7.md` é a **única especificação normativa atual**; leia a §2.2 primeiro. Leia-o antes de sugerir arquitetura ou escrever código. As versões v1–v6 e pareceres do Claude e do Hermes são fontes históricas; prevalece a v7 em toda divergência. O projeto está **APENAS EM PLANEJAMENTO**: não implemente, não crie repo, não instale ferramentas, não provisione Cloudflare ou distribua app sem autorização explícita.
 >
-> Privacidade acima da conveniência. iPhone em PWA instalada; Android protegido e empacotamento nativo em validação. Uma identidade ativa por aparelho; entrada por convite sem telefone/e-mail; E2EE; grupos, stories, mensagens, fotos, vídeos, áudio e documentos. D1 contém somente mensagens cifradas/metadata mínima; R2 contém mídia/documentos cifrados e temporários; DO/Workers coordenam autorizações. Todo horário mostrado é **Brasília**; UTC técnico. Prazos obrigatórios **12 horas a 15 dias**, padrão 5 dias, sem “Nunca”. **Visualização única por destinatário**, com pressionar para ver: remetente não reabre; os outros ainda podem abrir até o vencimento; objeto eliminado quando todos os direitos acabam. **Não usar marca d’água nem sobrepor nome, apelido, ID, data, hora ou identificação da pessoa nas mídias.** Foto/vídeo/áudio compactados antes da cifra; vídeo até 5min; áudio até 1h. Documentos até 20 MB, **3 ativos por pessoa no aplicativo inteiro**, quarto upload bem-sucedido revoga o mais antigo para todos. “Apagar para mim” não apaga dos outros nem encurta TTL no D1; “apagar para todos” revoga imediatamente e inicia purga global. Mensagens protegidas exigem autorização online para abrir; ao retornar do offline aplicar exclusões/TTL antes de exibir. Notificações com texto **exatamente `novas mensagens`**, sem remetente/grupo/contagem. Sem visto/online/digitando/entregue. Líder que sai é substituída pelo membro ativo mais antigo. Foto de perfil/grupo/fundo persistentes até substituição ou exclusão, sem versões antigas acessíveis. Nome e logo ficam para depois. Arquitetura Cloudflare A aprovada; detalhamento de gasto zero no R2 adiado até testes.
+> Privacidade acima da conveniência. iPhone em PWA instalada; Android protegido e empacotamento nativo em validação. Uma identidade ativa por aparelho; entrada por convite sem telefone/e-mail; E2EE; grupos, stories, mensagens, fotos, vídeos, áudio e documentos. D1 contém somente mensagens cifradas/metadata mínima; R2 contém mídia/documentos cifrados e temporários; DO/Workers coordenam autorizações. Todo horário mostrado é **Brasília**; UTC técnico. Prazos obrigatórios **12 horas a 15 dias**, padrão 5 dias, sem “Nunca”. **Visualização única por destinatário**, por toque para abrir (D6, 25/10/2026): remetente não reabre; os outros ainda podem abrir até o vencimento; objeto eliminado quando todos os direitos acabam. **Não usar marca d’água nem sobrepor nome, apelido, ID, data, hora ou identificação da pessoa nas mídias.** Foto/vídeo/áudio compactados antes da cifra; vídeo até 5min; áudio até 1h. Documentos até 20 MB, **3 ativos por pessoa no aplicativo inteiro**, quarto upload bem-sucedido revoga o mais antigo para todos. “Apagar para mim” não apaga dos outros nem encurta TTL no D1; “apagar para todos” revoga imediatamente e inicia purga global. Mensagens protegidas exigem autorização online para abrir; ao retornar do offline aplicar exclusões/TTL antes de exibir. Notificações com texto **exatamente `novas mensagens`**, sem remetente/grupo/contagem. Sem visto/online/digitando/entregue. Líder que sai é substituída pelo membro ativo mais antigo. Foto de perfil/grupo/fundo persistentes até substituição ou exclusão, sem versões antigas acessíveis. Nome e logo ficam para depois. Arquitetura Cloudflare A aprovada; detalhamento de gasto zero no R2 adiado até testes.
 >
 > Nunca prometer bloqueio de screenshots na PWA do iPhone, eliminação forense absoluta, ausência total de metadados ou impossibilidade de vazamento por destinatário legítimo. Diferencie [DECIDIDO], [APROVADO COMO DIREÇÃO], [PENDENTE] e [LIMITE]. Ao propor mudanças, apresentar ADR, impacto no modelo de ameaças, compatibilidade futura, testes e migração. **Não reintroduzir marcas d’água, rastreamento de visualizadores ou prazos antigos.**
 
@@ -1346,7 +1346,7 @@ A segunda conclusão é que o R$ 0 não é um detalhe de orçamento. É uma esco
 
 ### 45. APÊNDICE D — RELATÓRIO "PROTEÇÃO DE PRINT PWA E INTERFACE" (22/10/2026, ÍNTEGRA)
 
-> Referência, não decisão. Mesmas regras do Apêndice C. Conflitos já resolvidos por §0.1: o "ver uma vez" padrão é **segurar para ver a foto inteira** (D-043), não o holofote em blocos; a opção "só Android protegido" e os avisos "print não é bloqueado no iPhone" na interface foram descartados (D-044, D-046); não há recibos nem "digitando" (D-045).
+> Referência, não decisão. Mesmas regras do Apêndice C. Conflitos já resolvidos por §0.1 e pela revisão de 25/10/2026 (D6): o "ver uma vez" padrão é **tocar para abrir a foto inteira**, não o holofote em blocos; a opção "só Android protegido" continua descartada. O aviso "print não é bloqueado no iPhone" foi aprovado em D8 do plano de 25/10/2026, com implementação prevista na entrega B; não há recibos nem "digitando" (D-045).
 
 #### O iPhone não bloqueia print: torne-o inútil
 
@@ -1841,3 +1841,4 @@ Arquivos futuros de marca: SVG/PNG de ícone, variações para PWA Android/iOS, 
 ---
 
 **FIM DO ARQUIVO HISTÓRICO E DO DOCUMENTO v6.0.**
+

@@ -3,7 +3,7 @@
 Data: 25/10/2026  
 Repositório: [Fomes1574/Private](https://github.com/Fomes1574/Private), branch `ccr-de59a90b-gr4vug`  
 Código analisado: commit `03fa5d0` (o código é idêntico em `9965770`; só a documentação mudou)  
-Estado: **planejamento concluído; A1 em implementação para revisão**, autorizada pelo proprietário em 25/10/2026. Ver `ENTREGA_A1_2026-10-25.md`. Liberação depende de CI e testes em celular exigidos na seção 8. Nenhum deploy ou APK de produção foi distribuído nesta etapa.
+Estado: **planejamento concluído; A1 implementada em branch para revisão**, autorizada pelo proprietário em 25/10/2026. Ver `ENTREGA_A1_2026-10-25.md`. Liberação depende de CI e testes em celular exigidos na seção 8. Nenhum deploy ou APK de produção foi distribuído nesta etapa.
 
 | Versão | Autor | O que trouxe |
 |---|---|---|
@@ -35,7 +35,7 @@ Legenda de evidência: **verificado no código** (lido, sem rodar no celular), *
    - **a chave que abria a mídia deixa de existir**: ela nunca esteve no servidor, e no celular some junto com a troca da chave do banco.
    
    Ressalva: a Cloudflare guarda **30 dias de histórico** do banco do servidor. Esse histórico tem só conteúdo cifrado, que não dá mais para abrir, e metadados. Detalhes e a correção proposta na seção 3.6.
-7. **Próximo passo:** a entrega A1 (seção 8). Ela só começa quando o proprietário liberar a implementação.
+7. **Próximo passo:** concluir a validação da entrega A1 (seção 8), cuja implementação foi autorizada pelo proprietário e está em branch de revisão. Resultados e pendências em `ENTREGA_A1_2026-10-25.md`.
 
 ---
 

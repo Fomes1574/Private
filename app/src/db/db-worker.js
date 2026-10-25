@@ -270,7 +270,10 @@ const ops = {
     if (!staged) return true;
     const old = staged; staged = null;
     try { old.db.close(); } catch {}
-    await pools.get(old.name)?.removeVfs(); pools.delete(old.name);
+    // O cofre ainda aponta para o banco anterior. Falha ao remover a cópia
+    // órfã não pode manter as escritas presas na barreira; cleanup() retoma
+    // essa remoção no próximo desbloqueio, como na troca confirmada.
+    await pools.get(old.name)?.removeVfs().catch(() => {}); pools.delete(old.name);
     return true;
   },
 

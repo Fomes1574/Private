@@ -48,3 +48,10 @@ aparelho por código, recuperação com guardião e atualização assinada.
   Ative o hook local uma vez: `git config core.hooksPath .githooks`.
 - Dependências com versão travada (`=x.y.z` no Cargo, `Cargo.lock` no repositório).
 - Provas são descartáveis: o app de verdade não importa código daqui sem revisão.
+
+## Revisão de 25/10/2026
+
+A entrega A1 do [plano final](docs/PLANO_REVISAO_2026-10-25.md) está em revisão.
+Escopo, testes e bloqueios de liberação: [relatório A1](docs/ENTREGA_A1_2026-10-25.md).
+Não há deploy nem APK de produção distribuído por essa revisão; A2/B/C/D seguem
+a ordem e os critérios de teste do plano.
