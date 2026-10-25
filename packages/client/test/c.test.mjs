@@ -48,7 +48,8 @@ test('F10: resposta perdida não duplica; a fila reenvia o mesmo id', async () =
   const err = await p.ana.sendText(room, 'chegou uma vez só').catch((e) => e);
   assert.equal(err.code, 'pending');
   assert.equal((await p.ana.outbox()).length, 1, 'ficou na fila');
-  await p.ana.sync(); // a rede voltou: a fila vai junto
+  await p.ana.retryOutbox({ force: true }); // tentativa explícita ignora apenas o relógio de backoff
+  await p.ana.sync();
   assert.equal((await p.ana.outbox()).length, 0);
   const got = (await p.bia.sync()).received.filter((m) => m.body?.text === 'chegou uma vez só');
   assert.equal(got.length, 1, 'uma mensagem só');
@@ -56,12 +57,19 @@ test('F10: resposta perdida não duplica; a fila reenvia o mesmo id', async () =
 });
 
 test('F11: envio recusado depois do upload revoga a mídia', async () => {
-  const realInner = p.ana.sendInner.bind(p.ana);
+  const post = p.ana.api.post.bind(p.ana.api);
   let mediaId;
-  p.ana.sendInner = async (r, k, body) => { mediaId = body.mediaId; const e = new Error('400 bad_recipients'); e.status = 400; throw e; };
-  await assert.rejects(p.ana.sendMedia(room, new Uint8Array(500), { mime: 'image/jpeg' }));
-  p.ana.sendInner = realInner;
+  p.ana.api.post = async (path, body, opts) => {
+    if (/\/messages$/.test(path)) { mediaId = body.mediaId; throw Object.assign(new Error('bad_recipients'), { status: 400, code: 'bad_recipients' }); }
+    return post(path, body, opts);
+  };
+  try { await assert.rejects(p.ana.sendMedia(room, new Uint8Array(500), { mime: 'image/jpeg' }), (e) => e.code === 'send_failed'); }
+  finally { p.ana.api.post = post; }
   await assert.rejects(p.bia.api.post(`/v1/media/${mediaId}/open`, undefined, { binary: true }), /404/);
+  const job = (await p.ana.outbox()).find((o) => o.prepared?.body.mediaId === mediaId);
+  assert.equal(job.state, 'failed', 'falha terminal permanece removível na interface');
+  await p.ana.cancelQueued(job.payload.msgId);
+
 });
 
 test('S7: foto sobe em degrau de tamanho e abre igual', async () => {

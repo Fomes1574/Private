@@ -6,6 +6,7 @@ import { h, mount, header, toast, choiceSheet, confirmSheet, onLongPress, errTex
 import * as session from '../session.js';
 import { searchByText } from '../packages/protocol/src/search.js';
 import { pendingAttachment, takeAttachment, discardAttachment } from '../attachment-picker.js';
+import { verifySheet } from './verify.js';
 import { avatar } from '../avatar.js';
 import { listTime } from '../dates.js';
 
@@ -42,13 +43,14 @@ export async function chatsScreen(go) {
     h('button', { class: 'secondary', text: 'Descartar anexo', onclick: () => { discardAttachment(); attachmentCard.remove(); } })) : null;
   // S3: a administradora vê quem ainda espera confirmação no círculo.
   const adminCard = h('div', { hidden: true });
-  session.isCircleAdmin().then((yes) => {
+  async function drawApproval() {
+    const yes = await session.isCircleAdmin();
     const n = yes ? session.circlePendingCount() : 0;
-    if (!n) return;
+    adminCard.hidden = !n && (yes || !!S.client.circleRoster());
     adminCard.className = 'card';
-    adminCard.hidden = false;
-    adminCard.replaceChildren(h('p', { text: `${n} ${n > 1 ? 'pessoas aguardam' : 'pessoa aguarda'} sua confirmação no círculo.` }), h('button', { class: 'secondary', text: 'Conferir em Ajustes', onclick: () => go('settings') }));
-  }).catch(() => {});
+    adminCard.replaceChildren(...(yes && n ? [h('p', { text: `${n} ${n > 1 ? 'pessoas aguardam' : 'pessoa aguarda'} sua confirmação no círculo.` }), h('button', { class: 'secondary', text: 'Conferir em Ajustes', onclick: () => go('settings') })] : !yes && !S.client.circleRoster() ? [h('p', { text: 'Aguardando confirmação da administradora. Os perfis e stories ficam protegidos até a aprovação.' }), h('button', { class: 'secondary', text: 'Verificar administradora', onclick: async () => { const id = await S.client.circleAdminId(); if (id) await verifySheet(id); } })] : []));
+  }
+
   mount(h('div', {},
     header('Conversas', { actions: [
       h('button', { class: 'icon', 'aria-label': 'Anotações', text: '✎', onclick: () => go('notes') }),
@@ -106,6 +108,7 @@ export async function chatsScreen(go) {
   }
 
   const render = async () => {
+    await drawApproval();
     const views = (await session.listRooms()).filter(Boolean);
     const next = [];
     for (const v of views) {

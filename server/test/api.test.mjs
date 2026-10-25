@@ -288,7 +288,7 @@ test('limpeza periódica apaga envelopes vencidos (e o filtro já não entregava
 test('CORS só para a origem do app; horário do servidor em toda resposta', async () => {
   const ok = await fetch(`${api.base}/v1/time`, { headers: { origin: 'http://app.local' } });
   assert.equal(ok.headers.get('access-control-allow-origin'), 'http://app.local');
-  assert.equal(ok.headers.get('access-control-expose-headers'), 'x-mp-time', 'o app lê o horário do servidor');
+  assert.equal(ok.headers.get('access-control-expose-headers'), 'x-mp-time, retry-after', 'o app lê horário e intervalo de retry');
   const bad = await fetch(`${api.base}/v1/time`, { headers: { origin: 'https://evil.example' } });
   assert.equal(bad.headers.get('access-control-allow-origin'), null);
   assert.ok(Number(ok.headers.get('x-mp-time')) > 0);

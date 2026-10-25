@@ -26,3 +26,4 @@ Estados usados: **Aceito** (decisão do proprietário), **Aceito como direção*
 | [0012](0012-os-dados-morrem.md) | Os dados morrem: apagar de verdade em cada camada | Aceito | §7, §12, pedido do proprietário |
 | [0015](0015-a1-sessao-conversas-anexos.md) | A1: ciclo de sessão, conversa individual e retorno de anexos | Aceito pelo proprietário; liberação pendente de testes | Plano final de 25/10/2026, A1 e D6 |
 | [0016](0016-a2-b-c-d-privacidade-e-whatsapp.md) | A2, B, C e D: privacidade própria, funções como no WhatsApp | Aceito pelo proprietário; liberação pendente de testes | Plano final de 25/10/2026 |
+| [0017](0017-revisao-fila-cofre-e-revogacao.md) | Correções da revisão: confiança, cofre, fila e revogação duráveis | Implementado; liberação pendente de CI e aparelho | Revisão independente de 25/10/2026 |

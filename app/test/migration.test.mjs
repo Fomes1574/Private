@@ -42,8 +42,8 @@ const vaultRecord = () => page.evaluate(() => new Promise((ok) => {
 
 before(async () => {
   api = await startApi(8803, { appOrigin: APP });
-  oldDir = join(await mkdtemp(join(tmpdir(), 'mp-old-')), 'repo');
-  execFileSync('git', ['worktree', 'add', '--detach', oldDir, OLD_COMMIT], { cwd: repo, stdio: 'ignore' });
+  oldDir = process.env.MP_MIGRATION_OLD_DIR || join(await mkdtemp(join(tmpdir(), 'mp-old-')), 'repo');
+  if (!process.env.MP_MIGRATION_OLD_DIR) execFileSync('git', ['worktree', 'add', '--detach', oldDir, OLD_COMMIT], { cwd: repo, stdio: 'ignore' });
   build(join(oldDir, 'app'));
   build(join(repo, 'app'));
   root = join(oldDir, 'app/dist');
@@ -52,7 +52,7 @@ before(async () => {
 });
 after(async () => {
   await ctx?.close(); server?.close(); api?.stop();
-  try { execFileSync('git', ['worktree', 'remove', '--force', oldDir], { cwd: repo, stdio: 'ignore' }); } catch {}
+  try { if (!process.env.MP_MIGRATION_OLD_DIR) execFileSync('git', ['worktree', 'remove', '--force', oldDir], { cwd: repo, stdio: 'ignore' }); } catch {}
 });
 
 test('código antigo → código novo: identidade, conversa e mensagem preservadas; cofre e banco migrados', async () => {

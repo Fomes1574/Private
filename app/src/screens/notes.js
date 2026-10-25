@@ -6,13 +6,20 @@ import * as session from '../session.js';
 import { TTL_OPTIONS, describeTtl, DAY } from '../packages/protocol/src/ttl.js';
 import { formatDateTime } from '../packages/protocol/src/time.js';
 import { formatted } from '../format.js';
+import { sensitiveScope } from '../sensitive-scope.js';
 
 export async function notesScreen(go) {
+  const scope = sensitiveScope({ transient: false });
+  let timer = null;
+  scope.onCancel(() => clearTimeout(timer));
   const list = h('ol', { class: 'messages', role: 'log' });
   const input = h('textarea', { id: 'note-text', rows: '2', maxlength: '4000', placeholder: 'Anotação (só neste aparelho)', autocomplete: 'off', autocorrect: 'off', spellcheck: 'false' });
   const ttl = h('select', { id: 'note-ttl', 'aria-label': 'Some em' }, TTL_OPTIONS.map((s) => h('option', { value: String(s), text: `Some em ${describeTtl(s)}`, selected: s === 7 * DAY })));
   const render = async () => {
     const all = await session.notes();
+    if (!scope.valid()) return;
+    clearTimeout(timer);
+    if (all.length) timer = setTimeout(() => { list.replaceChildren(); render().catch(() => {}); }, Math.max(1, Math.min(...all.map((n) => n.expiresAt)) - (session.S.clock?.now() ?? Date.now())));
     list.replaceChildren(...(all.length ? all.map((n) => h('li', { class: 'msg mine' },
       h('span', { class: 'text' }, ...formatted(n.text)),
       h('span', { class: 'meta' }, h('time', { text: `some ${formatDateTime(n.expiresAt)}` }),
@@ -32,4 +39,7 @@ export async function notesScreen(go) {
         render();
       } })))));
   await render();
+  const off = session.onChange((what) => { if (what === 'synced' || what === 'notes') render().catch(() => {}); });
+  scope.onCancel(off);
+  return () => scope.cancel();
 }

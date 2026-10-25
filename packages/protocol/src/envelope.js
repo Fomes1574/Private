@@ -73,6 +73,7 @@ export function validateInner(m) {
       break;
     case 'membership':
       if (!Array.isArray(m.body?.members) || m.body.members.length < 1 || m.body.members.length > 10 || !m.body.members.every((x) => ID.test(x)) || !ID.test(m.body.leader ?? '') || !m.body.members.includes(m.body.leader)) fail('membros');
+      if (m.body.revision !== undefined && (!Number.isSafeInteger(m.body.revision) || m.body.revision < 1)) fail('versão dos membros');
       break;
     case 'room_profile':
       if (typeof m.body?.title !== 'string' || m.body.title.length > 60) fail('nome do grupo');

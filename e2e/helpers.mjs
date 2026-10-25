@@ -8,6 +8,17 @@ import { join } from 'node:path';
 // Use localhost, não 127.0.0.1: passkey (WebAuthn) não aceita IP como domínio.
 export const BASE = process.env.E2E_BASE || 'http://localhost:8091';
 
+// waitForFunction do Playwright 1.56.1 trata a Promise da condição async
+// como truthy antes de resolver. Aqui cada avaliação é aguardada no Node.
+export async function waitForPage(page, predicate, arg, { timeout = 30_000, interval = 50 } = {}) {
+  const deadline = Date.now() + timeout;
+  do {
+    if (await page.evaluate(predicate, arg)) return;
+    await new Promise((r) => setTimeout(r, interval));
+  } while (Date.now() < deadline);
+  throw new Error(`Condição assíncrona não satisfeita em ${timeout} ms`);
+}
+
 export async function startServer() {
   if (process.env.E2E_BASE) return () => {};
   const proc = spawn(process.execPath, [new URL('../scripts/serve.mjs', import.meta.url).pathname], {

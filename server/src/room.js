@@ -31,7 +31,8 @@ export class Room extends DurableObject {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, actor TEXT NOT NULL, json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS media (media_id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS mutes (user_id TEXT PRIMARY KEY, until INTEGER NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS mutes (user_id TEXT PRIMARY KEY, until INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS media_revocations (media_id TEXT NOT NULL, member TEXT NOT NULL, PRIMARY KEY(media_id, member));`);
   }
 
   load() { const r = this.sql.exec('SELECT json FROM state').toArray()[0]; return r ? fromJson(r.json) : null; }
@@ -86,10 +87,37 @@ export class Room extends DurableObject {
       throw e;
     }
     this.save(next);
+    await this.scheduleRevocations(next, ev.type === 'leave' ? actor : ev.type === 'remove_member' ? ev.member : null);
     this.sql.exec('INSERT INTO events(at, actor, json) VALUES (?, ?, ?)', Date.now(), actor, JSON.stringify(ev));
     await this.syncMembership(s, next);
     return this.view(next);
   }
+
+  async scheduleRevocations(s, member = null) {
+    if (!s.closed && !member) return;
+    for (const id of this.mediaIds()) {
+      if (s.closed) this.sql.exec('INSERT OR IGNORE INTO media_revocations VALUES (?, ?)', id, '*');
+      if (member) this.sql.exec('INSERT OR IGNORE INTO media_revocations VALUES (?, ?)', id, member);
+    }
+    if (this.sql.exec('SELECT 1 FROM media_revocations LIMIT 1').toArray().length) await this.ctx.storage.setAlarm(Date.now() + 1000);
+  }
+
+  async flushRevocations() {
+    const tasks = this.sql.exec('SELECT media_id, member FROM media_revocations LIMIT 100').toArray();
+    if (tasks.length) await this.ctx.storage.setAlarm(Date.now() + 60_000);
+    await Promise.all(tasks.map(async (task) => {
+      try {
+        const box = this.env.MEDIA_BOX.get(this.env.MEDIA_BOX.idFromName(task.media_id));
+        const result = task.member === '*' ? await box.closeRoom() : await box.revokeMember(task.member);
+        if (!result.error || result.error === 'gone') this.sql.exec('DELETE FROM media_revocations WHERE media_id = ? AND member = ?', task.media_id, task.member);
+      } catch { /* Trabalho persistido: o alarme repete após a falha do RPC. */ }
+    }));
+    const pending = this.sql.exec('SELECT count(*) AS n FROM media_revocations').one().n;
+    if (!pending) await this.ctx.storage.deleteAlarm();
+    return { pending };
+  }
+
+  async alarm() { await this.flushRevocations(); }
 
   events(actor, after = 0) {
     const s = this.load();
@@ -210,6 +238,7 @@ export class Room extends DurableObject {
       next = apply(s, { type: 'leave', actor: userId });
     }
     this.save(next);
+    await this.scheduleRevocations(next, userId);
     this.sql.exec('INSERT INTO events(at, actor, json) VALUES (?, ?, ?)', Date.now(), userId, JSON.stringify({ type: 'removed_from_circle' }));
     await this.syncMembership(s, next);
     return { ok: true };

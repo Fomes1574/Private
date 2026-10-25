@@ -80,7 +80,7 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
       pending.remove();
       // F10: sem rede, a mensagem já está na fila e vai sozinha; voltar o
       // texto para a caixa faria a pessoa mandar de novo (duplicada).
-      if (e.code === 'pending') { clearTimeout(draftTimer); await session.setDraft(roomId, ''); setReply(null); toast('Sem conexão: a mensagem ficou na fila (🕓) e vai sozinha quando a rede voltar.'); await render(); return; }
+      if (e.code === 'pending' || e.code === 'send_failed') { clearTimeout(draftTimer); await session.setDraft(roomId, ''); setReply(null); toast('Sem conexão: a mensagem ficou na fila (🕓) e vai sozinha quando a rede voltar.'); await render(); return; }
       input.value = text; toast(e.code === 'gone' ? 'Conversa encerrada.' : `Não enviou: ${errText(e)}`);
     }
   };
@@ -97,9 +97,11 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
     if (!f || !scope.valid()) return;
     const { video, once, doc, hd, batch } = pick;
     if (batch) {
+      if (files.some((f) => /^video\//.test(f.type))) { if (files.length !== 1) return toast('Selecione até 5 fotos ou um vídeo por envio.'); return sendVideo(f, false); }
       const prepared = [];
-      for (const file of files.slice(0, 5)) { try { prepared.push(await preparePhoto(file)); } catch (e) { toast(errText(e)); } }
+      for (const file of files.slice(0, 5)) { try { const p = await preparePhoto(file, { maxSide: 4096, quality: 0.9 }); if (!scope.valid()) { p.bytes.fill(0); break; } prepared.push(p); } catch (e) { toast(errText(e)); } }
       if (files.length > 5) toast('Dá para mandar até 5 fotos de uma vez. As outras ficaram de fora.');
+      if (!scope.valid()) { for (const p of prepared) p.bytes.fill(0); return; }
       return prepared.length ? sendBatch(prepared) : undefined;
     }
     if (hd) { try { const p = await preparePhoto(f, { maxSide: 4096, quality: 0.9 }); return sendPhoto(p.bytes, p.mime, false, { hd: true }); } catch (e) { return toast(`Não enviou: ${errText(e)}`); } }
@@ -160,6 +162,9 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
         throw e;
       }
       if (!scope.valid()) return;
+      const chosen = await choiceSheet('Preparar vídeo', [{ label: 'Enviar normalmente', value: 'media' }, { label: '① Ver uma vez', value: 'once' }]);
+      if (!chosen || !scope.valid()) return;
+      once = chosen === 'once';
       label.textContent = 'Enviando cifrado…';
       bar.removeAttribute('value');
       await S.client.sendMedia(roomId, bytes, { mode: once ? 'once' : 'media', mime: 'video/mp4', duration, caption: round ? undefined : takeCaption(once), ...(round ? { round: true } : {}) });
@@ -197,40 +202,21 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
 
   // Câmera do app sempre; galeria só com o modo máximo desligado (Ajustes).
   const attach = async () => {
-    const opts = [
-      { label: 'Câmera: foto', value: 'cam-photo' }, { label: 'Câmera: foto de ver uma vez', value: 'cam-photo-once' },
-      { label: 'Câmera: várias fotos (até 5)', value: 'cam-batch' },
-      { label: 'Câmera: vídeo (até 5 min)', value: 'cam-video' }, { label: 'Câmera: vídeo de ver uma vez', value: 'cam-video-once' },
-      { label: 'Câmera: vídeo redondo (até 60 s)', value: 'cam-round' }];
-    if (!session.maxMode()) opts.push(
-      { label: 'Galeria: foto', value: 'photo' }, { label: 'Galeria: foto de ver uma vez', value: 'photo-once' },
-      { label: 'Galeria: foto em HD', value: 'photo-hd' }, { label: 'Galeria: várias fotos (até 5)', value: 'batch' },
-      { label: 'Galeria: vídeo (até 5 min)', value: 'video' }, { label: 'Galeria: vídeo de ver uma vez', value: 'video-once' });
-    opts.push({ label: 'Documento: texto ou PDF (até 20 MB)', value: 'doc' });
-    if (view.kind === 'group') opts.push({ label: 'Enquete', value: 'poll' });
-    const c = await choiceSheet(session.maxMode() ? 'Enviar (modo máximo: só pela câmera do app)' : 'Enviar', opts);
-    if (!c) return;
-    if (c === 'poll') { const q = await pollSheet(); if (q) { try { await client.sendPoll(roomId, q.question, q.options, q.multi); await render(); } catch (e) { sendFailed(e); } } return; }
-    const once = c.endsWith('-once');
-    // D8: aviso honesto, sem revelar quem usa iPhone.
-    if (once) toast('Ver uma vez: no iPhone o app não consegue bloquear print nem gravação de tela.');
-    if (c === 'cam-batch') {
-      const shot = await openCamera({ mode: 'photo' });
-      if (!shot) return;
-      try { const pr = await preparePhoto(new Blob([shot.bytes], { type: 'image/jpeg' })); return sendBatch([pr]); } finally { shot.bytes.fill(0); }
+    const opts = [{ label: '📷 Câmera', value: 'camera' }];
+    if (!session.maxMode()) opts.push({ label: '▧ Galeria', value: 'gallery' });
+    opts.push({ label: '▤ Documento', value: 'doc' });
+    const c = await choiceSheet('Enviar', opts);
+    if (!c || !scope.valid()) return;
+    if (c === 'camera') {
+      let mode = 'photo', round = false;
+      for (;;) {
+        const shot = await openCamera({ mode, round, allowModes: true, ...(round ? { maxMs: 60_000, facing: 'user' } : {}) });
+        if (!shot || !scope.valid()) { shot?.bytes?.fill(0); return; }
+        if (shot.switchMode) { round = shot.switchMode === 'round'; mode = shot.switchMode === 'photo' ? 'photo' : 'video'; continue; }
+        return mode === 'video' ? sendVideo(shot.blob, false, { round }) : sendBatch([{ bytes: shot.bytes, mime: shot.mime }]);
+      }
     }
-    if (c === 'cam-round') {
-      const shot = await openCamera({ mode: 'video', maxMs: 60_000, round: true, facing: 'user' });
-      if (!shot) return;
-      return sendVideo(shot.blob, false, { round: true });
-    }
-    if (c.startsWith('cam-')) {
-      const video = c.startsWith('cam-video');
-      const shot = await openCamera({ mode: video ? 'video' : 'photo' });
-      if (!shot) return;
-      return video ? sendVideo(shot.blob, once) : sendPhoto(shot.bytes, shot.mime, once);
-    }
-    pick = { video: c.startsWith('video'), once, doc: c === 'doc', hd: c === 'photo-hd', batch: c === 'batch' };
+    pick = { doc: c === 'doc', batch: c === 'gallery', media: c === 'gallery' };
     if (nativePickerAvailable()) {
       await session.setDraft(roomId, input.value);
       await session.lock('file-picker');
@@ -238,7 +224,7 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
       return;
     }
     fileIn.multiple = pick.batch;
-    fileIn.accept = pick.doc ? '.txt,.md,.csv,text/plain,.pdf,application/pdf' : pick.video ? 'video/*' : 'image/*';
+    fileIn.accept = pick.doc ? '.txt,.md,.csv,text/plain,.pdf,application/pdf' : pick.media ? 'image/*,video/*' : pick.video ? 'video/*' : 'image/*';
     fileIn.click();
   };
 
@@ -246,20 +232,35 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
   // prazo e ver uma vez próprios. Envio em ordem; o que cair sem rede fica na
   // fila e vai sozinho (F10), sem duplicar.
   async function sendBatch(prepared) {
-    const items = await prepareBatch(prepared, { allowGallery: !session.maxMode() && !nativePickerAvailable() });
+    const initialCaption = input.value.trim().slice(0, 1000);
+    const items = await prepareBatch(prepared, { initialCaption, allowGallery: !session.maxMode() && !nativePickerAvailable() });
     if (!items?.length || !scope.valid()) { for (const it of items ?? []) it.bytes.fill(0); return; }
     const label = h('span', { class: 'muted small' });
     progressBar.replaceChildren(label); progressBar.hidden = false;
     let sent = 0, queued = 0, failed = 0;
+    const staged = [], ready = [];
     try {
       for (const [i, it] of items.entries()) {
-        label.textContent = `Enviando ${i + 1} de ${items.length}…`;
-        try { await client.sendMedia(roomId, it.bytes, { mode: it.once ? 'once' : 'media', mime: it.mime, caption: it.caption }); sent++; }
-        catch (e) { if (e.code === 'pending') queued++; else { failed++; if (e.code === 'key_unverified') { sendFailed(e); break; } } }
-        finally { it.bytes.fill(0); }
+        label.textContent = `Guardando ${i + 1} de ${items.length} cifrada…`;
         if (!scope.valid()) break;
+        const p = await preparePhoto(new Blob([it.bytes], { type: it.mime }), { maxSide: it.hd ? 4096 : 1280, quality: it.hd ? 0.9 : 0.82 });
+        if (!scope.valid()) { p.bytes.fill(0); break; }
+        ready.push({ bytes: p.bytes, opts: { mode: it.once ? 'once' : 'media', mime: p.mime, caption: it.caption, hd: it.hd } });
+        it.bytes.fill(0);
       }
-    } finally { for (const it of items) it.bytes.fill(0); progressBar.hidden = true; progressBar.replaceChildren(); }
+      if (!scope.valid()) return;
+      try { staged.push(...await client.prepareMediaBatch(roomId, ready)); }
+      catch (e) { staged.push(...(e.preparedIds ?? [])); throw e; }
+      if (staged.length && initialCaption) { input.value = ''; await session.setDraft(roomId, ''); }
+      // Só começa a transmitir depois de todo o lote estar durável.
+      for (const id of staged) {
+        if (!scope.valid()) { queued++; continue; }
+        try { await client.deliver(roomId, id); sent++; }
+        catch (e) { if (e.code === 'pending') queued++; else { failed++; sendFailed(e); } }
+      }
+    } catch (e) { queued += staged.length; failed++; sendFailed(e); }
+    finally { for (const it of [...items, ...ready]) it.bytes.fill(0); progressBar.hidden = true; progressBar.replaceChildren(); }
+
     if (queued || failed) toast(`${sent} enviada${sent === 1 ? '' : 's'}${queued ? `; ${queued} na fila (vão quando a rede voltar)` : ''}${failed ? `; ${failed} não foram` : ''}.`);
     if (scope.valid()) await render();
   }
@@ -357,7 +358,7 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
   const emojiPanel = h('div', { class: 'emoji-panel', hidden: true }, EMOJIS.map((e) => h('button', { class: 'emoji', type: 'button', text: e, onclick: () => { input.value += e; input.focus(); } })));
 
   mount(h('div', { class: 'chat' },
-    header(session.roomTitle(view), { back: () => go('chats'), actions: [h('button', { class: 'icon', 'aria-label': 'Menu da conversa', text: '⋮', onclick: async () => { const r = await roomMenu(go, roomId); if (r === 'search') { searchBar.hidden = false; searchIn.focus(); return; } if (r === 'refresh') return go('chat', { roomId }); } })] }),
+    header(session.roomTitle(view), { back: () => go('chats'), actions: [h('button', { class: 'icon', 'aria-label': 'Menu da conversa', text: '⋮', onclick: async () => { const r = await roomMenu(go, roomId); if (r === 'search') { searchBar.hidden = false; searchIn.focus(); return; } if (r === 'poll') { const q = await pollSheet(); if (q && scope.valid()) { try { await client.sendPoll(roomId, q.question, q.options, q.multi); await render(); } catch (e) { sendFailed(e); } } return; } if (r === 'refresh') return go('chat', { roomId }); } })] }),
     h('div', { class: 'policy muted small', text: policyLine(view) }),
     searchBar, selBar, pinBar,
     log,
@@ -640,7 +641,15 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
         // Na fila (F10): aparecem com 🕓 até o servidor aceitar.
         for (const el of log.querySelectorAll('li.queued')) el.remove();
         const queued = term ? [] : (await client.outbox()).filter((o) => o.roomId === roomId && o.local);
-        for (const o of queued) log.append(h('li', { class: 'msg mine pending queued' }, h('span', { class: 'text', text: o.local.kind === 'media' ? `${mediaName(o.local)} na fila` : o.local.body?.text ?? '' }), h('span', { class: 'meta' }, h('span', { 'aria-label': 'na fila', text: '🕓' }))));
+        for (const o of queued) {
+          const failed = o.state === 'failed' || o.state === 'staging';
+          const el = h('li', { class: 'msg mine pending queued' }, h('span', { class: 'text', text: o.local.kind === 'media' ? mediaName(o.local) : o.local.body?.text ?? '' }),
+            h('span', { class: 'meta', 'aria-label': failed ? 'falhou' : 'na fila', text: failed ? 'Falhou' : '🕓' }),
+            h('button', { class: 'secondary small', text: 'Remover da fila', onclick: async () => { await client.cancelQueued(o.payload.msgId); if (scope.valid()) await render(); } }));
+          if (failed && o.state !== 'staging') el.append(h('button', { class: 'secondary small', text: 'Tentar novamente', onclick: async () => { try { await client.retryQueued(o.payload.msgId); } catch (e) { sendFailed(e); } if (scope.valid()) await render(); } }));
+          log.append(el);
+        }
+
         if (!realCount && !queued.length) log.append(h('li', { class: 'note', text: term ? 'Nada encontrado no que ainda não venceu.' : 'Nenhuma mensagem.' }));
         // Primeira vez: abre na faixa de não lidas, como no WhatsApp.
         const firstOpen = !rendered;
@@ -676,6 +685,12 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
       try {
         const f = await readNativeAttachment(attachment, { signal: scope.signal, allowed: scope.valid, keep: !!attachment.pick.batch });
         if (!scope.valid()) return;
+        if (attachment.pick.action === 'wallpaper') {
+          const p = await preparePhoto(f, { maxSide: 1280 });
+          try { if (scope.valid()) await session.setWallpaper(roomId, p.bytes); } finally { p.bytes.fill(0); }
+          if (scope.valid()) go('chat', { roomId });
+          return;
+        }
         if (attachment.pick.action?.startsWith('room-')) {
           const slot = attachment.pick.action === 'room-photo' ? 'photo' : 'background';
           const p = await preparePhoto(f, { maxSide: slot === 'photo' ? 512 : 1280, square: slot === 'photo' });
@@ -685,14 +700,22 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
         }
         const { video, once, doc, hd, batch } = attachment.pick;
         if (batch) {
+          if (/^video\//.test(f.type)) { if ((attachment.count ?? 1) !== 1) { await clearNativeAttachment(attachment); return toast('Selecione até 5 fotos ou um vídeo por envio.'); } await clearNativeAttachment(attachment); return sendVideo(f, false); }
           const prepared = [];
-          try { prepared.push(await preparePhoto(f)); } catch (e) { toast(errText(e)); }
-          for (let i = 1; i < (attachment.count ?? 1) && scope.valid(); i++) {
-            try { prepared.push(await preparePhoto(await readNativeAttachment(attachment, { signal: scope.signal, allowed: scope.valid, index: i, keep: true }))); } catch (e) { toast(errText(e)); }
-          }
-          await clearNativeAttachment(attachment);
-          if (attachment.dropped) toast('Dá para mandar até 5 fotos de uma vez. As outras ficaram de fora.');
-          if (prepared.length && scope.valid()) await sendBatch(prepared);
+          try {
+            const files = [f];
+            for (let i = 1; i < (attachment.count ?? 1) && scope.valid(); i++) files.push(await readNativeAttachment(attachment, { signal: scope.signal, allowed: scope.valid, index: i, keep: true }));
+            if (files.some((file) => /^video\//.test(file.type))) throw new Error('Selecione até 5 fotos ou um vídeo por envio.');
+            for (const file of files) {
+              if (!scope.valid()) break;
+              const p = await preparePhoto(file, { maxSide: 4096, quality: 0.9 });
+              if (!scope.valid()) { p.bytes.fill(0); break; }
+              prepared.push(p);
+            }
+            if (attachment.dropped) toast('Dá para mandar até 5 fotos de uma vez. As outras ficaram de fora.');
+            if (prepared.length && scope.valid()) await sendBatch(prepared);
+          } finally { await clearNativeAttachment(attachment); for (const p of prepared) p.bytes.fill(0); }
+
           return;
         }
         if (hd) { const p = await preparePhoto(f, { maxSide: 4096, quality: 0.9 }); if (scope.valid()) await sendPhoto(p.bytes, p.mime, false, { hd: true }); else p.bytes.fill(0); return; }

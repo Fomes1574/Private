@@ -4,6 +4,7 @@ import android.content.Context;
 import android.util.AttributeSet;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
+import androidx.core.view.inputmethod.EditorInfoCompat;
 
 import com.getcapacitor.CapacitorWebView;
 
@@ -18,7 +19,7 @@ public class IncognitoWebView extends CapacitorWebView {
     @Override
     public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
         InputConnection ic = super.onCreateInputConnection(outAttrs);
-        outAttrs.imeOptions |= EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING;
+        outAttrs.imeOptions |= EditorInfoCompat.IME_FLAG_NO_PERSONALIZED_LEARNING;
         return ic;
     }
 }

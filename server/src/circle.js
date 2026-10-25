@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS security_events (seq INTEGER PRIMARY KEY AUTOINCREMEN
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS vaults (vault_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, device_id TEXT NOT NULL,
   verifier_hash TEXT NOT NULL, duress_hash TEXT, share TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
-  last_seen INTEGER NOT NULL, dead_days INTEGER NOT NULL);
+  last_seen INTEGER NOT NULL, dead_days INTEGER NOT NULL, protection INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS vault_migrations (previous TEXT PRIMARY KEY, replacement TEXT NOT NULL UNIQUE);
 CREATE TABLE IF NOT EXISTS kill_codes (user_id TEXT PRIMARY KEY, code_hash TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS dead_keys (vault_id TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS direct_rooms (pair_key TEXT PRIMARY KEY, room_id TEXT NOT NULL);
@@ -82,6 +83,7 @@ export class Circle extends DurableObject {
     this.state = ctx;
     this.sql = ctx.storage.sql;
     this.sql.exec(SCHEMA);
+    if (!this.q('PRAGMA table_info(vaults)').some((c) => c.name === 'protection')) this.sql.exec('ALTER TABLE vaults ADD COLUMN protection INTEGER NOT NULL DEFAULT 0');
     // push_subs ganhou `kind` (webpush no iPhone/navegador, fcm no APK).
     // Assinaturas antigas continuam valendo como webpush.
     if (!this.q("SELECT 1 FROM meta WHERE k = 'push_kind'").length) {
@@ -186,7 +188,7 @@ export class Circle extends DurableObject {
     const deviceId = this.addDevice(admin.user_id, device);
     const vaultId = randomId(18);
     const { share, stored } = await this.newShare(vaultId);
-    this.sql.exec('INSERT INTO vaults(vault_id, user_id, device_id, verifier_hash, duress_hash, share, attempts, last_seen, dead_days) VALUES (?, ?, ?, ?, NULL, ?, 0, ?, ?)',
+    this.sql.exec('INSERT INTO vaults(vault_id, user_id, device_id, verifier_hash, duress_hash, share, attempts, last_seen, dead_days, protection) VALUES (?, ?, ?, ?, NULL, ?, 0, ?, ?, 1)',
       vaultId, admin.user_id, deviceId, await sha(vault.verifier), stored, this.now(), vault.deadDays);
     this.event('recovered', admin.user_id); // contatos veem a troca de chave (aviso de segurança)
     return { userId: admin.user_id, deviceId, vault: { vaultId, share } };
@@ -368,7 +370,7 @@ export class Circle extends DurableObject {
     if (vault) {
       const vaultId = randomId(18);
       const { share, stored } = await this.newShare(vaultId);
-      this.sql.exec('INSERT INTO vaults(vault_id, user_id, device_id, verifier_hash, duress_hash, share, attempts, last_seen, dead_days) VALUES (?, ?, ?, ?, NULL, ?, 0, ?, ?)',
+      this.sql.exec('INSERT INTO vaults(vault_id, user_id, device_id, verifier_hash, duress_hash, share, attempts, last_seen, dead_days, protection) VALUES (?, ?, ?, ?, NULL, ?, 0, ?, ?, 1)',
         vaultId, '', pairVault(pairingId), await sha(vault.verifier), stored, this.now(), vault.deadDays);
       reg = { vaultId, share };
     }
@@ -494,7 +496,7 @@ export class Circle extends DurableObject {
     // Um cofre por aparelho: o anterior (se houver) deixa de abrir.
     this.dropVaults('device_id = ?', actor.deviceId);
     this.flushDeadKeys();
-    this.sql.exec('INSERT INTO vaults(vault_id, user_id, device_id, verifier_hash, duress_hash, share, attempts, last_seen, dead_days) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)',
+    this.sql.exec('INSERT INTO vaults(vault_id, user_id, device_id, verifier_hash, duress_hash, share, attempts, last_seen, dead_days, protection) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 1)',
       vaultId, actor.userId, actor.deviceId, await sha(verifier), duress ? await sha(duress) : null, stored, this.now(), deadDays);
     return { vaultId, share };
   }
@@ -515,7 +517,7 @@ export class Circle extends DurableObject {
     const opened = await this.readShare(v);
     if (opened.error) return opened;
     this.sql.exec('UPDATE vaults SET attempts = 0, last_seen = ? WHERE vault_id = ?', this.now(), vaultId);
-    return { share: opened.share };
+    return { share: opened.share, needsMigration: v.protection !== 1 };
   }
 
   // ---------- S12: destruição por chave da parte S ----------
@@ -533,7 +535,7 @@ export class Circle extends DurableObject {
   }
   async sealShare(vaultId, share) {
     const kv = this.keyStore();
-    if (!kv) return share; // sem R2 (só testes antigos): como antes
+    if (!kv) throw new Error('armazenamento de chaves indisponível');
     const raw = crypto.getRandomValues(new Uint8Array(32));
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(`mp/share/v1/${vaultId}`) }, await this.shareKey(raw, 'encrypt'), unb64(share)));
@@ -544,9 +546,8 @@ export class Circle extends DurableObject {
   }
   async readShare(v) {
     if (!String(v.share).startsWith('e1:')) {
-      // Cofre de antes do S12: passa a ser cifrado agora, sem trocar S.
-      const stored = await this.sealShare(v.vault_id, v.share).catch(() => null);
-      if (stored && stored !== v.share) this.sql.exec('UPDATE vaults SET share = ? WHERE vault_id = ?', stored, v.vault_id);
+      // O snapshot antigo já contém S em claro. Reembrulhar a MESMA S não
+      // corrige isso: o cliente deve migrar para S e DEK novas, em duas fases.
       return { share: v.share };
     }
     const kv = this.keyStore();
@@ -571,16 +572,70 @@ export class Circle extends DurableObject {
   dropVaults(where, ...args) {
     this.sql.exec(`INSERT OR IGNORE INTO dead_keys(vault_id) SELECT vault_id FROM vaults WHERE ${where}`, ...args);
     this.sql.exec(`DELETE FROM vaults WHERE ${where}`, ...args);
+    this.sql.exec('DELETE FROM vault_migrations WHERE previous NOT IN (SELECT vault_id FROM vaults) OR replacement NOT IN (SELECT vault_id FROM vaults)');
   }
   flushDeadKeys() {
+    if (this.flushingKeys) return this.flushingKeys;
     const kv = this.keyStore();
     const ids = this.q('SELECT vault_id FROM dead_keys LIMIT 100').map((r) => r.vault_id);
     if (!kv || !ids.length) return Promise.resolve();
-    const task = kv.delete(ids.map((id) => `k/${id}`))
-      .then(() => { for (const id of ids) this.sql.exec('DELETE FROM dead_keys WHERE vault_id = ?', id); })
-      .catch(() => null);
+    const task = (async () => {
+      try {
+        await this.ctx.storage.setAlarm(this.now() + 60_000);
+        await kv.delete(ids.map((id) => `k/${id}`));
+        for (const id of ids) this.sql.exec('DELETE FROM dead_keys WHERE vault_id = ?', id);
+      } catch { /* A marca e o alarme sobrevivem à indisponibilidade do R2. */ }
+      finally {
+        if (this.one('SELECT count(*) AS n FROM dead_keys').n) await this.ctx.storage.setAlarm(this.now() + 60_000);
+        else await this.ctx.storage.deleteAlarm();
+        this.flushingKeys = null;
+      }
+    })();
+    this.flushingKeys = task;
     this.ctx.waitUntil?.(task);
     return task;
+  }
+  async alarm() { await this.flushDeadKeys(); }
+
+  async vaultMigratePrepare(actor, { vaultId }) {
+    return this.state.blockConcurrencyWhile(async () => {
+      const old = this.one('SELECT * FROM vaults WHERE vault_id = ? AND device_id = ?', vaultId, actor.deviceId);
+      if (!old) return { error: 'gone' };
+      if (old.protection === 1) return { error: 'already_protected' };
+      const pending = this.one('SELECT replacement FROM vault_migrations WHERE previous = ?', vaultId);
+      if (pending) {
+        const next = this.one('SELECT * FROM vaults WHERE vault_id = ?', pending.replacement);
+        const opened = next && await this.readShare(next);
+        if (opened && !opened.error) return { vaultId: next.vault_id, share: opened.share };
+        return { error: 'gone' };
+      }
+      const id = randomId(18);
+      const { share, stored } = await this.newShare(id);
+      this.sql.exec('INSERT INTO vaults(vault_id, user_id, device_id, verifier_hash, duress_hash, share, attempts, last_seen, dead_days, protection) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, 1)',
+        id, old.user_id, old.device_id, old.verifier_hash, old.duress_hash, stored, this.now(), old.dead_days);
+      this.sql.exec('INSERT INTO vault_migrations(previous, replacement) VALUES (?, ?)', vaultId, id);
+      return { vaultId: id, share };
+    });
+  }
+
+  async vaultMigrateCommit(actor, { previous, vaultId }) {
+    const next = this.one('SELECT * FROM vaults WHERE vault_id = ? AND device_id = ? AND protection = 1', vaultId, actor.deviceId);
+    if (!next) return { error: 'gone' };
+    const old = this.one('SELECT * FROM vaults WHERE vault_id = ?', previous);
+    if (old && (old.device_id !== actor.deviceId || this.one('SELECT replacement FROM vault_migrations WHERE previous = ?', previous)?.replacement !== vaultId)) return { error: 'forbidden' };
+    this.dropVaults('vault_id = ? AND device_id = ?', previous, actor.deviceId);
+    await this.flushDeadKeys();
+    return { ok: true, pending: !!this.one('SELECT 1 FROM dead_keys WHERE vault_id = ?', previous) };
+  }
+
+  async testLegacyVault(vaultId) {
+    if (this.env.TEST_HOOKS !== '1') return { error: 'forbidden' };
+    const old = this.one('SELECT * FROM vaults WHERE vault_id = ?', vaultId);
+    if (!old) return { error: 'gone' };
+    const opened = await this.readShare(old);
+    if (opened.error) return opened;
+    this.sql.exec('UPDATE vaults SET share = ?, protection = 0 WHERE vault_id = ?', opened.share, vaultId);
+    return { ok: true };
   }
   vaultKill(v) {
     this.dropVaults('vault_id = ?', v.vault_id);

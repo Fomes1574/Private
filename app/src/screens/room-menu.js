@@ -9,7 +9,7 @@ import { verifySheet } from './verify.js';
 import { formatDateTime } from '../packages/protocol/src/time.js';
 
 // Fundo: até 1280 px, sem metadados; câmera traseira.
-const pickBackground = (roomId) => pickImage({ maxSide: 1280, facing: 'environment', resume: { roomId, target: 'chat', action: 'room-background' } });
+const pickBackground = (roomId, local = false) => pickImage({ maxSide: 1280, facing: 'environment', resume: { roomId, target: 'chat', action: local ? 'wallpaper' : 'room-background' } });
 
 export async function roomMenu(go, roomId) {
   const S = session.S;
@@ -23,6 +23,7 @@ export async function roomMenu(go, roomId) {
     { label: session.isMuted(roomId) ? 'Reativar avisos' : 'Silenciar', value: 'mute' },
     { label: flags.pinned ? 'Desafixar' : 'Fixar no topo', value: 'pin' },
     { label: flags.archived ? 'Desarquivar' : 'Arquivar', value: 'archive' }];
+  if (v.kind === 'group' && !v.closed && session.imActive(v)) opts.push({ label: 'Criar enquete', value: 'poll' });
   if (leader && !v.closed) {
     opts.push({ label: 'Prazos de mensagens e mídia', value: 'ttl' });
     if (v.kind === 'group') opts.push({ label: 'Nome do grupo', value: 'title' }, { label: 'Descrição do grupo', value: 'description' }, { label: 'Foto do grupo', value: 'photo' }, { label: 'Fundo da conversa', value: 'background' }, { label: 'Adicionar pessoa', value: 'add' }, { label: 'Remover pessoa', value: 'remove' });
@@ -43,11 +44,11 @@ export async function roomMenu(go, roomId) {
     if (c === 'members') return membersSheet(v);
     if (c === 'gallery') return gallerySheet(roomId);
     if (c === 'wallpaper') {
-      const has = !!(await session.wallpaperURL(roomId));
+      const has = !!((await S.store.get('wallpapers')) ?? {})[roomId];
       const a = has ? await choiceSheet('Papel de parede (só neste aparelho, cifrado)', [{ label: 'Trocar', value: 'set' }, { label: 'Remover', value: 'rm', danger: true }]) : 'set';
       if (a === 'rm') { await session.setWallpaper(roomId, null); toast('Papel de parede removido.'); return 'refresh'; }
       if (a !== 'set') return;
-      const b = await pickBackground(roomId);
+      const b = await pickBackground(roomId, true);
       if (!b) return;
       try { await session.setWallpaper(roomId, b); } finally { b.fill(0); }
       toast('Papel de parede trocado.');
@@ -60,6 +61,7 @@ export async function roomMenu(go, roomId) {
       toast('Descrição salva.');
       return;
     }
+    if (c === 'poll') return 'poll';
     if (c === 'search') return 'search';
     if (c === 'mute') {
       if (session.isMuted(roomId)) { await session.muteRoom(roomId, 0); toast('Avisos reativados.'); return; }

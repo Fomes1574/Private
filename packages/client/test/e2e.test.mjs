@@ -37,6 +37,8 @@ test('entrada: administradora, convites, sessão por chave do aparelho', async (
     await p[n].redeem(token); await p[n].login();
   }
   for (const c of Object.values(p)) await c.refreshDirectory();
+  await p.ana.confirmCircle([p.bia.userId, p.caio.userId]);
+  await p.bia.sync(); await p.caio.sync();
   room = (await p.ana.createRoom('group', [p.bia.userId, p.caio.userId], { textTtl: 86400, mediaTtl: 86400 })).roomId;
 });
 

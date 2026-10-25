@@ -7,15 +7,15 @@ import { sensitiveScope } from './sensitive-scope.js';
 const COLORS = ['#FFFFFF', '#000000', '#FF5A5A', '#FFD23F', '#3DDC97', '#6CB4FF'];
 const CROPS = [['Original', null], ['Quadrado', 1], ['4:5', 4 / 5], ['16:9', 16 / 9]];
 
-export function editPhoto(bytes, mime = 'image/jpeg') {
+export function editPhoto(bytes, mime = 'image/jpeg', { signal } = {}) {
   return new Promise(async (resolve, reject) => {
-    const scope = sensitiveScope();
+    const scope = sensitiveScope({ signal });
     let src;
     try { src = await createImageBitmap(new Blob([bytes], { type: mime })); }
     catch (e) { scope.finish(); reject(e); return; }
     if (!scope.valid()) { src.close(); scope.finish(); resolve(null); return; }
     let rot = 0, crop = null, color = COLORS[2], mode = 'draw';
-    let marks = []; // traços e textos, em coordenadas da imagem final
+    let marks = []; // traços e textos, em coordenadas da imagem original
     const canvas = h('canvas', { class: 'editor-canvas', 'aria-label': 'Foto em edição' });
     const g = canvas.getContext('2d');
 
@@ -33,8 +33,8 @@ export function editPhoto(bytes, mime = 'image/jpeg') {
       g.translate(-ox, -oy);
       g.translate(rw / 2, rh / 2);
       g.rotate((rot * Math.PI) / 2);
-      g.drawImage(src, -src.width / 2, -src.height / 2);
-      g.restore();
+      g.translate(-src.width / 2, -src.height / 2);
+      g.drawImage(src, 0, 0);
       for (const m of marks) {
         if (m.kind === 'stroke') {
           g.strokeStyle = m.color; g.lineWidth = m.width; g.lineCap = 'round'; g.lineJoin = 'round';
@@ -48,17 +48,22 @@ export function editPhoto(bytes, mime = 'image/jpeg') {
           g.strokeText(m.text, m.x, m.y); g.fillStyle = m.color; g.fillText(m.text, m.x, m.y);
         }
       }
+      g.restore();
     }
     const toImage = (e) => {
       const r = canvas.getBoundingClientRect();
-      return [((e.clientX - r.left) / r.width) * canvas.width, ((e.clientY - r.top) / r.height) * canvas.height];
+      const { rw, rh, ox, oy } = geometry();
+      const x = ((e.clientX - r.left) / r.width) * canvas.width + ox - rw / 2;
+      const y = ((e.clientY - r.top) / r.height) * canvas.height + oy - rh / 2;
+      const c = [1, 0, -1, 0][rot], s = [0, 1, 0, -1][rot];
+      return [c * x + s * y + src.width / 2, -s * x + c * y + src.height / 2];
     };
     let stroke = null;
     canvas.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       if (mode === 'text') return placeText(toImage(e));
       canvas.setPointerCapture?.(e.pointerId);
-      stroke = { kind: 'stroke', color, width: Math.max(4, canvas.width / 120), points: [toImage(e)] };
+      stroke = { kind: 'stroke', color, width: Math.max(4, src.width / 120), points: [toImage(e)] };
       marks.push(stroke);
     });
     canvas.addEventListener('pointermove', (e) => { if (stroke) { stroke.points.push(toImage(e)); draw(); } });
@@ -68,12 +73,12 @@ export function editPhoto(bytes, mime = 'image/jpeg') {
     function placeText([x, y]) {
       const t = textIn.value.trim();
       if (!t) return;
-      marks.push({ kind: 'text', text: t, color, x, y, size: Math.max(18, Math.round(canvas.width / 14)) });
+      marks.push({ kind: 'text', text: t, color, x, y, size: Math.max(18, Math.round(src.width / 14)) });
       textIn.value = '';
       draw();
     }
-    // Girar ou recortar muda a geometria: os desenhos recomeçam.
-    const reshape = (fn) => { fn(); marks = []; draw(); };
+    // Marcas no espaço da imagem original: giram junto e sobrevivem ao recorte.
+    const reshape = (fn) => { fn(); draw(); };
     const tool = (label, fn, extra = {}) => h('button', { type: 'button', class: 'secondary small', text: label, onclick: fn, ...extra });
     const modeBtns = [tool('Desenhar', () => setMode('draw'), { 'aria-pressed': 'true' }), tool('Escrever', () => setMode('text'), { 'aria-pressed': 'false' })];
     function setMode(m) {

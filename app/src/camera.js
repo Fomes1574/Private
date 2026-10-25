@@ -12,9 +12,9 @@ const fmt = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 
 
 // mode 'photo' → { bytes, mime: 'image/jpeg' } · mode 'video' → { blob, mime }
 // Cancelar, sair do app ou negar a permissão → null.
-export function openCamera({ mode = 'photo', facing = 'environment', maxSide = 2048, maxMs = MAX_VIDEO_MS, round = false } = {}) {
+export function openCamera({ mode = 'photo', facing = 'environment', maxSide = 2048, maxMs = MAX_VIDEO_MS, round = false, allowModes = false, signal } = {}) {
   return new Promise((resolve) => {
-    const scope = sensitiveScope();
+    const scope = sensitiveScope({ signal });
     let startVersion = 0;
     let stream = null, recorder = null, parts = [], t0 = 0, tick = null, done = false;
     const preview = h('video', { class: round ? 'camera-preview round' : 'camera-preview', playsinline: true, autoplay: true, muted: true, 'aria-label': 'Imagem da câmera' });
@@ -26,6 +26,7 @@ export function openCamera({ mode = 'photo', facing = 'environment', maxSide = 2
       h('div', { class: 'camera-bar row' }, h('button', { class: 'secondary small', text: 'Cancelar', onclick: () => finish(null) }), timer, flip),
       h('div', { class: 'camera-stage' }, preview),
       h('div', { class: 'camera-bar row center' }, shutter));
+    if (allowModes) overlay.append(h('div', { class: 'camera-bar row center' }, ...[['photo', 'Foto'], ['video', 'Vídeo'], ['round', 'Vídeo redondo']].map(([value, text]) => h('button', { class: 'secondary small', text, onclick: () => { if (!recorder) finish({ switchMode: value }); } }))));
 
     function stopTracks() { for (const t of stream?.getTracks() ?? []) t.stop(); stream = null; preview.srcObject = null; }
     function finish(out) {

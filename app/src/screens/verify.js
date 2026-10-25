@@ -37,7 +37,11 @@ function scanQr(expected) {
     (async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-        if (done || !scope.valid()) return finish(null);
+        if (done || !scope.valid()) {
+          for (const track of stream.getTracks()) track.stop();
+          stream = null;
+          return finish(null);
+        }
         video.srcObject = stream;
         await video.play().catch(() => {});
         const det = new globalThis.BarcodeDetector({ formats: ['qr_code'] });
@@ -54,10 +58,14 @@ function scanQr(expected) {
 }
 
 export async function verifySheet(userId) {
+  const owner = session.S.client;
+  const scope = sensitiveScope({ allowed: () => session.S.client === owner });
+  const expected = session.verifyPayload(userId);
   const name = session.nameOf(userId);
   const number = await session.safetyNumber(userId);
-  if (!number) return toast('Ainda sem a chave dessa pessoa. Tente depois de sincronizar.');
-  const payload = session.verifyPayload(userId);
+  if (!scope.valid()) { scope.cancel(); return; }
+  if (!number || expected !== session.verifyPayload(userId)) { scope.cancel(); return toast('A chave mudou. Abra a verificação novamente.'); }
+  const payload = expected;
   const canvas = h('canvas', { class: 'qr', 'aria-label': `QR de verificação com ${name}` });
   const status = h('p', { class: 'muted small' });
   const actions = h('div', { class: 'row wrap' });
@@ -67,19 +75,27 @@ export async function verifySheet(userId) {
     canvas,
     h('p', { class: 'code safety', text: number }),
     status, actions,
-    h('button', { class: 'block', text: 'Fechar', onclick: () => sheet.remove() })));
+    h('button', { class: 'block', text: 'Fechar', onclick: () => scope.cancel() })));
+  scope.onCancel(() => { canvas.width = canvas.height = 0; sheet.replaceChildren(); sheet.remove(); });
+  async function confirm(on) {
+    if (!scope.valid()) return;
+    try {
+      await session.setVerified(userId, on, payload);
+      if (scope.valid()) { toast(on ? `${name} verificado.` : 'Verificação removida.'); refresh(); }
+    } catch { scope.cancel(); toast('A chave mudou durante a conferência. Abra novamente e confira os novos números.'); }
+  }
   const refresh = () => {
     const ok = session.isVerified(userId), changed = session.keyChanged(userId);
     status.textContent = ok ? '✓ Verificado.' : changed ? `A chave de ${name} mudou desde a verificação. Confiram de novo.` : 'Ainda não verificado.';
     actions.replaceChildren(
       canScan() ? h('button', { class: 'secondary', text: 'Ler o QR da outra pessoa', onclick: async () => {
         const r = await scanQr(payload);
-        if (r === true) { await session.setVerified(userId, true); toast(`${name} verificado.`); refresh(); }
+        if (r === true) await confirm(true);
         else if (r === false) toast('O QR não bate. Não marque como verificado e avise a pessoa.');
       } }) : null,
-      ok ? h('button', { class: 'secondary', text: 'Remover verificação', onclick: async () => { await session.setVerified(userId, false); refresh(); } })
-        : h('button', { text: 'Os números batem: marcar como verificado', onclick: async () => { await session.setVerified(userId, true); toast(`${name} verificado.`); refresh(); } }),
-      changed ? h('button', { class: 'danger', text: 'Aceitar a chave nova sem conferir', onclick: async () => { await session.setVerified(userId, false); toast('Aceita. O envio de mídia volta, sem a marca de verificado.'); refresh(); } }) : null);
+      ok ? h('button', { class: 'secondary', text: 'Remover verificação', onclick: () => confirm(false) })
+        : h('button', { text: 'Os números batem: marcar como verificado', onclick: () => confirm(true) }),
+      changed ? h('button', { class: 'danger', text: 'Aceitar a chave nova sem conferir', onclick: () => confirm(false) }) : null);
   };
   refresh();
   document.body.append(sheet);

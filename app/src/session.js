@@ -110,7 +110,7 @@ async function registerVault(lock) {
 async function vaultRelease(vaultId, verifier) {
   const res = await fetch(`${CONFIG.api}/v1/vault/release`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ vaultId, verifier }) });
   const body = await res.json().catch(() => ({}));
-  if (res.ok && body.share) return { share: body.share };
+  if (res.ok && body.share) return { share: body.share, needsMigration: body.needsMigration === true };
   if (res.status === 404 && body.error === 'gone') return { gone: true };
   if (res.status === 403 && body.error === 'wrong_secret') return { wrong: true, left: body.left };
   throw new Error(`release ${res.status}`);
@@ -193,20 +193,21 @@ export async function pairStart(lock) {
   await idbPutMany({ vault: record, activePool: lock.pool, lastRotate: Date.now(), pairPending: true });
   return info;
 }
-export async function pairPoll(info) {
+export async function pairPoll(info, beforeUnlock) {
   const st = await S.client.api.post('/v1/devices/pair/status', { pairingId: info.pairingId, authPub: info.authPub });
-  if (st.state === 'approved') await finishPairing(st);
+  if (st.state === 'approved') await finishPairing(st, beforeUnlock);
   return st.state;
 }
 // Aprovado: entra (o servidor aceita o aparelho pendente só para isto) e
 // confirma; só então o celular antigo cai. Confirmar de novo não quebra.
-async function finishPairing(st) {
+async function finishPairing(st, beforeUnlock) {
   Object.assign(S.client, { userId: st.userId, deviceId: st.deviceId });
   await S.client.saveDevice();
   await S.client.login();
   await S.client.api.post('/v1/devices/pair/commit');
   await S.store.put('pairing', null);
   await idbPut('pairPending', false);
+  await beforeUnlock?.();
   await afterUnlock({ loggedIn: true });
 }
 // Pedido que venceu sem aprovação: este aparelho não tem nada de valor.
@@ -243,6 +244,7 @@ export async function unlock(secret) {
     throw e;
   } finally { prf?.fill(0); }
   const { dek, kek } = opened;
+  try {
   await openStore(dek);
   S.kek = kek;
   const pickleKey = vault.unb64(await S.store.get('pickleKey'));
@@ -251,7 +253,10 @@ export async function unlock(secret) {
   // Troca de aparelho em andamento (app fechado no meio): continua.
   if (await idbGet('pairPending')) {
     const info = await S.store.get('pairing');
-    const st = await pairPoll(info);
+    const st = await pairPoll(info, async () => {
+      if (opened.migrate) await migrateServerShare(opened);
+      await completeVaultMigration().catch(() => {});
+    });
     if (st === 'approved') return {};
     if (st === 'pending') return { pairing: info };
     await wipeEverything();
@@ -259,21 +264,51 @@ export async function unlock(secret) {
   }
   await S.client.login();
   if (opened.upgrade) await upgradeVault(opened);
+  if (opened.migrate) await migrateServerShare(opened);
+  await completeVaultMigration().catch(() => {});
   await afterUnlock({ loggedIn: true });
   return {};
+  } catch (e) {
+    S.unlocked = false; setSensitiveSession(false);
+    S.kek = null; S.client = null;
+    await S.store?.lock().catch(() => {});
+    throw e;
+  } finally { opened.forget?.(); }
 }
 
-// Cofre antigo (v1) passa a ter a parte do servidor, sem perder nada: a
-// mesma DEK é reembrulhada. Se o servidor ainda não aceitar (API antiga ou
-// sem rede), continua em v1 e tenta de novo no próximo desbloqueio.
+async function replaceVaultBank(record, dek, extra = {}) {
+  const name = newPoolName();
+  await S.store.rebuild(dek, name, S.clock?.now() ?? Date.now());
+  try { await idbPutMany({ vault: record, activePool: name, lastRotate: Date.now(), ...extra }); }
+  catch (e) { await S.store.abortRebuild(); throw e; }
+  await S.store.switchTo(name);
+}
+
+async function migrateServerShare(opened) {
+  const { record, dek, kek, previous } = await opened.migrate((vaultId) => S.client.api.post('/v1/vault/migrate/prepare', { vaultId }));
+  await replaceVaultBank(record, dek, { shareMigration: { previous, vaultId: record.vaultId } });
+  S.kek = kek;
+}
+
+async function completeVaultMigration() {
+  const pending = await idbGet('shareMigration');
+  if (!pending || !S.client) return;
+  const result = await S.client.api.post('/v1/vault/migrate/commit', pending);
+  if (!result.pending) await idbPut('shareMigration', null);
+}
+
+// Cofre antigo recebe parte S e DEK novas. Sem migração completa, a sessão
+// não abre; o registro/banco anteriores permitem tentar no próximo desbloqueio.
 async function upgradeVault(opened) {
   try {
     const { record, kek } = await opened.upgrade((b) => S.client.api.post('/v1/vault/register', { ...b, deadDays: DEFAULT_DEAD_DAYS }));
-    await idbPutMany({ vault: record });
+    const rotated = await vault.rotateDek(record, kek);
+    await replaceVaultBank(rotated.record, rotated.dek);
     S.kek = kek;
   } catch (e) {
     opened.forget?.();
     console.error('migração do cofre adiada', e?.message);
+    throw e;
   }
 }
 
@@ -406,6 +441,8 @@ export function syncNow() {
         }
         if (!S.unlocked) break;
         if (S.clock.now() && (await S.store.purgeExpired(S.clock.now())) > 0) scheduleRotate();
+        await notes();
+        await completeVaultMigration().catch(() => {});
         // Lista do círculo mudou (S3): anuncia o apelido aos recém-confirmados.
         if (S.client.circleRosterChanged) { S.client.circleRosterChanged = false; await announce().catch(() => {}); }
         await maybeAnnounce();
@@ -639,6 +676,7 @@ export async function clearRoom(roomId) {
 export async function deleteRoomForMe(roomId) {
   await S.client.clearRoomForMe(roomId);
   await setDraft(roomId, '');
+  await setWallpaper(roomId, null);
   const prev = S.rooms[roomId] ?? {};
   for (const k of ['photo', 'background']) if (prev[k]) forgetVisual(prev[k]);
   S.rooms[roomId] = { deleted: true, deletedAt: now(), ...(prev.left ? { left: true } : {}) };
@@ -670,20 +708,31 @@ export async function searchMessages(term, limit = 30) {
 
 // Anotações (D, "conversa comigo"): só neste aparelho, nunca vão ao servidor
 // e vencem como qualquer mensagem (passo 9).
-export async function notes() {
-  const now = S.clock?.now() ?? Date.now();
-  const all = ((await S.store.get('notes')) ?? []).filter((n) => n.expiresAt > now);
-  return all;
-}
+let notesWork = Promise.resolve();
+const changeNotes = (fn) => {
+  const store = S.store;
+  const task = notesWork.then(async () => {
+    const previous = (await store.get('notes')) ?? [];
+    const current = previous.filter((n) => n.expiresAt > now());
+    const next = fn ? fn(current) : current;
+    if (fn || current.length !== previous.length) {
+      await store.put('notes', next);
+      if (S.store === store && previous.some((n) => !next.some((v) => v.id === n.id))) scheduleRotate();
+      if (current.length !== previous.length) emit('notes');
+    }
+    return next;
+  });
+  notesWork = task.catch(() => {});
+  return task;
+};
+export const notes = () => changeNotes();
 export async function addNote(text, ttlSec) {
   const now = S.clock?.now() ?? Date.now();
-  const all = await notes();
-  all.push({ id: crypto.randomUUID(), text: text.slice(0, 4000), at: now, expiresAt: now + ttlSec * 1000 });
-  await S.store.put('notes', all);
+  if (!Number.isSafeInteger(ttlSec) || ttlSec < 43200 || ttlSec > 15 * 86400) throw new Error('Prazo inválido.');
+  await changeNotes((all) => [...all, { id: crypto.randomUUID(), text: text.slice(0, 4000), at: now, expiresAt: now + ttlSec * 1000 }]);
 }
 export async function deleteNote(id) {
-  await S.store.put('notes', (await notes()).filter((n) => n.id !== id));
-  scheduleRotate(); // o texto apagado sai do arquivo do banco
+  await changeNotes((all) => all.filter((n) => n.id !== id));
 }
 
 // Papel de parede só deste aparelho (b.17), cifrado no banco.
@@ -810,7 +859,12 @@ export async function confirmCircle(members) {
 }
 export const isCircleAdmin = async () => (await S.client.circleAdminId()) === S.client.userId;
 export const keyChanged = (userId) => S.client.keyChangedSinceVerified(userId);
-export async function setVerified(userId, on) { await S.client.setVerified(userId, on); emit('verified'); }
+export async function setVerified(userId, on, expected = verifyPayload(userId)) {
+  const client = S.client;
+  if (!client || expected !== verifyPayload(userId)) throw new Error('chave alterada durante a conferência');
+  await client.setVerified(userId, on, { curve: client.known[userId]?.curve, own: client.account.curve25519Key });
+  emit('verified');
+}
 // Avisos de segurança desta conversa (S1): troca de chave de quem está nela.
 export function roomWarnings(view) {
   const ids = new Set(view.members.filter((m) => m.active && m.userId !== S.client.userId).map((m) => m.userId));

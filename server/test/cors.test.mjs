@@ -44,6 +44,7 @@ test('resposta real tem o mesmo CORS e relógio confiável; origem estranha não
     const r = await fetch(api.base + '/v1/time', { headers: { origin } });
     assert.equal(r.status, 200);
     assert.equal(r.headers.get('access-control-allow-origin'), origin);
+    assert.match(r.headers.get('access-control-expose-headers') ?? '', /retry-after/i);
     assert.ok(Number(r.headers.get('x-mp-time')) > 1_000_000_000_000);
     const data = await r.json();
     assert.ok(Number(data.now) > 1_000_000_000_000);

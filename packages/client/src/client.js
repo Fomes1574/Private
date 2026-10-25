@@ -13,6 +13,7 @@ import { reconcile, applyEdit, EDIT_WINDOW_MS, EDIT_GRACE_MS } from '../../proto
 import { CIRCLE_ROOM_ID } from '../../protocol/src/room.js';
 import { isValidTtl, MAX_TTL } from '../../protocol/src/ttl.js';
 import { encryptMedia, decryptMedia, newMediaKey } from './media-crypto.js';
+import { serial } from './serial.js';
 
 const OTK_BATCH = 20;
 const OTK_LOW = 5;
@@ -37,6 +38,8 @@ export class MessengerClient {
     this.trusted = {};
     // S8: quem foi conferido pessoalmente (userId -> chave conferida).
     this.verified = {};
+    this.stateWork = serial();
+    this.outboxWork = serial();
   }
 
   // ---------- identidade do aparelho ----------
@@ -66,6 +69,12 @@ export class MessengerClient {
     const device = await this.createDevice();
     const r = await this.api.post('/v1/bootstrap', { setupCode, device });
     Object.assign(this, { userId: r.userId, deviceId: r.deviceId });
+    this.circleAdmin = this.userId;
+    this.circleAdminKey = this.account.curve25519Key;
+    this.trusted[CIRCLE_ROOM_ID] = { members: [this.userId], leader: this.userId, revision: 0, adminCurve: this.circleAdminKey };
+    await this.store.put('circleAdmin', this.circleAdmin);
+    await this.store.put('circleAdminKey', this.circleAdminKey);
+    await this.store.put('trusted', this.trusted);
     await this.saveDevice();
     return r;
   }
@@ -93,27 +102,42 @@ export class MessengerClient {
     this.warnings = (await this.store.get('warnings')) ?? [];
     this.verified = (await this.store.get('verified')) ?? {};
     this.circleAdmin = (await this.store.get('circleAdmin')) ?? null;
+    this.circleAdminKey = (await this.store.get('circleAdminKey')) ?? null;
   }
 
   // ---------- círculo confirmado pela administradora (S3) ----------
   // A administradora é quem criou o círculo (primeira identidade). Fica
   // fixada no aparelho na primeira vez; o servidor não consegue trocá-la.
   async circleAdminId() {
-    if (this.circleAdmin) return this.circleAdmin;
+    if (this.circleAdmin) {
+      if (!this.circleAdminKey && this.known[this.circleAdmin]?.curve) {
+        this.circleAdminKey = this.known[this.circleAdmin].curve;
+        await this.store.put('circleAdminKey', this.circleAdminKey);
+      }
+      return this.circleAdmin;
+    }
     const first = Object.entries(this.known).filter(([, k]) => Number.isSafeInteger(k.joinedSeq)).sort((a, b) => a[1].joinedSeq - b[1].joinedSeq)[0];
     if (!first || first[1].joinedSeq !== 0) return null;
     this.circleAdmin = first[0];
     await this.store.put('circleAdmin', this.circleAdmin);
+    this.circleAdminKey = first[1].curve;
+    await this.store.put('circleAdminKey', this.circleAdminKey);
     return this.circleAdmin;
   }
-  circleRoster() { return this.trusted[CIRCLE_ROOM_ID]?.members ?? null; }
+  circleRoster() {
+    if (!this.circleAdminKey || this.known[this.circleAdmin]?.curve !== this.circleAdminKey) return null;
+    return this.trusted[CIRCLE_ROOM_ID]?.members ?? null;
+  }
   // Só a administradora: confirma (assina, cifrado) quem está no círculo.
-  async confirmCircle(members) {
+  confirmCircle(members) { return this.stateWork(() => this._confirmCircle(members)); }
+  async _confirmCircle(members) {
     if ((await this.circleAdminId()) !== this.userId) throw new Error('só a administradora confirma o círculo');
     const list = [this.userId, ...new Set(members.filter((u) => u !== this.userId))];
-    this.trusted[CIRCLE_ROOM_ID] = { members: list, leader: this.userId };
+    if (list.some((u) => this.known[u]?.state !== 'active')) throw new Error('pessoa não está ativa no círculo');
+    const revision = (this.trusted[CIRCLE_ROOM_ID]?.revision ?? 0) + 1;
+    this.trusted[CIRCLE_ROOM_ID] = { members: list, leader: this.userId, revision, adminCurve: this.account.curve25519Key };
     await this.store.put('trusted', this.trusted);
-    await this.sendInner(CIRCLE_ROOM_ID, 'membership', { members: list, leader: this.userId });
+    await this._sendInner(CIRCLE_ROOM_ID, 'membership', { members: list, leader: this.userId, revision });
   }
 
   // ---------- avisos de segurança (S1) e verificação (S8) ----------
@@ -134,11 +158,19 @@ export class MessengerClient {
   // Conferido e depois trocou de chave: o envio de mídia pausa até conferir
   // de novo ou aceitar a chave nova.
   keyChangedSinceVerified(userId) { return !!this.verified[userId] && this.verified[userId] !== this.known[userId]?.curve; }
-  async setVerified(userId, on) {
+  setVerified(userId, on, expected = null) { return this.stateWork(() => this._setVerified(userId, on, expected)); }
+  async _setVerified(userId, on, expected) {
+    if (expected && (expected.curve !== this.known[userId]?.curve || expected.own !== this.account.curve25519Key)) throw new Error('chave alterada durante a conferência');
     if (on) {
       if (!this.known[userId]?.curve) throw new Error('chave desconhecida');
       this.verified[userId] = this.known[userId].curve;
     } else delete this.verified[userId];
+    if (on && userId === this.circleAdmin && this.circleAdminKey !== this.known[userId].curve) {
+      this.circleAdminKey = this.known[userId].curve;
+      delete this.trusted[CIRCLE_ROOM_ID];
+      await this.store.put('circleAdminKey', this.circleAdminKey);
+      await this.store.put('trusted', this.trusted);
+    }
     await this.store.put('verified', this.verified);
   }
 
@@ -158,7 +190,10 @@ export class MessengerClient {
   }
 
   // ---------- diretório e avisos de troca de chave ----------
-  async refreshDirectory() {
+  refreshDirectory() { return this.stateWork(() => this._refreshDirectory()); }
+  async _refreshDirectory() {
+    // Fixa a chave anterior antes de processar uma mudança do diretório.
+    await this.circleAdminId();
     const { members } = await this.api.get('/v1/directory');
     for (const m of members) {
       const prev = this.known[m.userId];
@@ -174,6 +209,7 @@ export class MessengerClient {
     const listed = new Set(members.map((m) => m.userId));
     for (const [u, k] of Object.entries(this.known)) if (!listed.has(u)) k.state = 'removed';
     await this.store.put('directory', this.known);
+    await this.circleAdminId();
     await this.persistCrypto();
     await this.saveWarnings();
     return members;
@@ -225,7 +261,8 @@ export class MessengerClient {
 
   // A líder anuncia (cifrado) quem está na conversa e quem lidera. Chamar
   // depois de criar, adicionar, remover, ceder liderança ou antes de sair.
-  async announceMembership(roomId, view = null, { leaving = false } = {}) {
+  announceMembership(...args) { return this.stateWork(() => this._announceMembership(...args)); }
+  async _announceMembership(roomId, view = null, { leaving = false } = {}) {
     view ??= await this.room(roomId);
     let members = view.members.filter((m) => m.active).sort((a, b) => a.joinSeq - b.joinSeq).map((m) => m.userId);
     let leader = view.leader;
@@ -233,7 +270,7 @@ export class MessengerClient {
     if (!members.length) return;
     this.trusted[roomId] = { members, leader };
     await this.store.put('trusted', this.trusted);
-    if (members.some((u) => u !== this.userId) || leaving) await this.sendInner(roomId, 'membership', { members: leaving ? [...members] : members, leader }, { view });
+    if (members.some((u) => u !== this.userId) || leaving) await this._sendInner(roomId, 'membership', { members: leaving ? [...members] : members, leader }, { view });
   }
 
   // Confere o que o servidor diz contra o que foi confirmado de ponta a ponta.
@@ -254,11 +291,12 @@ export class MessengerClient {
   roomEvent(roomId, ev) { return this.api.post(`/v1/rooms/${roomId}/events`, ev); }
 
   // Envia qualquer tipo de conteúdo interno a todos os membros ativos.
-  async sendInner(roomId, kind, body, { replyTo, msgKind = 'text', view = null, audience = null, ttl, mediaId, localBody = null } = {}) {
+  sendInner(...args) { return this.stateWork(() => this._sendInner(...args)); }
+  async _sendInner(roomId, kind, body, { replyTo, msgKind = 'text', view = null, audience = null, ttl, mediaId, localBody = null, queueId = null } = {}) {
     // Os dois pedidos vão juntos (menos idas e voltas em rede lenta, ex.: Tor);
     // a conferência de segurança termina antes de qualquer cifra.
     const [, room] = await Promise.all([
-      this.checkSecurityEvents(), // nunca cifrar para uma chave que já foi trocada
+      this._checkSecurityEvents(), // nunca cifrar para uma chave que já foi trocada
       view ?? this.room(roomId),
     ]);
     let to = room.members.filter((m) => m.active && m.userId !== this.userId).map((m) => m.userId);
@@ -271,8 +309,12 @@ export class MessengerClient {
     // recebe um envelope de enchimento (o servidor exige um por membro e não
     // distingue); só os confirmados recebem conteúdo.
     let decoys = [];
-    const roster = roomId === CIRCLE_ROOM_ID && !audience ? this.circleRoster() : null;
-    if (roster) {
+    if (roomId === CIRCLE_ROOM_ID && !audience) {
+      const admin = await this.circleAdminId();
+      const pinned = this.circleAdminKey === this.known[admin]?.curve;
+      // Antes da aprovação, só o próprio perfil pode ir à administradora
+      // fixada, para ela identificar o pedido. Nunca vai aos demais membros.
+      const roster = this.circleRoster() ?? (kind === 'nickname_change' && this.userId !== admin && pinned ? [admin] : []);
       decoys = to.filter((u) => !roster.includes(u));
       to = to.filter((u) => roster.includes(u));
       if (decoys.length) {
@@ -284,7 +326,7 @@ export class MessengerClient {
     if (kind !== 'membership') this.checkRecipients(roomId, room, to);
     else if (to.some((u) => !this.trusted[roomId]?.members.includes(u))) throw new Error('anúncio para quem não está confirmado: recusado');
     if (msgKind !== 'text') this.assertMediaAllowed(to);
-    const msgId = newMsgId();
+    const msgId = queueId ?? newMsgId();
     const inner = { v: INNER_VERSION, kind, msgId, room: roomId, sender: this.userId, policyRev: room.policyRev, body };
     const expect = ttl ?? (msgKind === 'media' ? room.mediaTtl : room.textTtl);
     if (isValidTtl(expect)) inner.ttl = expect;
@@ -302,44 +344,76 @@ export class MessengerClient {
     const draft = { msgId, room: roomId, sender: this.userId, kind, body: localBody ?? body, replyTo, mine: true, ...(localBody ? { consumed: true } : {}) };
     const stored = ['text', 'media', 'story', 'poll'].includes(kind);
     await this.queue(roomId, payload, stored ? draft : null);
-    return this.deliver(roomId, msgId);
+    return this._deliver(roomId, msgId);
   }
 
   // ---------- fila de envio (F10) ----------
   static OUTBOX_TTL = 15 * 86_400_000;
-  async outbox() { return (await this.store.get('outbox')) ?? []; }
+  async outbox() { return structuredClone((await this.store.get('outbox')) ?? []); }
   async queue(roomId, payload, local) {
-    const all = await this.outbox();
-    all.push({ roomId, payload, local, at: Date.now() });
-    await this.store.put('outbox', all);
+    return this.outboxWork(async () => {
+      const all = await this.outbox();
+      const existing = all.find((o) => o.payload.msgId === payload.msgId);
+      await this.store.put('outbox', [...all.filter((o) => o !== existing), { ...existing, roomId, payload, local, at: existing?.at ?? Date.now(), state: 'ready' }]);
+    });
   }
-  async dequeue(msgId) { await this.store.put('outbox', (await this.outbox()).filter((o) => o.payload.msgId !== msgId)); }
-  async deliver(roomId, msgId) {
+  async updateQueued(msgId, patch) {
+    return this.outboxWork(async () => {
+      const all = await this.outbox();
+      await this.store.put('outbox', all.map((o) => o.payload.msgId === msgId ? { ...o, ...patch } : o));
+    });
+  }
+  dequeue(msgId) { return this.outboxWork(async () => { await this.store.put('outbox', (await this.outbox()).filter((o) => o.payload.msgId !== msgId)); }); }
+  deliver(...args) { return this.stateWork(() => this._deliver(...args)); }
+  async _deliver(roomId, msgId) {
     const item = (await this.outbox()).find((o) => o.payload.msgId === msgId);
-    if (!item) throw new Error('envio não encontrado');
+    if (!item) {
+      // A sincronização pode ter concluído este envio entre dois itens do
+      // lote. A confirmação local torna deliver repetível também nesse caso.
+      const accepted = await this.store.getMessage(msgId);
+      if (accepted?.room === roomId && accepted.sender === this.userId) return structuredClone(accepted);
+      throw new Error('envio não encontrado');
+    }
     let r;
     try {
+      if (item.state === 'staging') throw Object.assign(new Error('preparação interrompida'), { status: 400, code: 'incomplete_upload' });
+      if (item.state === 'prepared') return await this.uploadPrepared(item);
       // mediaId liga a mensagem à mídia (F04/F16): apagar para todos revoga no
       // servidor, e o documento entra na cota no mesmo envio.
       r = await this.api.post(`/v1/rooms/${roomId}/messages`, item.payload);
     } catch (e) {
-      if (e.status) { await this.dequeue(msgId); throw e; } // recusado: não adianta repetir
+      if (e.code === 'pending' || e.code === 'send_failed') throw e;
+      const temporary = !e.status && !['key_unverified', 'incomplete_upload'].includes(e.code) || [401, 408, 425, 429, 500, 502, 503, 504].includes(e.status);
+      const attempts = (item.attempts ?? 0) + 1;
+      if (!temporary) {
+        await this.updateQueued(msgId, { state: 'failed', error: e.code || 'send_failed', cleanupPending: !!item.prepared });
+        try { await this.cleanupUpload(item); await this.updateQueued(msgId, { cleanupPending: false }); } catch { /* laço de sync repete */ }
+        if (e.code !== 'key_unverified') e.code = 'send_failed';
+        e.msgId = msgId;
+        throw e;
+      }
+      await this.updateQueued(msgId, { attempts, nextTryAt: Date.now() + Math.max(e.retryAfterMs ?? 0, Math.min(60_000, 1000 * 2 ** Math.min(attempts - 1, 6))) });
       const p = new Error('sem conexão: a mensagem fica na fila e vai sozinha quando a rede voltar');
       p.code = 'pending'; p.msgId = msgId;
       throw p;
     }
     const local = item.local ? { ...item.local, acceptedAt: r.acceptedAt, expiresAt: r.expiresAt } : { msgId, room: roomId, acceptedAt: r.acceptedAt, expiresAt: r.expiresAt };
     if (item.local) await this.store.putMessage({ ...local, text: local.body?.text });
+    await this.eraseUpload(item);
     await this.dequeue(msgId);
     if (r.quota) local.quota = r.quota;
     return local;
   }
   // Tenta de novo o que ficou na fila. Devolve o que foi e o que falhou.
-  async retryOutbox() {
+  retryOutbox(options) { return this.stateWork(() => this._retryOutbox(options)); }
+  async _retryOutbox({ force = false } = {}) {
     const out = { sent: [], failed: [] };
     for (const item of await this.outbox()) {
-      if (Date.now() - item.at > MessengerClient.OUTBOX_TTL) { await this.dequeue(item.payload.msgId); out.failed.push(item); continue; }
-      try { out.sent.push(await this.deliver(item.roomId, item.payload.msgId)); }
+      if (item.cleanupPending) { try { await this.cleanupUpload(item); await this.updateQueued(item.payload.msgId, { cleanupPending: false }); } catch {} }
+      if (item.state === 'cancelled') { try { await this._cancelQueued(item.payload.msgId); } catch {} continue; }
+      if (Date.now() - item.at > MessengerClient.OUTBOX_TTL) { await this._cancelQueued(item.payload.msgId); out.failed.push(item); continue; }
+      if (item.state === 'failed' || (!force && item.nextTryAt > Date.now())) continue;
+      try { out.sent.push(await this._deliver(item.roomId, item.payload.msgId)); }
       catch (e) { if (e.code === 'pending') break; out.failed.push(item); this.warn({ kind: 'send_failed', roomId: item.roomId, at: Date.now() }); }
     }
     return out;
@@ -438,38 +512,99 @@ export class MessengerClient {
     await this.destroy(ids);
   }
   async clearRoomForMe(roomId) {
+    for (const o of await this.outbox()) if (o.roomId === roomId) await this.cancelQueued(o.payload.msgId);
     const ids = (await this.store.roomMessages(roomId)).map((m) => m.msgId);
     await this.deleteManyForMe(ids);
     return ids.length;
   }
 
   // ---------- mídia ----------
-  async sendMedia(roomId, bytes, { mode = 'media', mime = 'application/octet-stream', caption, duration, name, round, hd } = {}) {
-    // Confere antes de subir qualquer byte (nada fica órfão no servidor).
-    const view = await this.room(roomId);
-    this.assertMediaAllowed(view.members.filter((m) => m.active && m.userId !== this.userId).map((m) => m.userId));
+  // Pré-upload durável: só ciphertext e a CEK dentro do banco cifrado.
+  // Um lote inteiro é preparado antes de iniciar qualquer pedido de rede.
+  prepareMedia(roomId, bytes, opts = {}) { return this.stateWork(() => this._prepareMedia(roomId, bytes, opts)); }
+  prepareMediaBatch(roomId, items) { return this.stateWork(async () => {
+    if (!Array.isArray(items) || items.length < 1 || items.length > 5) throw new Error('Selecione de 1 a 5 fotos.');
+    const ids = [];
+    try {
+      for (const item of items) ids.push(await this._prepareMedia(roomId, item.bytes, item.opts));
+      return ids;
+    } catch (e) { e.preparedIds = ids; throw e; }
+  }); }
+  async _prepareMedia(roomId, bytes, { mode = 'media', mime = 'application/octet-stream', caption, duration, name, round, hd } = {}) {
+    const msgId = newMsgId(), mediaId = newMsgId();
     const key = await newMediaKey();
-    // S7: foto, vídeo e áudio sobem em degraus de tamanho (documento não).
-    const blob = await encryptMedia(key, bytes, { pad: mode !== 'doc' });
-    const up = await this.api.post(`/v1/rooms/${roomId}/media?mode=${mode}`, blob);
-    // A chave vai só dentro do envelope Olm de cada destinatário.
-    const body = { mediaId: up.mediaId, key: b64(key), mime, mode, size: bytes.byteLength, ...(caption ? { caption } : {}), ...(duration ? { duration: Math.round(duration) } : {}), ...(name ? { name } : {}), ...(round ? { round: true } : {}), ...(hd ? { hd: true } : {}) };
-    key.fill(0);
-    // Quem enviou não reabre ver uma vez (§15.6): a chave não fica nem no
-    // aparelho dele, nem na fila de envio.
-    const localBody = mode === 'once' ? { ...body, key: null } : null;
-    let msg;
-    try { msg = await this.sendInner(roomId, 'media', body, { msgKind: 'media', mediaId: up.mediaId, localBody }); }
-    catch (e) {
-      // F11: recusado de vez → a mídia que subiu é revogada (não fica órfã).
-      // Sem rede → fica na fila e a mídia continua esperando o reenvio.
-      if (e.code !== 'pending') await this.api.post(`/v1/media/${up.mediaId}/revoke`).catch(() => null);
-      throw e;
+    let blob;
+    try {
+      blob = await encryptMedia(key, bytes, { pad: mode !== 'doc' });
+      const body = { mediaId, key: b64(key), mime, mode, size: bytes.byteLength, ...(caption ? { caption } : {}), ...(duration ? { duration: Math.round(duration) } : {}), ...(name ? { name } : {}), ...(round ? { round: true } : {}), ...(hd ? { hd: true } : {}) };
+      const chunks = Math.ceil(blob.length / (192 * 1024));
+      await this.queue(roomId, { msgId, mediaId }, { msgId, room: roomId, sender: this.userId, kind: 'media', body: mode === 'once' ? { ...body, key: null } : body, mine: true });
+      await this.updateQueued(msgId, { state: 'staging', prepared: { body, chunks, size: blob.length } });
+      for (let i = 0; i < chunks; i++) await this.store.put(`upload:${msgId}:${i}`, b64(blob.subarray(i * 192 * 1024, (i + 1) * 192 * 1024)));
+      await this.updateQueued(msgId, { state: 'prepared' });
+      return msgId;
+    } finally { key.fill(0); blob?.fill(0); }
+  }
+  async sendMedia(roomId, bytes, opts) {
+    const id = await this.prepareMedia(roomId, bytes, opts);
+    return this.deliver(roomId, id);
+  }
+  async uploadPrepared(item) {
+    const { body, chunks, size } = item.prepared;
+    // API antiga ignora uploadId e criaria um objeto novo em cada retry.
+    // Recusa antes de transmitir bytes em vez de depender desse comportamento.
+    let capabilities;
+    try { capabilities = await this.api.get('/v1/capabilities'); }
+    catch (e) { if (e.status !== 404) throw e; }
+    if (capabilities?.mediaUploadIds !== 1) throw Object.assign(new Error('A API precisa ser atualizada antes de enviar mídias nesta versão.'), { status: 409, code: 'api_update_required' });
+    await this._checkSecurityEvents();
+    const view = await this.room(item.roomId);
+    const to = view.members.filter((m) => m.active && m.userId !== this.userId).map((m) => m.userId);
+    this.checkRecipients(item.roomId, view, to);
+    this.assertMediaAllowed(to);
+    const blob = new Uint8Array(size);
+    try {
+      for (let i = 0; i < chunks; i++) {
+        const saved = await this.store.get(`upload:${item.payload.msgId}:${i}`);
+        if (!saved) throw Object.assign(new Error('preparação incompleta: remova e selecione o arquivo novamente'), { status: 400, code: 'incomplete_upload' });
+        const part = unb64(saved);
+        blob.set(part, i * 192 * 1024); part.fill(0);
+      }
+      await this.api.post(`/v1/rooms/${item.roomId}/media?mode=${body.mode}&uploadId=${body.mediaId}`, blob);
+    } finally { blob.fill(0); }
+    return this._sendInner(item.roomId, 'media', body, { msgKind: 'media', mediaId: body.mediaId, localBody: body.mode === 'once' ? { ...body, key: null } : null, queueId: item.payload.msgId });
+  }
+  async eraseUpload(item) {
+    for (let i = 0; i < (item.prepared?.chunks ?? 0); i++) await this.store.put(`upload:${item.payload.msgId}:${i}`, null);
+    if (item.prepared) await this.onDestroy([]);
+  }
+  async cleanupUpload(item) {
+    if (!item.prepared) return;
+    try { await this.api.post(`/v1/media/${item.prepared.body.mediaId}/revoke`); }
+    catch (e) { if (![404, 410].includes(e.status)) throw e; }
+  }
+  retryQueued(msgId) { return this.stateWork(async () => {
+    const item = (await this.outbox()).find((o) => o.payload.msgId === msgId);
+    if (!item || ['staging', 'cancelled'].includes(item.state)) throw new Error('envio incompleto ou cancelado: remova e selecione novamente');
+    if (item.prepared) {
+      await this.cleanupUpload(item);
+      await this.updateQueued(msgId, { payload: { msgId, mediaId: item.prepared.body.mediaId }, cleanupPending: false });
     }
-    if (mode === 'once') { msg.body = localBody; await this.onDestroy([]); }
-    // Servidor antigo (sem F16): publica a cota pela rota separada.
-    if (mode === 'doc' && !msg.quota) msg.quota = await this.api.post('/v1/docs/publish', { mediaId: up.mediaId, msgId: msg.msgId });
-    return msg;
+    await this.updateQueued(msgId, { state: item.prepared ? 'prepared' : 'ready', nextTryAt: 0 });
+    return this._deliver(item.roomId, msgId);
+  }); }
+  cancelQueued(msgId) { return this.stateWork(() => this._cancelQueued(msgId)); }
+  async _cancelQueued(msgId) {
+    const item = (await this.outbox()).find((o) => o.payload.msgId === msgId);
+    if (!item) return;
+    // Mantém somente a intenção de limpeza, sem CEK nem conteúdo local.
+    await this.updateQueued(msgId, { state: 'cancelled', local: null, ...(item.prepared ? { prepared: { body: { mediaId: item.prepared.body.mediaId }, chunks: item.prepared.chunks } } : {}) });
+    await this.eraseUpload(item);
+    if (item.prepared) {
+      const cleanup = { body: { mediaId: item.prepared.body.mediaId }, chunks: 0 };
+      await this.updateQueued(msgId, { prepared: cleanup });
+    }
+    try { await this.cleanupUpload(item); await this.dequeue(msgId); } catch { /* sync repete */ }
   }
 
   // Story (§22): foto ou vídeo para quem a pessoa escolher, com prazo
@@ -480,7 +615,7 @@ export class MessengerClient {
     const circle = view.members.filter((m) => m.active && m.userId !== this.userId).map((m) => m.userId);
     if (!audience?.length || audience.some((u) => !circle.includes(u))) throw new Error('audiência inválida');
     const roster = this.circleRoster();
-    if (roster && audience.some((u) => !roster.includes(u))) throw new Error('audiência inválida: alguém não foi confirmado pela administradora');
+    if (!roster || !roster.includes(this.userId) || audience.some((u) => !roster.includes(u))) throw new Error('audiência inválida: alguém não foi confirmado pela administradora');
     this.assertMediaAllowed(audience);
     const key = await newMediaKey();
     const blob = await encryptMedia(key, bytes, { pad: true });
@@ -558,25 +693,27 @@ export class MessengerClient {
   // Eventos de segurança do círculo (troca de aparelho, recuperação, entrada,
   // remoção): qualquer um deles faz reler o diretório antes de cifrar de novo,
   // para não mandar nada para uma chave que não vale mais.
-  async checkSecurityEvents() {
+  checkSecurityEvents() { return this.stateWork(() => this._checkSecurityEvents()); }
+  async _checkSecurityEvents() {
     const after = (await this.store.get('secSeq')) ?? 0;
     const { events } = await this.api.get(`/v1/security-events?after=${after}`);
     if (!events.length) return [];
     // Linha do tempo de segurança (S1/S3): entrou, saiu, trocou de aparelho.
     // (aparelho novo começa do zero: o histórico antigo não vira aviso)
     if (after > 0) for (const e of events) if (['joined', 'removed', 'device_changed', 'recovered'].includes(e.kind) && e.userId) this.warn({ kind: `circle_${e.kind}`, userId: e.userId, at: e.at });
-    if (events.some((e) => ['device_changed', 'recovered', 'joined', 'removed', 'frozen', 'unfrozen'].includes(e.kind))) await this.refreshDirectory();
+    if (events.some((e) => ['device_changed', 'recovered', 'joined', 'removed', 'frozen', 'unfrozen'].includes(e.kind))) await this._refreshDirectory();
     else await this.saveWarnings();
     await this.store.put('secSeq', events.at(-1).seq);
     return events;
   }
 
-  async sync() {
+  sync() { return this.stateWork(() => this._sync()); }
+  async _sync() {
     // Juntos: avisos de segurança e caixa de entrada. Os avisos são
     // aplicados (diretório relido) antes de decifrar qualquer envelope.
-    const [security, res] = await Promise.all([this.checkSecurityEvents(), this.api.get('/v1/sync')]);
+    const [security, res] = await Promise.all([this._checkSecurityEvents(), this.api.get('/v1/sync')]);
     // F10: com a rede de volta, o que ficou na fila vai (mesmo id, sem duplicar).
-    const retried = await this.retryOutbox().catch(() => ({ sent: [], failed: [] }));
+    const retried = await this._retryOutbox().catch(() => ({ sent: [], failed: [] }));
     const acks = { envelopes: [], tombstones: [] };
     // 1) tombstones primeiro: nada apagado chega a aparecer (§12).
     for (const t of res.tombstones) {
@@ -588,13 +725,18 @@ export class MessengerClient {
     for (let e of res.envelopes) {
       acks.envelopes.push([e.room, e.msgId]);
       if (this.tombs.has(e.msgId)) continue;
-      if (!this.known[e.sender]) await this.refreshDirectory();
+      if (!this.known[e.sender]) await this._refreshDirectory();
       try {
         const { type, body } = parseOuter(e.ct);
         const inner = decodeInner(await this.decryptFrom(e.sender, type, body));
         // Anti-falsificação: o que está dentro tem que bater com o que o
         // servidor autenticou (remetente, conversa e id).
         if (inner.sender !== e.sender || inner.room !== e.room || inner.msgId !== e.msgId) throw new Error('remetente ou conversa não conferem');
+        if (inner.room === CIRCLE_ROOM_ID && ['nickname_change', 'story'].includes(inner.kind)) {
+          const admin = await this.circleAdminId(), roster = this.circleRoster();
+          const intake = inner.kind === 'nickname_change' && this.userId === admin;
+          if (!intake && (!roster || !roster.includes(inner.sender) || !roster.includes(this.userId))) throw new Error('remetente do círculo não confirmado');
+        }
         // O prazo nunca passa do que quem enviou pediu, nem de 15 dias a
         // partir de agora, mesmo que o servidor diga outra coisa.
         const now = this.api.clock.now() ?? e.acceptedAt;
@@ -670,9 +812,12 @@ export class MessengerClient {
       // Lista do círculo: só da administradora fixada (S3).
       let admin = await this.circleAdminId();
       // Diretório antigo (sem ordem de entrada): relê antes de decidir.
-      if (!admin) { await this.refreshDirectory(); admin = await this.circleAdminId(); }
-      if (!admin || inner.sender !== admin || leader !== admin) { this.warn({ kind: 'membership_rejected', roomId: inner.room, from: inner.sender, at: this.api.clock.now() }); return; }
-      this.trusted[CIRCLE_ROOM_ID] = { members, leader };
+      if (!admin) { await this._refreshDirectory(); admin = await this.circleAdminId(); }
+      const current = this.trusted[CIRCLE_ROOM_ID];
+      const revision = inner.body.revision ?? 0;
+      if (!admin || inner.sender !== admin || leader !== admin || this.known[admin]?.curve !== this.circleAdminKey
+        || (current?.revision > 0 && revision <= current.revision)) { this.warn({ kind: 'membership_rejected', roomId: inner.room, from: inner.sender, at: this.api.clock.now() }); return; }
+      this.trusted[CIRCLE_ROOM_ID] = { members, leader, revision, adminCurve: this.circleAdminKey };
       this.circleRosterChanged = true;
       await this.store.put('trusted', this.trusted);
       return;

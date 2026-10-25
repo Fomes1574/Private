@@ -4,16 +4,16 @@ import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { startApi, SETUP } from '../../server/test/helpers.mjs';
-import { browser, virtualAuthenticator, watchErrors } from '../../e2e/helpers.mjs';
+import { browser, virtualAuthenticator, watchErrors, waitForPage } from '../../e2e/helpers.mjs';
 
-const APP_PORT = 8792;
+const APP_PORT = Number(process.env.MP_APP_TEST_PORT || 8792);
 const APP = `http://localhost:${APP_PORT}`;
 const PIN = '284917';
 let api, appProc, ana, bia;
 
 before(async () => {
-  api = await startApi(8793, { appOrigin: APP });
-  execFileSync(process.execPath, ['build.mjs'], { cwd: new URL('..', import.meta.url).pathname, env: { ...process.env, MP_MODE: 'plain', MP_API: api.base, MP_TEST_HOOKS: '1' }, stdio: 'ignore' });
+  api = await startApi(Number(process.env.MP_API_TEST_PORT || 8793), { appOrigin: APP });
+  execFileSync(process.execPath, ['build.mjs'], { cwd: new URL('..', import.meta.url).pathname, env: { ...process.env, MP_MODE: 'plain', MP_API: api.base, MP_TEST_HOOKS: '1' }, stdio: 'inherit' });
   appProc = spawn(new URL('../node_modules/.bin/wrangler', import.meta.url).pathname, ['dev', '--local', '--port', String(APP_PORT), '--ip', '127.0.0.1'],
     { cwd: new URL('..', import.meta.url).pathname, stdio: 'ignore', detached: true, env: { ...process.env, WRANGLER_SEND_METRICS: 'false' } });
   for (let i = 0; i < 60; i++) { try { if ((await fetch(APP + '/')).ok) break; } catch {} await new Promise((r) => setTimeout(r, 500)); }
@@ -68,8 +68,13 @@ test('Bia entra pelo convite, acha Ana pelo apelido e manda mensagem', async () 
   await bia.page.fill('#token', invite);
   await bia.page.click('text=Entrar');
   await enterNickname(bia, 'Bia');
+  // Aprovação explícita: perfis ficam fechados até a administradora confirmar.
+  await ana.page.click('[aria-label=Ajustes]');
+  await ana.page.locator('.check input[type=checkbox]').check();
+  await ana.page.getByRole('button', { name: 'Confirmar selecionadas', exact: true }).click();
+  await ana.page.click('[aria-label=Voltar]');
+  await bia.page.evaluate(() => globalThis.__mpTest.syncNow());
   // O apelido da Ana chega cifrado pela conversa do círculo.
-  await bia.page.waitForFunction(async () => true);
   for (let i = 0; i < 20; i++) {
     await bia.page.fill('#search', 'an');
     if (await bia.page.$('.results button')) break;
@@ -129,9 +134,10 @@ test('foto de ver uma vez: tocar abre, soltar mantém, fechar consome uma vez s�
   await maxMode(ana, false, 'Bia');
   const chooser = ana.page.waitForEvent('filechooser');
   await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
-  await ana.page.click('.sheet >> text=Galeria: foto de ver uma vez');
+  await ana.page.click('.sheet button:text-is("▧ Galeria")');
   await (await chooser).setFiles(new URL('../../poc/01-vodozemac-wasm/web/icon-512.png', import.meta.url).pathname);
-  await ana.page.click('.editor >> text=Usar foto');
+  await ana.page.click('.batch .once-toggle');
+  await ana.page.click('.batch .send-batch');
   await ana.page.waitForSelector('text=Foto de ver uma vez (enviada)', { timeout: 30000 });
   assert.equal(await ana.page.$('.once-open'), null, 'quem enviou não tem botão para reabrir');
 
@@ -145,6 +151,42 @@ test('foto de ver uma vez: tocar abre, soltar mantém, fechar consome uma vez s�
   await bia.page.click('.viewer [aria-label=Fechar]');
   await bia.page.waitForSelector('.viewer', { state: 'detached' });
   await bia.page.waitForSelector('text=Foto de ver uma vez (abertura encerrada)', { timeout: 15000 });
+});
+
+test('lote real de cinco fotos: três únicas, falha no quarto upload e retomada sem duplicar', async () => {
+  // O id da conversa vem do estado real, sem depender do formato da rota.
+  const before = await bia.page.evaluate(async () => (await globalThis.__mpTest.S.client.store.roomMessages((await globalThis.__mpTest.listRooms()).find((v) => v.kind === 'direct').roomId)).map((m) => m.msgId));
+  let uploads = 0, failedId = null;
+  const errorsStart = ana.errors.length;
+  await ana.page.route('**/v1/rooms/*/media?**', (r) => {
+    const id = new URL(r.request().url()).searchParams.get('uploadId');
+    if (++uploads === 4) failedId = id;
+    if (id === failedId) return r.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"temporarily_unavailable"}', headers: { 'access-control-allow-origin': APP } });
+    return r.continue();
+  });
+  const chooser = ana.page.waitForEvent('filechooser');
+  await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
+  await ana.page.click('.sheet button:text-is("▧ Galeria")');
+  const buffer = readFileSync(new URL('../../poc/01-vodozemac-wasm/web/icon-180.png', import.meta.url));
+  await (await chooser).setFiles(Array.from({ length: 5 }, (_, i) => ({ name: `foto-${i}.png`, mimeType: 'image/png', buffer })));
+  for (const i of [1, 3, 4]) { await ana.page.locator('.batch .thumb').nth(i).click(); await ana.page.click('.batch .once-toggle'); }
+  await ana.page.click('.batch .send-batch');
+  await waitForPage(ana.page, async () => { const q = await globalThis.__mpTest.S.client.outbox(); return document.querySelector('.progress')?.hidden && q.length === 1 && q[0].state === 'prepared'; });
+  assert.ok(failedId, JSON.stringify({ uploads, state: await ana.page.evaluate(async () => ({ toast: document.querySelector('#toast')?.textContent, outbox: (await globalThis.__mpTest.S.client.outbox()).map((o) => ({ id: o.payload.msgId, state: o.state, error: o.error })), progress: document.querySelector('.progress')?.hidden })) }));
+  const expected = ana.errors.slice(errorsStart);
+  assert.deepEqual(expected, ['Failed to load resource: the server responded with a status of 503 (Service Unavailable)'], 'somente o erro de rede injetado');
+  ana.errors.splice(errorsStart, expected.length);
+  await ana.page.unroute('**/v1/rooms/*/media?**');
+  await ana.page.evaluate(() => globalThis.__mpTest.S.client.retryOutbox({ force: true }));
+  await bia.page.evaluate(() => globalThis.__mpTest.syncNow());
+  const got = await bia.page.evaluate(async (before) => {
+    const s = globalThis.__mpTest, id = (await s.listRooms()).find((v) => v.kind === 'direct').roomId;
+    return (await s.S.client.store.roomMessages(id)).filter((m) => !before.includes(m.msgId));
+  }, before);
+  assert.equal(got.length, 5); assert.equal(new Set(got.map((m) => m.msgId)).size, 5);
+  assert.equal(got.filter((m) => m.body.mode === 'once').length, 3);
+  assert.equal(got.filter((m) => m.body.mode === 'media').length, 2);
+  for (const p of [ana, bia]) await p.page.evaluate(async (ids) => { await globalThis.__mpTest.S.client.deleteManyForMe(ids); await globalThis.__mpTest.syncNow(); }, got.map((m) => m.msgId));
 });
 
 test('áudio: gravar, enviar cifrado e tocar do outro lado', async () => {
@@ -187,8 +229,9 @@ test('vídeo: recodificado no aparelho, enviado cifrado, abre do outro lado; ver
   for (const once of [false, true]) {
     const chooser = ana.page.waitForEvent('filechooser');
     await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
-    await ana.page.click(once ? '.sheet >> text=Galeria: vídeo de ver uma vez' : '.sheet >> text=Galeria: vídeo (até 5 min)');
+    await ana.page.click('.sheet button:text-is("▧ Galeria")');
     await (await chooser).setFiles({ name: 'praia.mp4', mimeType: 'video/mp4', buffer: video });
+    await ana.page.click(once ? '.sheet button:text-is("① Ver uma vez")' : '.sheet button:text-is("Enviar normalmente")');
     await ana.page.waitForSelector(once ? 'text=Vídeo de ver uma vez (enviado)' : '.msg.mine >> text=/Vídeo · 0:02/', { timeout: 60000 })
       .catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} | aviso: ${await status(ana)}`); });
   }
@@ -221,7 +264,7 @@ test('documento de texto: enviado cifrado, aberto como texto puro (HTML não vir
   const text = 'lista:\n- pão\n<img src=x onerror="document.title=\'xss\'"><script>document.title=\'xss\'</script>\nção ✓';
   const chooser = ana.page.waitForEvent('filechooser');
   await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
-  await ana.page.click('text=Documento: texto ou PDF (até 20 MB)');
+  await ana.page.click('.sheet button:text-is("▤ Documento")');
   await (await chooser).setFiles({ name: 'notas/../secreto.txt', mimeType: 'text/plain', buffer: Buffer.from(text) });
   await ana.page.waitForSelector('.msg.mine >> text=/Documento · notas..secreto.txt/', { timeout: 30000 })
     .catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} | aviso: ${await status(ana)}`); });
@@ -236,7 +279,7 @@ test('documento de texto: enviado cifrado, aberto como texto puro (HTML não vir
   // Binário é recusado antes de sair do aparelho.
   const c2 = ana.page.waitForEvent('filechooser');
   await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
-  await ana.page.click('text=Documento: texto ou PDF (até 20 MB)');
+  await ana.page.click('.sheet button:text-is("▤ Documento")');
   await (await c2).setFiles({ name: 'x.txt', mimeType: 'text/plain', buffer: Buffer.from([0xff, 0xfe, 0, 1, 2]) });
   await ana.page.waitForFunction(() => /Não enviou: só texto \(UTF-8\) ou PDF/.test(document.querySelector('#toast').textContent));
 });
@@ -270,7 +313,7 @@ test('PDF: aberto dentro do app, só desenhado; JavaScript, ação automática e
   bia.ctx.on('page', (p) => popups.push(p.url()));
   const chooser = ana.page.waitForEvent('filechooser');
   await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
-  await ana.page.click('text=Documento: texto ou PDF (até 20 MB)');
+  await ana.page.click('.sheet button:text-is("▤ Documento")');
   await (await chooser).setFiles({ name: 'contrato.pdf', mimeType: 'application/pdf', buffer: hostilePdf() });
   await bia.page.waitForSelector('.msg:not(.mine) >> text=/Documento · contrato.pdf · abrir/', { timeout: 40000 });
   await bia.page.click('.msg:not(.mine) >> text=/Documento · contrato.pdf/');
@@ -298,7 +341,7 @@ test('PDF: aberto dentro do app, só desenhado; JavaScript, ação automática e
   // "PDF" que não é PDF (nome .pdf, conteúdo de .docx/zip) é recusado no envio.
   const c2 = ana.page.waitForEvent('filechooser');
   await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
-  await ana.page.click('text=Documento: texto ou PDF (até 20 MB)');
+  await ana.page.click('.sheet button:text-is("▤ Documento")');
   await (await c2).setFiles({ name: 'falso.pdf', mimeType: 'application/pdf', buffer: Buffer.from([0x50, 0x4b, 3, 4, 0, 0, 0xff, 0xfe]) });
   await ana.page.waitForFunction(() => /Não enviou: só texto \(UTF-8\) ou PDF/.test(document.querySelector('#toast').textContent));
 });
@@ -316,7 +359,7 @@ test('APK: seletor retorna só token e só lê a foto depois de desbloquear', as
     }}};
   }, encoded);
   await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
-  await ana.page.click('.sheet >> text=Galeria: foto', { exact: true });
+  await ana.page.click('.sheet button:text-is("▧ Galeria")', { exact: true });
   await ana.page.waitForSelector('#secret');
   assert.deepEqual(await ana.page.evaluate(()=>pickerCalls),['pick']);
   await ana.page.fill('#secret',PIN);await ana.page.click('form button');
@@ -328,6 +371,29 @@ test('APK: seletor retorna só token e só lê a foto depois de desbloquear', as
   assert.ok(calls.indexOf('authorize')<calls.indexOf('describe'));assert.ok(calls.includes('read'));
   await ana.page.click('.editor >> text=Cancelar');
   await ana.page.evaluate(()=>{delete window.Capacitor;delete window.pickerCalls;});
+});
+
+test('R12: galeria nativa retoma papel de parede individual só no aparelho', async () => {
+  const encoded = readFileSync(new URL('../../poc/01-vodozemac-wasm/web/icon-180.png', import.meta.url)).toString('base64');
+  await ana.page.evaluate((encoded) => {
+    window.Capacitor = { isNativePlatform: () => true, Plugins: { BiometricSecret: {}, AttachmentPicker: {
+      pick: async () => ({ token: 'wallpaper-token' }), authorize: async () => {},
+      describe: async () => ({ name: 'fundo.png', mime: 'image/png', size: atob(encoded).length }),
+      read: async () => ({ data: encoded }), clear: async () => {},
+    } } };
+  }, encoded);
+  let sharedWrites = 0;
+  await ana.page.route('**/v1/visual/group/**', (r) => { sharedWrites++; return r.abort(); });
+  await ana.page.click('[aria-label="Menu da conversa"]');
+  await ana.page.click('.sheet >> text=Papel de parede (só neste aparelho)');
+  await ana.page.click('.sheet button:text-is("Galeria")');
+  await ana.page.waitForSelector('#secret');
+  await ana.page.fill('#secret', PIN); await ana.page.click('form button');
+  await ana.page.click('text=Continuar com o anexo');
+  await waitForPage(ana.page, async () => Object.keys((await globalThis.__mpTest.S.store.get('wallpapers')) ?? {}).length === 1);
+  assert.equal(sharedWrites, 0);
+  await ana.page.unroute('**/v1/visual/group/**');
+  await ana.page.evaluate(() => { delete window.Capacitor; });
 });
 
 test('rotação real do SQLite não perde escrita entre rebuild e troca', async () => {
@@ -533,8 +599,8 @@ test('como no WhatsApp: prévia e não lidas na lista, busca por trecho, formata
 test('enquete no grupo (voto cifrado) e anotações só neste aparelho', async () => {
   for (const p of [ana, bia]) await p.page.click('[aria-label=Voltar]');
   await ana.page.click('.row-btn:has(.title:has-text("Família"))');
-  await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
-  await ana.page.click('.sheet >> text=Enquete');
+  await ana.page.click('[aria-label="Menu da conversa"]');
+  await ana.page.click('.sheet >> text=Criar enquete');
   await ana.page.fill('#poll-q', 'Pizza ou sushi?');
   const opts = await ana.page.$$('.poll-opt');
   await opts[0].fill('pizza'); await opts[1].fill('sushi');
@@ -563,9 +629,9 @@ test('legenda vai cifrada com a foto; recado aparece para o círculo', async () 
   await ana.page.fill('#composer', 'pôr do sol 🌅');
   const chooser = ana.page.waitForEvent('filechooser');
   await ana.page.click('[aria-label="Anexar foto ou vídeo"]');
-  await ana.page.click('.sheet button:text-is("Galeria: foto")');
+  await ana.page.click('.sheet button:text-is("▧ Galeria")');
   await (await chooser).setFiles(new URL('../../poc/01-vodozemac-wasm/web/icon-180.png', import.meta.url).pathname);
-  await ana.page.click('.editor >> text=Usar foto');
+  await ana.page.click('.batch .send-batch');
   await ana.page.waitForSelector('.msg.mine .caption >> text=pôr do sol 🌅', { timeout: 30000 });
   assert.equal(await ana.page.inputValue('#composer'), '', 'texto virou legenda');
   await bia.page.waitForSelector('.msg:not(.mine) .caption >> text=pôr do sol 🌅', { timeout: 40000 });
@@ -627,15 +693,17 @@ test('editor de foto: girar, desenhar e escrever no aparelho; cancelar não envi
   const send = async (p) => {
     const chooser = p.page.waitForEvent('filechooser');
     await p.page.click('[aria-label="Anexar foto ou vídeo"]');
-    await p.page.click('.sheet button:text-is("Galeria: foto")');
+    await p.page.click('.sheet button:text-is("▧ Galeria")');
     await (await chooser).setFiles({ name: 'paisagem.png', mimeType: 'image/png', buffer: bmp(300, 200) });
+    await p.page.click('.batch button:text-is("Editar")');
     await p.page.waitForSelector('.editor canvas');
   };
   const before = await ana.page.$$eval('.msg.mine', (l) => l.length);
   const biaPhotos = () => bia.page.$$eval('.msg:not(.mine) .open', (l) => l.filter((b) => /Foto · tocar/.test(b.textContent)).length);
   const biaBefore = await biaPhotos();
   await send(ana);
-  await ana.page.click('.editor >> text=Cancelar');
+  await ana.page.click('.editor:not(.batch) >> text=Cancelar');
+  await ana.page.click('.batch >> text=Cancelar');
   await ana.page.waitForSelector('.editor', { state: 'detached' });
   await ana.page.waitForTimeout(500);
   assert.equal(await ana.page.$$eval('.msg.mine', (l) => l.length), before, 'cancelar não envia');
@@ -649,7 +717,8 @@ test('editor de foto: girar, desenhar e escrever no aparelho; cancelar não envi
   await ana.page.click('.editor >> text=Escrever');
   await ana.page.fill('#editor-text', 'oi!');
   await ana.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  await ana.page.click('.editor >> text=Usar foto');
+  await ana.page.click('.editor:not(.batch) >> text=Usar foto');
+  await ana.page.click('.batch .send-batch');
   await ana.page.waitForFunction((n) => document.querySelectorAll('.msg.mine').length > n, before, { timeout: 30000 });
 
   await bia.page.waitForFunction((n) => [...document.querySelectorAll('.msg:not(.mine) .open')].filter((b) => /Foto · tocar/.test(b.textContent)).length > n, biaBefore, { timeout: 40000 });
@@ -665,33 +734,35 @@ test('câmera do app (modo máximo, padrão): foto e vídeo sem galeria nem arqu
   bia.page.on('filechooser', () => { picked++; });
   const attachSheet = async () => { await bia.page.click('[aria-label="Anexar foto ou vídeo"]'); return bia.page.$$eval('.sheet button', (b) => b.map((x) => x.textContent)); };
   const opts = await attachSheet();
-  assert.ok(opts.includes('Câmera: foto'));
+  assert.ok(opts.includes('📷 Câmera'));
   assert.ok(!opts.some((o) => /Galeria/.test(o)), 'modo máximo: sem galeria');
   const before = await ana.page.$$eval('.msg:not(.mine) .open', (l) => l.length);
 
   // Foto: abre a câmera do app, tira, edita, envia.
-  await bia.page.click('.sheet >> text=Câmera: foto');
+  await bia.page.click('.sheet button:text-is("📷 Câmera")');
   await bia.page.waitForFunction(() => document.querySelector('.camera video')?.videoWidth > 0, null, { timeout: 15000 });
   await bia.page.click('[aria-label="Tirar foto"]');
-  await bia.page.waitForSelector('.editor canvas');
+  await bia.page.waitForSelector('.batch');
   assert.equal(await bia.page.$('.camera'), null, 'câmera fechada');
-  await bia.page.click('.editor >> text=Usar foto');
+  await bia.page.click('.batch .send-batch');
   await ana.page.waitForFunction((n) => document.querySelectorAll('.msg:not(.mine) .open').length > n, before, { timeout: 40000 });
 
   // Vídeo: grava ~2 s, recodifica e envia.
   await attachSheet();
-  await bia.page.click('.sheet >> text=Câmera: vídeo (até 5 min)');
+  await bia.page.click('.sheet button:text-is("📷 Câmera")');
+  await bia.page.click('.camera button:text-is("Vídeo")');
   await bia.page.waitForFunction(() => document.querySelector('.camera video')?.videoWidth > 0, null, { timeout: 15000 });
   await bia.page.click('[aria-label="Gravar"]');
   await bia.page.waitForTimeout(2300);
   await bia.page.click('[aria-label="Parar"]');
+  await bia.page.click('.sheet button:text-is("Enviar normalmente")');
   await bia.page.waitForSelector('.msg.mine >> text=/Vídeo · 0:0[1-3]/', { timeout: 90000 })
     .catch(async (e) => { throw new Error(`${e.message.split('\n')[0]} | aviso: ${await status(bia)}`); });
   await ana.page.waitForSelector('.msg:not(.mine) >> text=/Vídeo · 0:0[1-3]/', { timeout: 40000 });
 
   // A câmera desliga na hora quando o app sai da tela.
   await attachSheet();
-  await bia.page.click('.sheet >> text=Câmera: foto');
+  await bia.page.click('.sheet button:text-is("📷 Câmera")');
   await bia.page.waitForSelector('.camera');
   await bia.page.evaluate(() => { Object.defineProperty(document, 'hidden', { value: true, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
   await bia.page.waitForSelector('.camera', { state: 'detached' });

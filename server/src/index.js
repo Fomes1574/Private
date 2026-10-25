@@ -33,7 +33,7 @@ function cors(env, request) {
     'access-control-allow-headers': 'authorization, content-type',
     'access-control-max-age': '600',
     // O app (outra origem) precisa ler o horário do servidor (relógio confiável).
-    'access-control-expose-headers': 'x-mp-time',
+    'access-control-expose-headers': 'x-mp-time, retry-after',
     vary: 'origin',
   };
 }
@@ -62,6 +62,8 @@ async function nudge(env, ctx, userIds, { silent = [] } = {}) {
 // Ao passar do limite, nega o upload (melhor que estourar a franquia).
 const DEFAULT_QUOTA = 9 * 1024 ** 3; // abaixo dos 10 GB grátis do R2
 async function reserveBytes(env, mediaId, bytes, expiresAt) {
+  const existing = await env.DB.prepare('SELECT bytes FROM media_usage WHERE media_id = ?').bind(mediaId).first();
+  if (existing) { if (existing.bytes !== bytes) throw new HttpError(409, 'exists'); return; }
   const limit = Number(env.MEDIA_QUOTA_BYTES) || DEFAULT_QUOTA;
   const now = Date.now();
   const r = await env.DB.prepare(`INSERT INTO media_usage(media_id, bytes, expires_at)
@@ -197,11 +199,9 @@ route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/events', async ({ env, ctx, reque
   // Grupo encerrado: foto e fundo do grupo deixam de existir (§21).
   if (view.closed) ctx.waitUntil(circle(env).visualClear(`r:${p[1]}`).then((ids) => purgeVisuals(env, ids)));
   // Saiu ou foi removido: perde os direitos de mídia pendentes (§15.7).
-  const gone = ev.type === 'leave' ? me.userId : ev.type === 'remove_member' ? ev.member : null;
-  if (gone) ctx.waitUntil(Promise.all((await r.mediaIds()).map((id) => media(env, id).revokeMember(gone))));
-  // F05 (V7-008): desfazer vínculo ou encerrar o grupo revoga o ver uma vez
-  // pendente. Mídia comum fica só para leitura até vencer.
-  if (view.closed && ['unlink', 'close'].includes(ev.type)) await Promise.all((await r.mediaIds()).map((id) => media(env, id).closeRoom().catch(() => null)));
+  // A intenção já foi persistida no Room antes de responder. Falha de RPC
+  // não se perde: o alarme da sala repete a revogação.
+  await r.flushRevocations();
   await nudge(env, ctx, view.members.filter((m) => m.active && m.userId !== me.userId).map((m) => m.userId));
   return json(200, view);
 });
@@ -266,6 +266,7 @@ route('POST', '/v1/ack', async ({ env, request, me }) => {
 });
 
 // Mídia
+route('GET', '/v1/capabilities', async () => json(200, { mediaUploadIds: 1, vaultMigration: 1 }));
 route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/media', async ({ env, request, me, p, url }) => {
   const mode = ['once', 'media', 'doc'].includes(url.searchParams.get('mode')) ? url.searchParams.get('mode') : null;
   if (!mode) throw new HttpError(400, 'bad_mode');
@@ -277,16 +278,22 @@ route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/media', async ({ env, request, me
     ? { audience: (url.searchParams.get('audience') || '').split(',').filter(Boolean).slice(0, 10).map(assertId), ttl: url.searchParams.has('ttl') ? Number(url.searchParams.get('ttl')) : undefined }
     : null;
   const plan = unwrap(await room(env, p[1]).mediaPlan(me.userId, mode, story));
-  const mediaId = randomId(16);
+  const retry = url.searchParams.has('uploadId');
+  const mediaId = retry ? assertId(url.searchParams.get('uploadId')) : randomId(16);
   const box = media(env, mediaId);
   const expiresAt = Date.now() + plan.ttl * 1000;
-  await reserveBytes(env, mediaId, len, expiresAt);
-  const created = await box.create({ mediaId, mode, room: p[1], sender: me.userId, recipients: plan.recipients, expiresAt, backend: env.BLOB_BACKEND, key: `m/${mediaId}` });
-  if (created.error) { await env.DB.prepare('DELETE FROM media_usage WHERE media_id = ?').bind(mediaId).run(); unwrap(created); }
+  const created = await box.create({ mediaId, mode, room: p[1], sender: me.userId, recipients: plan.recipients, expiresAt, backend: env.BLOB_BACKEND, key: `m/${mediaId}`, size: len, retry });
+  if (created.error === 'upload_busy') return json(503, { error: 'upload_busy' }, { 'retry-after': '120' });
+  unwrap(created);
+  if (created.active) {
+    unwrap(await room(env, p[1]).addMedia(me.userId, mediaId, created.expiresAt));
+    return json(200, { mediaId, expiresAt: created.expiresAt });
+  }
   let count = 0, size = 0;
   try {
+  await reserveBytes(env, mediaId, len, expiresAt);
   if (env.BLOB_BACKEND === 'r2') {
-    const obj = await env.MEDIA.put(`m/${mediaId}`, request.body);
+    const obj = await env.MEDIA.put(created.key, request.body);
     size = obj.size;
   } else {
     // Lê em fluxo e manda pedaços de 1,9 MB: memória do Worker fica pequena.
@@ -301,23 +308,30 @@ route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/media', async ({ env, request, me
         buf.set(value.subarray(off, off + n), fill);
         fill += n; off += n; size += n;
         if (size > len) throw new HttpError(400, 'bad_length');
-        if (fill === CHUNK) { unwrap(await box.putChunk(count++, buf)); buf = new Uint8Array(CHUNK); fill = 0; }
+        if (fill === CHUNK) { unwrap(await box.putChunk(count++, buf, created.lease)); buf = new Uint8Array(CHUNK); fill = 0; }
       }
     }
-    if (fill) unwrap(await box.putChunk(count++, buf.subarray(0, fill)));
+    if (fill) unwrap(await box.putChunk(count++, buf.subarray(0, fill), created.lease));
   }
   if (size !== len) throw new HttpError(400, 'bad_length');
+  unwrap(await box.seal({ count, size, lease: created.lease }));
   } catch (e) {
     // Upload incompleto não fica guardado esperando o prazo: apaga já.
-    await box.revokeAll(me.userId).catch(() => null);
+    await box.abortUpload(created.lease);
+    if (env.BLOB_BACKEND === 'r2') await env.MEDIA.delete(created.key);
     throw e;
   }
-  unwrap(await box.seal({ count, size }));
-  await room(env, p[1]).addMedia(me.userId, mediaId, expiresAt);
+  const linked = await room(env, p[1]).addMedia(me.userId, mediaId, expiresAt);
+  if (linked.error) { await box.revokeAll(me.userId); unwrap(linked); }
   return json(201, { mediaId, expiresAt });
 });
 route('POST', '/v1/media/([A-Za-z0-9_-]{8,64})/open', async ({ env, ctx, me, p }) => {
   const box = media(env, p[1]);
+  const info = unwrap(await box.describe());
+  if (info.mode === 'once') {
+    const view = unwrap(await room(env, info.room).get(me.userId));
+    if (view.closed || !view.members.some((m) => m.userId === me.userId && m.active)) throw new HttpError(404, 'gone');
+  }
   const r = unwrap(await box.open(me.userId));
   const headers = { 'content-type': 'application/octet-stream', 'content-length': String(r.size), ...SECURITY_HEADERS };
   if (r.backend === 'r2') {
@@ -431,6 +445,18 @@ route('POST', '/v1/vault/register', async ({ env, request, me }) => {
   const b = await readJson(request);
   return json(201, unwrap(await circle(env).vaultRegister(me, { verifier: b.verifier, duress: b.duress ?? null, deadDays: Number(b.deadDays ?? 15) })));
 });
+route('POST', '/v1/vault/migrate/prepare', async ({ env, request, me }) => {
+  const b = await readJson(request);
+  return json(200, unwrap(await circle(env).vaultMigratePrepare(me, { vaultId: assertId(b.vaultId) })));
+});
+route('POST', '/v1/vault/migrate/commit', async ({ env, request, me }) => {
+  const b = await readJson(request);
+  return json(200, unwrap(await circle(env).vaultMigrateCommit(me, { vaultId: assertId(b.vaultId), previous: assertId(b.previous) })));
+});
+route('POST', '/__test/vault/legacy', async ({ env, url, request }) => {
+  if (env.TEST_HOOKS !== '1' || !['127.0.0.1', 'localhost'].includes(url.hostname)) throw new HttpError(404, 'not_found');
+  return json(200, unwrap(await circle(env).testLegacyVault(assertId((await readJson(request)).vaultId))));
+}, { open: true });
 // Aberta (o app ainda está trancado): quem conta os erros é o servidor.
 route('POST', '/v1/vault/release', async ({ env, request }) => {
   const b = await readJson(request);

@@ -1,7 +1,7 @@
 // Cliente HTTP da API. Cada resposta atualiza o relógio confiável com o
 // horário do servidor (x-mp-time) e o tempo de ida e volta.
 export class ApiError extends Error {
-  constructor(status, code) { super(`${status} ${code}`); this.status = status; this.code = code; }
+  constructor(status, code, retryAfterMs = 0) { super(`${status} ${code}`); this.status = status; this.code = code; this.retryAfterMs = retryAfterMs; }
 }
 
 export class Api {
@@ -27,7 +27,9 @@ export class Api {
     if (!res.ok) {
       let code = 'error';
       try { code = (await res.json()).error ?? code; } catch {}
-      throw new ApiError(res.status, code);
+      const wait = res.headers.get('retry-after');
+      const retryAfterMs = wait === null ? 0 : /^\d+$/.test(wait) ? Number(wait) * 1000 : Math.max(0, Date.parse(wait) - Date.now());
+      throw new ApiError(res.status, code, Number.isFinite(retryAfterMs) ? retryAfterMs : 0);
     }
     if (rawResponse) return res;
     return binary ? new Uint8Array(await res.arrayBuffer()) : res.json();

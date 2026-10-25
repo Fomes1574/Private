@@ -120,7 +120,22 @@ export async function openVault(store, { prf, secret, release }) {
     }
     if (res.wrong) { const e = new WrongSecretError(); e.left = res.left; throw e; }
     const kek = await kekOf(part, res.share, r);
-    return { dek: await unwrap(r, kek), kek };
+    const dek = await unwrap(r, kek);
+    if (!res.needsMigration) return { dek, kek };
+    let retained = part.slice();
+    const forget = () => { retained?.fill(0); retained = null; };
+    // A substituição prepara S nova, mas mantém o cofre antigo até o cliente
+    // gravar banco/DEK/embrulho novos numa única troca durável.
+    async function migrate(prepare) {
+      if (!retained) throw new Error('sessão da migração encerrada');
+      try {
+        const reg = await prepare(r.vaultId);
+        const nextKek = await kekOf(retained, reg.share, r);
+        const rotated = await rotateDek({ ...r, vaultId: reg.vaultId }, nextKek);
+        return { ...rotated, kek: nextKek, previous: r.vaultId };
+      } finally { forget(); }
+    }
+    return { dek, kek, migrate, forget };
   } finally { part.fill(0); }
 }
 
