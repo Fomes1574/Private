@@ -213,11 +213,15 @@ route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/messages', async ({ env, ctx, req
   // guardada. O servidor usa o que ELE registrou, nunca o que o cliente diz.
   let info = null;
   const mediaId = kind !== 'text' && b.mediaId !== undefined ? assertId(b.mediaId) : null;
-  if (mediaId) {
+  const msgId0 = assertId(b.msgId);
+  // Reenvio da fila (F10) de uma mensagem já aceita: responde como antes,
+  // mesmo que a mídia já tenha sido aberta (ver uma vez) e apagada.
+  const already = mediaId ? await room(env, p[1]).messageInfo(msgId0) : null;
+  if (mediaId && !already) {
     info = unwrap(await media(env, mediaId).describe());
     if (info.sender !== me.userId || info.room !== p[1] || info.state !== 'active' || info.mode === 'visual') throw new HttpError(403, 'forbidden');
   }
-  const msgId = assertId(b.msgId);
+  const msgId = msgId0;
   const r = unwrap(await room(env, p[1]).send(me.userId, { msgId, kind, envelopes: b.envelopes, ttl: b.ttl === undefined ? undefined : Number(b.ttl), mediaId }));
   let quota;
   if (info?.mode === 'doc' && !r.duplicate) quota = await publishDoc(env, ctx, me, { mediaId, msgId, info });

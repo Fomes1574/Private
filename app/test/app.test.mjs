@@ -719,9 +719,9 @@ test('bloquear e desbloquear: conversa continua, guardada cifrada no aparelho', 
   const before = await dbDirs(ana);
   assert.equal(before.length, 1, `um banco só: ${before}`);
   // Apaga uma mensagem só para si e tranca logo: a rotação roda antes de trancar.
-  await ana.page.click('.msg.mine >> text=tudo, Bia 🌙');
+  await ana.page.click('.msg.mine >> text=tudo, Bia 🌙', { delay: 700 });
+  await ana.page.click('.sheet button:text-is("Apagar")');
   await ana.page.click('text=Apagar para mim');
-  await ana.page.click('.sheet button.danger');
   await ana.page.waitForFunction(() => ![...document.querySelectorAll('.msg .text')].some((e) => e.textContent === 'tudo, Bia 🌙'));
   await ana.page.click('[aria-label=Voltar]');
   await ana.page.click('[aria-label=Ajustes]');

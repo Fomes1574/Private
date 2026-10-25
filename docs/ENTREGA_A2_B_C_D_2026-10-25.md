@@ -36,6 +36,21 @@ Código conferido: escopo sensível por tela e sessão, microfone, visualizadore
 | b.7, b.11–b.17 | Áudio de ver uma vez, fixar mensagem, favoritas, mídia da conversa, busca geral, responder em particular, descrição do grupo, papel de parede local | `client/test/c.test.mjs` (núcleo); interface sem teste dedicado |
 | D (b.18–b.21) | Enquete, vídeo redondo, anotações só no aparelho, foto HD | `client/test/c.test.mjs`, `app.test.mjs` (enquete e anotações) |
 
+## Resultados dos testes automáticos (25/10/2026, neste ambiente)
+
+| Suíte | Resultado |
+|---|---|
+| Protocolo | 36 passaram |
+| Criptografia | 5 passaram |
+| Cliente (com servidor local real) | 32 passaram |
+| Servidor, mídia no R2 | 53 passaram |
+| Servidor, mídia no Durable Object | 52 passaram (o teste S13 confere o R2 só no modo R2) |
+| Interface (Chromium, todos os arquivos) | 53 passaram |
+
+Numa das rodadas completas da interface, o teste da câmera falhou uma vez: o vídeo gravado pela câmera simulada saiu sem trilha de vídeo, com a máquina sobrecarregada. Ele passou isolado duas vezes e nas duas rodadas completas seguintes. Fica registrado, sem ser descartado: se aparecer no CI, deve ser investigado.
+
+Android: o ambiente não tem SDK. O build do APK, com `IncognitoWebView` e o seletor de várias fotos, só será conferido no CI.
+
 ## Compatibilidade
 
 Versões antigas do app **não abrem** mídia em degraus, áudio de ver uma vez, enquete, voto e fixar: a mensagem é recusada com aviso e nada vaza. Por isso, todos os membros devem atualizar juntos, seguindo a seção "Para liberar".

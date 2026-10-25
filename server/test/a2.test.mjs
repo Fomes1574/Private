@@ -104,9 +104,11 @@ test('F16: documento entra na cota no próprio envio; o 4º revoga o mais antigo
 test('S13: o alarme de vencimento apaga a mídia do R2 e do Durable Object', async () => {
   const room = await group();
   const up = await p.admin.post(`/v1/rooms/${room}/media?mode=media`, blob());
-  assert.equal(r2Has(`m/${up.data.mediaId}`), true);
+  // Com mídia no próprio Durable Object (MP_TEST_BACKEND=do) não há R2 a conferir.
+  const inR2 = (process.env.MP_TEST_BACKEND || 'r2') === 'r2';
+  if (inR2) assert.equal(r2Has(`m/${up.data.mediaId}`), true);
   assert.equal((await new Client(api.base).post(`/__test/media/${up.data.mediaId}/alarm`)).status, 200);
-  assert.equal(r2Has(`m/${up.data.mediaId}`), false, 'objeto saiu do R2');
+  if (inR2) assert.equal(r2Has(`m/${up.data.mediaId}`), false, 'objeto saiu do R2');
   assert.equal((await p.bia.post(`/v1/media/${up.data.mediaId}/open`)).status, 404, 'abrir devolve que não existe mais');
 });
 
@@ -124,4 +126,19 @@ test('S12: a parte S fica cifrada por chave no R2; destruir o cofre destrói a c
   let gone = false;
   for (let i = 0; i < 20 && !gone; i++) { gone = !r2Has(`k/${vaultId}`); if (!gone) await new Promise((r) => setTimeout(r, 250)); }
   assert.ok(gone, 'chave apagada do R2: um SQLite restaurado do histórico não abre mais');
+});
+
+test('F10 no servidor: reenvio de ver uma vez já aberto devolve o mesmo aceite', async () => {
+  // (a Bia perdeu a sessão no teste do S12: só Caio aqui)
+  const d = await p.admin.post('/v1/rooms', { kind: 'group', members: [p.caio.userId] });
+  const room = d.data.roomId;
+  const up = await p.admin.post(`/v1/rooms/${room}/media?mode=once`, blob());
+  const id = msgId(), body = { msgId: id, kind: 'media', mediaId: up.data.mediaId, envelopes: envs(p.caio) };
+  const first = await p.admin.post(`/v1/rooms/${room}/messages`, body);
+  assert.equal(first.status, 201);
+  assert.equal((await p.caio.post(`/v1/media/${up.data.mediaId}/open`, undefined, { raw: true })).status, 200);
+  assert.equal((await p.caio.post(`/v1/media/${up.data.mediaId}/open`)).status, 404, 'já apagada');
+  const again = await p.admin.post(`/v1/rooms/${room}/messages`, body);
+  assert.equal(again.status, 200, 'reconhecido como repetido');
+  assert.equal(again.data.acceptedAt, first.data.acceptedAt);
 });

@@ -3,7 +3,7 @@
 Data: 25/10/2026  
 Repositório: [Fomes1574/Private](https://github.com/Fomes1574/Private), branch `ccr-de59a90b-gr4vug`  
 Código analisado: commit `03fa5d0` (o código é idêntico em `9965770`; só a documentação mudou)  
-Estado: **planejamento concluído; A1 implementada em branch para revisão**, autorizada pelo proprietário em 25/10/2026. Ver `ENTREGA_A1_2026-10-25.md`. Liberação depende de CI e testes em celular exigidos na seção 8. Nenhum deploy ou APK de produção foi distribuído nesta etapa.
+Estado: **A1 (GPT, revisada), A2, B, C e D implementadas** em 25/10/2026 no branch `ccr-de59a90b-gr4vug`, com testes automáticos. Ver `ENTREGA_A1_2026-10-25.md`, `ENTREGA_A2_B_C_D_2026-10-25.md` e ADR 0016. Liberação depende de CI, deploy da API (migração 0003), APK novo e testes em celular (seção 9). D5 (aliases) segue adiada.
 
 | Versão | Autor | O que trouxe |
 |---|---|---|
@@ -13,6 +13,7 @@ Estado: **planejamento concluído; A1 implementada em branch para revisão**, au
 | v3.1 | Claude | Regra do proprietário: **funcionalidades iguais ao WhatsApp, segurança nossa** (os 50 passos). Comparação completa das funções **dentro da conversa** (seção 2.2). **Confirmação do que o prazo apaga de verdade**, inclusive na Cloudflare (seção 3.6, S12–S13) |
 | Final | Claude | Revisão de consistência; documento fechado para servir de base à implementação |
 | A1 | Codex | Implementação iniciada com autorização do proprietário; relatório e critérios de liberação em `ENTREGA_A1_2026-10-25.md` |
+| A2–D | Claude | A1 revisada; A2, B, C e D implementadas; relatório em `ENTREGA_A2_B_C_D_2026-10-25.md` |
 
 Legenda de evidência: **verificado no código** (lido, sem rodar no celular), **reproduzido** (teste isolado com partes simuladas), **a validar** (mecanismo concreto, precisa de teste). Nada deste documento foi testado em celular de verdade.
 
@@ -35,7 +36,7 @@ Legenda de evidência: **verificado no código** (lido, sem rodar no celular), *
    - **a chave que abria a mídia deixa de existir**: ela nunca esteve no servidor, e no celular some junto com a troca da chave do banco.
    
    Ressalva: a Cloudflare guarda **30 dias de histórico** do banco do servidor. Esse histórico tem só conteúdo cifrado, que não dá mais para abrir, e metadados. Detalhes e a correção proposta na seção 3.6.
-7. **Próximo passo:** concluir a validação da entrega A1 (seção 8), cuja implementação foi autorizada pelo proprietário e está em branch de revisão. Resultados e pendências em `ENTREGA_A1_2026-10-25.md`.
+7. **Próximo passo:** liberar: CI verde, `deploy-api` (migração 0003), novo APK e PWA, e os cenários 11 a 16 de `TESTE_EM_CELULAR.md`. Todos os membros atualizam juntos (ADR 0016).
 
 ---
 

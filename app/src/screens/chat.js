@@ -76,7 +76,13 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
       await session.setDraft(roomId, '');
       setReply(null);
       await render();
-    } catch (e) { pending.remove(); input.value = text; toast(e.code === 'gone' ? 'Conversa encerrada.' : `Não enviou: ${errText(e)}`); }
+    } catch (e) {
+      pending.remove();
+      // F10: sem rede, a mensagem já está na fila e vai sozinha; voltar o
+      // texto para a caixa faria a pessoa mandar de novo (duplicada).
+      if (e.code === 'pending') { clearTimeout(draftTimer); await session.setDraft(roomId, ''); setReply(null); toast('Sem conexão: a mensagem ficou na fila (🕓) e vai sozinha quando a rede voltar.'); await render(); return; }
+      input.value = text; toast(e.code === 'gone' ? 'Conversa encerrada.' : `Não enviou: ${errText(e)}`);
+    }
   };
   const setReply = (m) => {
     replyTo = m?.msgId ?? null;
@@ -631,7 +637,11 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
           }
           if (log.children[i] !== entry.el) log.insertBefore(entry.el, log.children[i] ?? null);
         });
-        if (!realCount) log.append(h('li', { class: 'note', text: term ? 'Nada encontrado no que ainda não venceu.' : 'Nenhuma mensagem.' }));
+        // Na fila (F10): aparecem com 🕓 até o servidor aceitar.
+        for (const el of log.querySelectorAll('li.queued')) el.remove();
+        const queued = term ? [] : (await client.outbox()).filter((o) => o.roomId === roomId && o.local);
+        for (const o of queued) log.append(h('li', { class: 'msg mine pending queued' }, h('span', { class: 'text', text: o.local.kind === 'media' ? `${mediaName(o.local)} na fila` : o.local.body?.text ?? '' }), h('span', { class: 'meta' }, h('span', { 'aria-label': 'na fila', text: '🕓' }))));
+        if (!realCount && !queued.length) log.append(h('li', { class: 'note', text: term ? 'Nada encontrado no que ainda não venceu.' : 'Nenhuma mensagem.' }));
         // Primeira vez: abre na faixa de não lidas, como no WhatsApp.
         const firstOpen = !rendered;
         rendered = true;
@@ -722,6 +732,7 @@ function messageSheet(title, reactions, options) {
 // verificação dessa pessoa.
 function sendFailed(e) {
   if (e?.code === 'key_unverified') { toast(errText(e)); if (e.userIds?.[0]) verifySheet(e.userIds[0]); return; }
+  if (e?.code === 'pending') { toast('Sem conexão: ficou na fila (🕓) e vai sozinha quando a rede voltar.'); return; }
   toast(`Não enviou: ${errText(e)}`);
 }
 
