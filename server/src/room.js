@@ -131,7 +131,7 @@ export class Room extends DurableObject {
     return [...s.members].filter(([id, m]) => m.active && id !== actor).map(([id]) => id).sort();
   }
 
-  async send(actor, { msgId, kind, envelopes, ttl }) {
+  async send(actor, { msgId, kind, envelopes, ttl, mediaId = null }) {
     const s = this.load();
     if (!s) return { error: 'not_found' };
     if (!isMember(s, actor)) return { error: 'forbidden' };
@@ -158,7 +158,7 @@ export class Room extends DurableObject {
     }
     const acceptedAt = Date.now();
     const expiresAt = acceptedAt + (storyTtl ?? ttlFor(s, kind === 'media' ? 'media' : 'text')) * 1000;
-    const stmts = [db.prepare('INSERT INTO messages(room, msg_id, sender, accepted_at, expires_at) VALUES (?, ?, ?, ?, ?)').bind(s.roomId, msgId, actor, acceptedAt, expiresAt)];
+    const stmts = [db.prepare('INSERT INTO messages(room, msg_id, sender, accepted_at, expires_at, media_id) VALUES (?, ?, ?, ?, ?, ?)').bind(s.roomId, msgId, actor, acceptedAt, expiresAt, mediaId)];
     for (const [rcpt, ct] of Object.entries(envelopes)) {
       const bytes = Uint8Array.from(atob(ct), (c) => c.charCodeAt(0));
       stmts.push(db.prepare('INSERT INTO envelopes(recipient, room, msg_id, sender, accepted_at, expires_at, ct) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(rcpt, s.roomId, msgId, actor, acceptedAt, expiresAt, bytes));
@@ -216,9 +216,13 @@ export class Room extends DurableObject {
   }
 
   async messageOwner(msgId) {
+    return (await this.messageInfo(msgId))?.sender ?? null;
+  }
+  // Autor e mídia ligada (F04): o Worker revoga a mídia antes de apagar.
+  async messageInfo(msgId) {
     const s = this.load();
     if (!s) return null;
-    return this.env.DB.prepare('SELECT sender FROM messages WHERE room = ? AND msg_id = ?').bind(s.roomId, msgId).first('sender');
+    return this.env.DB.prepare('SELECT sender, media_id AS mediaId FROM messages WHERE room = ? AND msg_id = ?').bind(s.roomId, msgId).first();
   }
 
   // Apagar para todos: só o autor (V7-010), ou o sistema quando o 4º documento

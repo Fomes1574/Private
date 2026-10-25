@@ -5,6 +5,7 @@ import * as session from '../session.js';
 import { TTL_OPTIONS, describeTtl } from '../packages/protocol/src/ttl.js';
 import { pickSquarePhoto } from './settings.js';
 import { pickImage } from '../pick-image.js';
+import { verifySheet } from './verify.js';
 
 // Fundo: até 1280 px, sem metadados; câmera traseira.
 const pickBackground = (roomId) => pickImage({ maxSide: 1280, facing: 'environment', resume: { roomId, target: 'chat', action: 'room-background' } });
@@ -24,10 +25,16 @@ export async function roomMenu(go, roomId) {
     if (v.kind === 'group') opts.push({ label: 'Nome do grupo', value: 'title' }, { label: 'Foto do grupo', value: 'photo' }, { label: 'Fundo da conversa', value: 'background' }, { label: 'Adicionar pessoa', value: 'add' }, { label: 'Remover pessoa', value: 'remove' });
     opts.push({ label: 'Ceder liderança', value: 'transfer' });
   }
-  opts.push({ label: 'Apagar conversa (só para mim)', value: 'clear', danger: true });
-  if (!v.closed) opts.push(v.kind === 'direct' ? { label: 'Desfazer vínculo', value: 'unlink', danger: true } : { label: 'Sair do grupo', value: 'leave', danger: true });
+  // D3, como no WhatsApp: limpar e excluir valem só neste aparelho. Grupo só
+  // se exclui depois de sair.
+  const inGroup = session.imActive(v);
+  opts.push({ label: 'Limpar conversa', value: 'clear', danger: true });
+  if (v.kind === 'direct') opts.push({ label: 'Excluir conversa', value: 'delete', danger: true });
+  else if (!inGroup || v.closed) opts.push({ label: 'Excluir grupo', value: 'delete', danger: true });
+  if (!v.closed) opts.push(v.kind === 'direct' ? { label: 'Desfazer vínculo', value: 'unlink', danger: true } : inGroup ? { label: 'Sair do grupo', value: 'leave', danger: true } : null);
   if (leader && v.kind === 'group' && !v.closed) opts.push({ label: 'Encerrar o grupo', value: 'close', danger: true });
-  const c = await choiceSheet(leader ? 'Você é a líder desta conversa' : `Líder: ${session.nameOf(v.leader)}`, opts);
+  const shown = opts.filter(Boolean);
+  const c = await choiceSheet(leader ? 'Você é a líder desta conversa' : `Líder: ${session.nameOf(v.leader)}`, shown);
   const active = v.members.filter((m) => m.active);
   try {
     if (c === 'members') return membersSheet(v);
@@ -42,13 +49,23 @@ export async function roomMenu(go, roomId) {
       toast('Conversa silenciada.');
       return;
     }
-    if (c === 'pin') { await session.setRoomFlag(roomId, { pinned: !flags.pinned }); toast(flags.pinned ? 'Desafixada.' : 'Fixada no topo.'); return; }
+    if (c === 'pin') { const on = await session.togglePin(roomId); toast(on ? 'Fixada no topo.' : 'Desafixada.'); return; }
     if (c === 'archive') { await session.setRoomFlag(roomId, { archived: !flags.archived }); toast(flags.archived ? 'Desarquivada.' : 'Arquivada. Fica em "Arquivadas" na lista.'); return; }
     if (c === 'clear') {
-      if (!await confirmSheet('Apagar todas as mensagens desta conversa só deste aparelho? Os outros continuam vendo até o prazo. Não dá para desfazer.', 'Apagar conversa')) return;
-      const n = await S.client.clearRoomForMe(roomId);
-      toast(n ? 'Conversa apagada deste aparelho.' : 'Nada para apagar.');
+      if (!await confirmSheet('Limpar esta conversa? As mensagens somem só deste aparelho; a conversa continua na lista. Os outros continuam vendo até vencer.', 'Limpar conversa')) return;
+      const n = await session.clearRoom(roomId);
+      toast(n ? 'Conversa limpa neste aparelho.' : 'Nada para limpar.');
       return 'refresh';
+    }
+    if (c === 'delete') {
+      const who = v.kind === 'direct' ? session.roomTitle(v) : 'As outras pessoas';
+      const q = v.kind === 'direct'
+        ? `Excluir esta conversa só do seu aparelho? ${who} continua vendo as mensagens até vencer. Se chegar mensagem nova, ela volta para a lista.`
+        : 'Excluir este grupo do seu aparelho? Nome, foto e mensagens somem daqui. As outras pessoas continuam vendo até vencer.';
+      if (!await confirmSheet(q, v.kind === 'direct' ? 'Excluir conversa' : 'Excluir grupo')) return;
+      await session.deleteRoomForMe(roomId);
+      toast(v.kind === 'direct' ? 'Conversa excluída deste aparelho.' : 'Grupo excluído deste aparelho.');
+      return go('chats');
     }
     if (c === 'ttl') {
       const kind = await choiceSheet('Qual prazo mudar? Vale só para o que for enviado depois.', [{ label: `Mensagens (agora ${describeTtl(v.textTtl)})`, value: 'textTtl' }, { label: `Mídia (agora ${describeTtl(v.mediaTtl)})`, value: 'mediaTtl' }]);
@@ -102,7 +119,8 @@ export async function roomMenu(go, roomId) {
     if (c === 'leave' && await confirmSheet('Sair do grupo? Se você for a líder, assume quem entrou primeiro.', 'Sair')) {
       if (leader) await S.client.announceMembership(roomId, v, { leaving: true }); // passa a liderança cifrada antes de sair
       await session.roomEvent(roomId, { type: 'leave' });
-      return go('chats');
+      await session.markLeft(roomId); // fica na lista só para leitura até excluir
+      return 'refresh';
     }
     if (c === 'unlink' && await confirmSheet('Desfazer vínculo? A conversa acaba; o outro lado fica só com leitura até vencer. Uma conversa nova começa do zero.', 'Desfazer')) { await session.roomEvent(roomId, { type: 'unlink' }); return 'refresh'; }
     if (c === 'close' && await confirmSheet('Encerrar o grupo? Ninguém mais envia nada.', 'Encerrar')) { await session.roomEvent(roomId, { type: 'close' }); return 'refresh'; }
@@ -113,14 +131,14 @@ async function membersSheet(v) {
   const S = session.S;
   const rows = [];
   for (const m of v.members.filter((x) => x.active)) {
-    const k = S.client.known[m.userId];
-    const fp = k ? await session.fingerprint(k.curve) : '—';
-    rows.push(h('li', {}, h('strong', { text: session.nameOf(m.userId) + (m.userId === v.leader ? ' · líder' : '') + (m.userId === S.client.userId ? ' (você)' : '') }),
+    const me = m.userId === S.client.userId;
+    const mark = me ? '' : session.isVerified(m.userId) ? ' · ✓ verificado' : session.keyChanged(m.userId) ? ' · chave mudou' : '';
+    rows.push(h('li', {}, h('strong', { text: session.nameOf(m.userId) + (m.userId === v.leader ? ' · líder' : '') + (me ? ' (você)' : '') + mark }),
       session.aboutOf(m.userId) ? h('span', { class: 'muted small', text: session.aboutOf(m.userId) }) : null,
-      h('span', { class: 'code small', text: fp })));
+      me ? null : h('button', { class: 'secondary small', text: 'Verificar', onclick: () => { sheet.remove(); verifySheet(m.userId); } })));
   }
   const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'sheet-box' },
-    h('p', { text: 'Para verificar alguém, encontrem-se e comparem os números. Se baterem, ninguém está no meio.' }),
+    h('p', { text: 'Para verificar alguém, encontrem-se e leiam o QR ou comparem o número de segurança. Se baterem, ninguém está no meio.' }),
     h('ul', { class: 'list' }, rows),
     h('button', { class: 'block', text: 'Fechar', onclick: () => sheet.remove() })));
   document.body.append(sheet);

@@ -129,3 +129,20 @@ button.link { background: none; border: 0; color: var(--accent, #6CB4FF); text-d
 
 /* A1: não desloca quem está lendo mensagens antigas. */
 .jump-bottom { position: fixed; right: 1rem; bottom: 6rem; border-radius: 2rem; z-index: 3; min-width: 44px; min-height: 44px; }
+/* Verificação (S8) e avisos de segurança na conversa (S1). */
+.qr { display: block; margin: 8px auto; width: min(240px, 70vw); height: auto; image-rendering: pixelated; border-radius: 8px; }
+.code.safety { text-align: center; letter-spacing: 0.04em; line-height: 1.6; }
+.row.wrap { flex-wrap: wrap; }
+.msg-sys { align-self: center; max-width: 92%; background: var(--card, rgba(127,127,127,.12)); border-radius: 10px; padding: 6px 10px; font-size: .85em; text-align: center; list-style: none; cursor: pointer; }
+/* Lista como no WhatsApp (entrega B). */
+.row-side { display: grid; justify-items: end; gap: 4px; }
+.preview { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 62vw; }
+.preview.unread { color: var(--text); font-weight: 600; }
+.unread-time { color: #25D366; }
+.badge { background: #25D366; color: #0B1220; border-radius: 999px; min-width: 20px; padding: 1px 6px; font-size: 12px; font-weight: 700; text-align: center; }
+.badge.muted-badge { background: #6B7280; color: #fff; }
+/* Formatação (b.9) e menção (b.10). */
+.fmt-mono, .fmt-code { font-family: ui-monospace, Menlo, monospace; font-size: .92em; background: rgba(127,127,127,.18); border-radius: 4px; padding: 0 3px; }
+.fmt-quote { display: block; border-left: 3px solid rgba(127,127,127,.6); padding-left: 8px; opacity: .9; }
+.fmt-li { display: block; padding-left: 4px; }
+.mention { color: #53BDEB; font-weight: 600; }

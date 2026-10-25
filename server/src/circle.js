@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS vaults (vault_id TEXT PRIMARY KEY, user_id TEXT NOT N
   verifier_hash TEXT NOT NULL, duress_hash TEXT, share TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
   last_seen INTEGER NOT NULL, dead_days INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS kill_codes (user_id TEXT PRIMARY KEY, code_hash TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS dead_keys (vault_id TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS direct_rooms (pair_key TEXT PRIMARY KEY, room_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS visuals (owner TEXT NOT NULL, slot TEXT NOT NULL, media_id TEXT NOT NULL, PRIMARY KEY (owner, slot));`;
 
@@ -108,11 +109,12 @@ export class Circle extends DurableObject {
     this.sql.exec('DELETE FROM challenges WHERE expires_at <= ?', now);
     this.sql.exec('DELETE FROM pairings WHERE expires_at <= ?', now);
     // Cofre de pedido que venceu sem aprovação some junto.
-    this.sql.exec("DELETE FROM vaults WHERE device_id LIKE 'p:%' AND substr(device_id, 3) NOT IN (SELECT pairing_id FROM pairings)");
+    this.dropVaults("device_id LIKE 'p:%' AND substr(device_id, 3) NOT IN (SELECT pairing_id FROM pairings)");
     this.expirePending();
     // Interruptor do homem morto: aparelho sumido há mais que o combinado
     // perde a parte do servidor; o banco dele vira ruído para sempre.
-    this.sql.exec('DELETE FROM vaults WHERE dead_days > 0 AND last_seen + dead_days * ? < ?', this.vaultDay(), now);
+    this.dropVaults('dead_days > 0 AND last_seen + dead_days * ? < ?', this.vaultDay(), now);
+    this.flushDeadKeys();
   }
 
   activeCount() { return this.one("SELECT count(*) AS n FROM identities WHERE state != 'removed'").n; }
@@ -146,7 +148,7 @@ export class Circle extends DurableObject {
       this.sql.exec('DELETE FROM otks WHERE device_id = ?', d.device_id);
       this.sql.exec('DELETE FROM fallback_keys WHERE device_id = ?', d.device_id);
       this.sql.exec('DELETE FROM push_subs WHERE device_id = ?', d.device_id);
-      this.sql.exec('DELETE FROM vaults WHERE device_id = ?', d.device_id);
+      this.dropVaults('device_id = ?', d.device_id);
     }
     return devs.length;
   }
@@ -183,9 +185,9 @@ export class Circle extends DurableObject {
     if (admin.state !== 'active') this.sql.exec("UPDATE identities SET state = 'active' WHERE user_id = ?", admin.user_id);
     const deviceId = this.addDevice(admin.user_id, device);
     const vaultId = randomId(18);
-    const share = b64(crypto.getRandomValues(new Uint8Array(32)));
+    const { share, stored } = await this.newShare(vaultId);
     this.sql.exec('INSERT INTO vaults(vault_id, user_id, device_id, verifier_hash, duress_hash, share, attempts, last_seen, dead_days) VALUES (?, ?, ?, ?, NULL, ?, 0, ?, ?)',
-      vaultId, admin.user_id, deviceId, await sha(vault.verifier), share, this.now(), vault.deadDays);
+      vaultId, admin.user_id, deviceId, await sha(vault.verifier), stored, this.now(), vault.deadDays);
     this.event('recovered', admin.user_id); // contatos veem a troca de chave (aviso de segurança)
     return { userId: admin.user_id, deviceId, vault: { vaultId, share } };
   }
@@ -365,9 +367,9 @@ export class Circle extends DurableObject {
     let reg = null;
     if (vault) {
       const vaultId = randomId(18);
-      const share = b64(crypto.getRandomValues(new Uint8Array(32)));
+      const { share, stored } = await this.newShare(vaultId);
       this.sql.exec('INSERT INTO vaults(vault_id, user_id, device_id, verifier_hash, duress_hash, share, attempts, last_seen, dead_days) VALUES (?, ?, ?, ?, NULL, ?, 0, ?, ?)',
-        vaultId, '', pairVault(pairingId), await sha(vault.verifier), share, this.now(), vault.deadDays);
+        vaultId, '', pairVault(pairingId), await sha(vault.verifier), stored, this.now(), vault.deadDays);
       reg = { vaultId, share };
     }
     return { pairingId, code, expiresAt: this.now() + PAIRING_TTL, vault: reg };
@@ -488,11 +490,12 @@ export class Circle extends DurableObject {
     if (!B64_32.test(verifier ?? '') || (duress !== null && !B64_32.test(duress))) return { error: 'bad_request' };
     if (!DEAD_DAYS.includes(deadDays)) return { error: 'bad_request' };
     const vaultId = randomId(18);
-    const share = b64(crypto.getRandomValues(new Uint8Array(32)));
+    const { share, stored } = await this.newShare(vaultId);
     // Um cofre por aparelho: o anterior (se houver) deixa de abrir.
-    this.sql.exec('DELETE FROM vaults WHERE device_id = ?', actor.deviceId);
+    this.dropVaults('device_id = ?', actor.deviceId);
+    this.flushDeadKeys();
     this.sql.exec('INSERT INTO vaults(vault_id, user_id, device_id, verifier_hash, duress_hash, share, attempts, last_seen, dead_days) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)',
-      vaultId, actor.userId, actor.deviceId, await sha(verifier), duress ? await sha(duress) : null, share, this.now(), deadDays);
+      vaultId, actor.userId, actor.deviceId, await sha(verifier), duress ? await sha(duress) : null, stored, this.now(), deadDays);
     return { vaultId, share };
   }
   async vaultRelease({ vaultId, verifier }) {
@@ -509,11 +512,79 @@ export class Circle extends DurableObject {
       this.sql.exec('UPDATE vaults SET attempts = ? WHERE vault_id = ?', attempts, vaultId);
       return { error: 'wrong_secret', left: VAULT_MAX_FAILURES - attempts };
     }
+    const opened = await this.readShare(v);
+    if (opened.error) return opened;
     this.sql.exec('UPDATE vaults SET attempts = 0, last_seen = ? WHERE vault_id = ?', this.now(), vaultId);
-    return { share: v.share };
+    return { share: opened.share };
+  }
+
+  // ---------- S12: destruição por chave da parte S ----------
+  // A parte S fica cifrada no SQLite deste DO por uma chave própria de cada
+  // cofre, guardada no R2 (que não tem histórico/versões). O SQLite do DO tem
+  // 30 dias de recuperação no tempo: sem isto, um cofre destruído (5 erros,
+  // coação, emergência, prazo) poderia ser restaurado por quem controla a
+  // conta. Destruir = apagar o objeto do R2; uma cópia restaurada do SQLite
+  // fica com S cifrada por uma chave que não existe mais.
+  keyStore() { return this.env.MEDIA ?? null; }
+  async shareKey(raw, usage) { return crypto.subtle.importKey('raw', raw, 'AES-GCM', false, [usage]); }
+  async newShare(vaultId) {
+    const share = b64(crypto.getRandomValues(new Uint8Array(32)));
+    return { share, stored: await this.sealShare(vaultId, share) };
+  }
+  async sealShare(vaultId, share) {
+    const kv = this.keyStore();
+    if (!kv) return share; // sem R2 (só testes antigos): como antes
+    const raw = crypto.getRandomValues(new Uint8Array(32));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(`mp/share/v1/${vaultId}`) }, await this.shareKey(raw, 'encrypt'), unb64(share)));
+    await kv.put(`k/${vaultId}`, raw);
+    raw.fill(0);
+    const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12);
+    return `e1:${b64(out)}`;
+  }
+  async readShare(v) {
+    if (!String(v.share).startsWith('e1:')) {
+      // Cofre de antes do S12: passa a ser cifrado agora, sem trocar S.
+      const stored = await this.sealShare(v.vault_id, v.share).catch(() => null);
+      if (stored && stored !== v.share) this.sql.exec('UPDATE vaults SET share = ? WHERE vault_id = ?', stored, v.vault_id);
+      return { share: v.share };
+    }
+    const kv = this.keyStore();
+    let obj;
+    try { obj = kv && await kv.get(`k/${v.vault_id}`); } catch { return { error: 'unavailable' }; }
+    if (!kv) return { error: 'unavailable' };
+    if (!obj) {
+      // A chave foi destruída: este registro só pode ter voltado de um
+      // histórico restaurado. Some de novo, sem abrir nada.
+      this.sql.exec('DELETE FROM vaults WHERE vault_id = ?', v.vault_id);
+      return { error: 'gone' };
+    }
+    const raw = new Uint8Array(await obj.arrayBuffer());
+    try {
+      const blob = unb64(v.share.slice(3));
+      const pt = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: blob.subarray(0, 12), additionalData: new TextEncoder().encode(`mp/share/v1/${v.vault_id}`) }, await this.shareKey(raw, 'decrypt'), blob.subarray(12)));
+      try { return { share: b64(pt) }; } finally { pt.fill(0); }
+    } catch { return { error: 'gone' }; } finally { raw.fill(0); }
+  }
+  // Apaga cofres e marca as chaves para destruir no R2 (a marca sobrevive a
+  // uma falha do R2 e é refeita na próxima limpeza).
+  dropVaults(where, ...args) {
+    this.sql.exec(`INSERT OR IGNORE INTO dead_keys(vault_id) SELECT vault_id FROM vaults WHERE ${where}`, ...args);
+    this.sql.exec(`DELETE FROM vaults WHERE ${where}`, ...args);
+  }
+  flushDeadKeys() {
+    const kv = this.keyStore();
+    const ids = this.q('SELECT vault_id FROM dead_keys LIMIT 100').map((r) => r.vault_id);
+    if (!kv || !ids.length) return Promise.resolve();
+    const task = kv.delete(ids.map((id) => `k/${id}`))
+      .then(() => { for (const id of ids) this.sql.exec('DELETE FROM dead_keys WHERE vault_id = ?', id); })
+      .catch(() => null);
+    this.ctx.waitUntil?.(task);
+    return task;
   }
   vaultKill(v) {
-    this.sql.exec('DELETE FROM vaults WHERE vault_id = ?', v.vault_id);
+    this.dropVaults('vault_id = ?', v.vault_id);
+    this.flushDeadKeys();
     if (!v.user_id) { this.sql.exec('DELETE FROM pairings WHERE pairing_id = ?', String(v.device_id).slice(2)); return; } // cofre de pedido ainda não aprovado
     this.revokeDevicesOf(v.user_id); // sessão do aparelho cai junto
     this.event('vault_destroyed', v.user_id);

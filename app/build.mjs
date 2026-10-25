@@ -46,7 +46,7 @@ await cp(join(repo, 'branding/pacto-talk-icon-180.png'), join(stage, 'icon-180.p
 await cp(join(repo, 'branding/pacto-talk-icon-512.webp'), join(stage, 'icon-512.webp'));
 
 // Cópia de terceiros precisa bater com o SHA256SUMS conferido no CI.
-for (const dir of ['vendor/sqlite', 'video/vendor', 'vendor/pdfjs']) {
+for (const dir of ['vendor/sqlite', 'video/vendor', 'vendor/pdfjs', 'vendor/qrcode']) {
   const sums = (await readFile(join(stage, dir, 'SHA256SUMS'), 'utf8')).split('\n').filter((l) => /^[0-9a-f]{64}/.test(l));
   if (!sums.length) throw new Error(`${dir}: SHA256SUMS vazio`);
   for (const l of sums) {
@@ -54,6 +54,9 @@ for (const dir of ['vendor/sqlite', 'video/vendor', 'vendor/pdfjs']) {
     if (sha(await readFile(join(stage, dir, name))) !== h) throw new Error(`${dir} alterado: ${name}`);
   }
 }
+
+// QR (S8): o arquivo original, conferido acima, vira módulo sem ser alterado.
+await writeFile(join(stage, 'vendor/qrcode/qrcode.mjs'), `${await readFile(join(stage, 'vendor/qrcode/qrcode.js'), 'utf8')}\nexport default qrcode;\n`);
 
 // 2) Assinatura.
 let priv, devBuild = false;

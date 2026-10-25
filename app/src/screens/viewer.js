@@ -5,11 +5,15 @@ import { sensitiveScope } from '../sensitive-scope.js';
 
 let current = null;
 export function closeMedia() { current?.scope.cancel(); }
+// F07: a mensagem aberta venceu ou foi apagada: fecha na hora.
+export function closeIfGone(stillThere) { if (current?.msgId && !stillThere(current.msgId)) closeMedia(); }
 function begin(options = {}) {
   closeMedia();
   const scope = sensitiveScope(options);
-  const entry = { scope, overlay: null, url: null, cleanup: null };
+  const entry = { scope, overlay: null, url: null, cleanup: null, msgId: options.msgId ?? null };
   current = entry;
+  // F07: fecha sozinho quando a mensagem vence, mesmo sem outro evento.
+  if (options.expiresIn > 0) { const t = setTimeout(() => scope.cancel(), Math.min(options.expiresIn, 2 ** 31 - 1)); scope.onCancel(() => clearTimeout(t)); }
   scope.onCancel(() => {
     if (current === entry) current = null;
     try { entry.cleanup?.(); } catch {}

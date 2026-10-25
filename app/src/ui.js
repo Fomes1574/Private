@@ -82,3 +82,20 @@ export function errText(e) {
   if (e?.code === 'rate_limited') return 'muitas ações seguidas. Espere um minuto e tente de novo.';
   return e?.message ?? String(e);
 }
+
+// Segurar (toque longo) como no WhatsApp; no computador, botão direito.
+// Devolve true no clique que vier logo depois do toque longo, para quem
+// chama ignorar esse clique.
+export function onLongPress(el, fn, ms = 450) {
+  let timer = null, x = 0, y = 0, fired = false;
+  const stop = () => { clearTimeout(timer); timer = null; };
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    fired = false; x = e.clientX; y = e.clientY;
+    stop(); timer = setTimeout(() => { timer = null; fired = true; fn(e); }, ms);
+  });
+  el.addEventListener('pointermove', (e) => { if (timer && Math.hypot(e.clientX - x, e.clientY - y) > 10) stop(); });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) el.addEventListener(ev, stop);
+  el.addEventListener('contextmenu', (e) => { e.preventDefault(); stop(); fired = true; fn(e); });
+  el.addEventListener('click', (e) => { if (fired) { fired = false; e.stopPropagation(); e.preventDefault(); } }, true);
+}

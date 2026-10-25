@@ -97,6 +97,16 @@ export class MediaBox extends DurableObject {
     return { ok: true };
   }
 
+  // Conversa encerrada (desfazer vínculo, encerrar grupo, V7-008): ver uma
+  // vez ainda não aberto deixa de existir para todos. Mídia comum continua
+  // só para leitura até vencer, como as mensagens.
+  async closeRoom() {
+    const meta = this.meta();
+    if (!meta.state) return { error: 'gone' };
+    if (meta.mode === 'once') await this.purge();
+    return { ok: true };
+  }
+
   // Membro removido perde o direito e não segura a limpeza (§15.7).
   async revokeMember(target) {
     const meta = this.meta();
@@ -116,4 +126,6 @@ export class MediaBox extends DurableObject {
   }
 
   async alarm() { await this.purge(); }
+  // Só pelo gancho de teste local (S13): o mesmo efeito do alarme.
+  async expireNow() { await this.purge(); return { ok: true }; }
 }

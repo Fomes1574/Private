@@ -140,7 +140,13 @@ export async function enroll({ lock, how, token, setupCode, confirmRecover }) {
   try {
     r = how === 'bootstrap' ? await S.client.bootstrap(setupCode) : await S.client.redeem(token);
   } catch (e) {
-    if (how !== 'bootstrap' || e.code !== 'exists' || !(await confirmRecover?.())) throw e;
+    if (how !== 'bootstrap' || e.code !== 'exists' || !(await confirmRecover?.())) {
+      // N3: nada de banco aberto pela metade; uma nova tentativa começa limpa.
+      // (Instalação nova: ainda não existe cofre nem banco de verdade.)
+      S.client = null;
+      await S.store?.wipe().catch(() => {});
+      throw e;
+    }
     return recoverAdmin(lock, pool, setupCode);
   }
   await S.client.login();
@@ -286,6 +292,8 @@ async function afterUnlock({ loggedIn = false } = {}) {
   // Token novo ou permissão retirada nas configurações: acerta no servidor.
   if (pushEnabled()) push.refreshPush(S.client.api, true).catch(() => {});
   else S.client.api.post('/v1/push', { endpoint: null }).catch(() => {});
+  // S3: fixa quem é a administradora (primeira identidade do círculo).
+  if (!S.client.circleAdmin) S.client.refreshDirectory().then(() => S.client?.circleAdminId()).catch(() => {});
   if (native.isNative()) await globalThis.Capacitor?.Plugins?.AttachmentPicker?.authorize();
   emit('unlocked');
 }
@@ -398,6 +406,8 @@ export function syncNow() {
         }
         if (!S.unlocked) break;
         if (S.clock.now() && (await S.store.purgeExpired(S.clock.now())) > 0) scheduleRotate();
+        // Lista do círculo mudou (S3): anuncia o apelido aos recém-confirmados.
+        if (S.client.circleRosterChanged) { S.client.circleRosterChanged = false; await announce().catch(() => {}); }
         await maybeAnnounce();
         emit('synced');
       } while (again && S.unlocked);
@@ -416,7 +426,8 @@ async function handleExtras(received) {
     }
     if (m.kind === 'room_profile') {
       // Nome do grupo só da líder confirmada de ponta a ponta (não do servidor).
-      if (S.client.trusted[m.room]?.leader === m.sender) {
+      // F03: conversa excluída por mim não recupera nome/foto por anúncio velho.
+      if (S.client.trusted[m.room]?.leader === m.sender && !S.rooms[m.room]?.deleted) {
         const prev = S.rooms[m.room] ?? {};
         const next = { ...prev, title: m.body.title };
         for (const k of ['photo', 'background']) if (k in m.body) { next[k] = m.body[k]; if (prev[k] && prev[k].mediaId !== m.body[k]?.mediaId) forgetVisual(prev[k]); }
@@ -467,8 +478,10 @@ async function maybeAnnounce() {
   announceCheck = false;
 }
 
+// N2: só quem ainda está no círculo aparece na busca.
+export const isActiveMember = (userId) => S.client.known[userId]?.state !== 'removed';
 export function searchPeople(term) {
-  const dir = Object.entries(S.nicknames).map(([userId, n]) => ({ userId, nickname: n.nickname }));
+  const dir = Object.entries(S.nicknames).filter(([userId]) => isActiveMember(userId)).map(([userId, n]) => ({ userId, nickname: n.nickname }));
   return searchByPrefix(dir, term, { self: S.client.userId });
 }
 
@@ -504,6 +517,7 @@ export function roomTitle(view) {
 export async function listRooms() {
   const res = await S.client.api.get('/v1/rooms');
   const ids = res.rooms.filter((r) => r !== CIRCLE_ROOM_ID);
+  for (const [id, r] of Object.entries(S.rooms)) if (r?.left && !r.deleted && !ids.includes(id)) ids.push(id);
   for (const id of ids) if (!S.rooms[id]) S.rooms[id] = {};
   return Promise.all(ids.map((id) => roomView(id)));
 }
@@ -518,6 +532,7 @@ export function startDirect(userId) {
     if (v.created === false) await syncNow();
     if (!S.unlocked || S.client !== client) throw new Error('sessão encerrada');
     S.rooms[v.roomId] ??= {};
+    await undeleteRoom(v.roomId);
     await S.store.put('rooms', S.rooms);
     viewCache.set(v.roomId, v);
     return v;
@@ -551,7 +566,7 @@ export async function sendRoomProfile(roomId) {
 // ---------- preferências deste aparelho ----------
 // Modo máximo (padrão): foto e vídeo só pela câmera do app, nunca da galeria
 // (o original da galeria tem GPS/modelo e o sistema faz cópia temporária).
-export const DEFAULT_PREFS = Object.freeze({ maxMode: true, lockAfter: 0 });
+export const DEFAULT_PREFS = Object.freeze({ maxMode: true, lockAfter: 0, showPreview: true });
 export async function setPrefs(patch) {
   S.prefs = { ...S.prefs, ...patch };
   await S.store.put('prefs', S.prefs);
@@ -569,6 +584,76 @@ export async function muteRoom(roomId, until) {
   await setRoomFlag(roomId, { mutedUntil: r.until });
 }
 export const isMuted = (roomId) => (S.rooms[roomId]?.mutedUntil ?? 0) > Date.now();
+
+// ---------- lista como no WhatsApp (entrega B) ----------
+// Tudo aqui é só deste aparelho, dentro do banco cifrado. Nada vai ao
+// servidor: nem lido/não lido, nem prévia, nem conversa excluída.
+export const MAX_PINNED = 3; // D9
+export async function togglePin(roomId) {
+  const on = !S.rooms[roomId]?.pinned;
+  if (on && Object.values(S.rooms).filter((r) => r?.pinned && !r.deleted).length >= MAX_PINNED) throw new Error(`Dá para fixar até ${MAX_PINNED} conversas.`);
+  await setRoomFlag(roomId, { pinned: on });
+  return on;
+}
+const now = () => S.clock?.now() ?? Date.now();
+// Contador (D2): mensagens recebidas, válidas, ainda não vistas. Reação,
+// edição e eventos não são mensagens guardadas, então não contam.
+export function unreadCount(roomId, render) {
+  const r = S.rooms[roomId] ?? {};
+  const readAt = r.readAt ?? 0;
+  const n = render.filter((m) => m.sender !== S.client.userId && m.acceptedAt > readAt).length;
+  return n || (r.markedUnread ? 1 : 0);
+}
+// Marcar como lida até a mensagem que apareceu na tela (D2): a posição de
+// leitura importa, então quem lê lá em cima não zera o contador.
+export async function markRead(roomId, upTo) {
+  const r = S.rooms[roomId] ?? {};
+  if ((r.readAt ?? 0) >= upTo && !r.markedUnread) return;
+  await setRoomFlag(roomId, { readAt: Math.max(r.readAt ?? 0, upTo), markedUnread: false });
+}
+export const markUnread = (roomId) => setRoomFlag(roomId, { markedUnread: true }); // D10
+// Prévia da última mensagem (D2). Nunca abre mídia nem cria miniatura; ver
+// uma vez aparece só como rótulo. Com a opção desligada: "Nova mensagem".
+export function previewOf(view, last) {
+  if (!last) return view.closed ? 'Encerrada' : 'Sem mensagens';
+  if (S.prefs.showPreview === false) return last.sender === S.client.userId ? 'Mensagem enviada' : 'Nova mensagem';
+  const who = last.sender === S.client.userId ? 'Você: ' : view.kind === 'group' ? `${nameOf(last.sender)}: ` : '';
+  let what;
+  if (last.kind === 'media') {
+    const mime = last.body?.mime ?? '';
+    const base = last.body?.mode === 'doc' ? '📄 Documento' : /^audio\//.test(mime) ? '🎤 Áudio' : /^video\//.test(mime) ? '🎥 Vídeo' : '📷 Foto';
+    what = last.body?.mode === 'once' ? `${base} de ver uma vez` : last.body?.caption ? `${base} · ${last.body.caption}` : base;
+  } else if (last.kind === 'poll') what = `📊 ${last.body?.question ?? 'Enquete'}`;
+  else what = last.text ?? '';
+  return (who + what).replace(/\s+/g, ' ').slice(0, 80);
+}
+// Limpar (D3): apaga as mensagens só deste aparelho; a conversa fica.
+export async function clearRoom(roomId) {
+  const n = await S.client.clearRoomForMe(roomId);
+  await setRoomFlag(roomId, { readAt: now(), markedUnread: false });
+  return n;
+}
+// Excluir (D3, F03): some da MINHA lista com mensagens, rascunho, prévia,
+// contador e nome/foto/fundo locais. Os outros continuam com tudo. Volta se
+// chegar mensagem nova (aceita depois da exclusão, pelo relógio do servidor).
+export async function deleteRoomForMe(roomId) {
+  await S.client.clearRoomForMe(roomId);
+  await setDraft(roomId, '');
+  const prev = S.rooms[roomId] ?? {};
+  for (const k of ['photo', 'background']) if (prev[k]) forgetVisual(prev[k]);
+  S.rooms[roomId] = { deleted: true, deletedAt: now(), ...(prev.left ? { left: true } : {}) };
+  await S.store.put('rooms', S.rooms);
+  viewCache.delete(roomId);
+  scheduleRotate(); // nome e foto antigos saem do arquivo do banco
+}
+export const isDeleted = (roomId, lastAt = 0) => !!S.rooms[roomId]?.deleted && lastAt <= (S.rooms[roomId].deletedAt ?? 0);
+// Abrir de propósito (tocar na pessoa) traz a conversa de volta à lista.
+export async function undeleteRoom(roomId) {
+  if (S.rooms[roomId]?.deleted) { const { deleted, deletedAt, ...rest } = S.rooms[roomId]; S.rooms[roomId] = { ...rest, readAt: deletedAt }; await S.store.put('rooms', S.rooms); }
+}
+// Saiu do grupo: continua na lista só para leitura até excluir (WhatsApp).
+export const markLeft = (roomId) => setRoomFlag(roomId, { left: true });
+export const imActive = (view) => !!view?.members.some((m) => m.userId === S.client.userId && m.active);
 
 // ---------- fotos de perfil, de grupo e fundo (§21) ----------
 // Decifradas só em memória; trancar o app solta tudo.
@@ -641,6 +726,42 @@ export async function fingerprint(curveB64) {
   return out.join(' ');
 }
 export const myFingerprint = () => fingerprint(S.client.account.curve25519Key);
+
+// S8: número de segurança da DUPLA (como o WhatsApp/Signal): metade de cada
+// chave, em ordem fixa, então os dois aparelhos mostram o mesmo número.
+export async function safetyNumber(userId) {
+  const theirs = S.client.known[userId]?.curve;
+  if (!theirs) return null;
+  const halves = await Promise.all([S.client.account.curve25519Key, theirs].sort().map(async (k) => (await fingerprint(k)).split(' ').slice(0, 6).join(' ')));
+  return halves.join(' ');
+}
+// Conteúdo do QR: as duas chaves públicas em ordem fixa (nada secreto).
+export function verifyPayload(userId) {
+  const theirs = S.client.known[userId]?.curve;
+  return theirs ? `mp-verify:1:${[S.client.account.curve25519Key, theirs].sort().join(':')}` : null;
+}
+export const isVerified = (userId) => S.client.isVerified(userId);
+// S3: lista do círculo confirmada pela administradora.
+export function circlePending(userId) {
+  const roster = S.client.circleRoster();
+  if (userId === S.client.circleAdmin) return false;
+  return roster ? !roster.includes(userId) : true;
+}
+export function circlePendingCount() {
+  return Object.entries(S.client.known).filter(([u, k]) => k.state !== 'removed' && u !== S.client.userId && circlePending(u)).length;
+}
+export async function confirmCircle(members) {
+  await S.client.confirmCircle(members);
+  await announce().catch(() => {});
+}
+export const isCircleAdmin = async () => (await S.client.circleAdminId()) === S.client.userId;
+export const keyChanged = (userId) => S.client.keyChangedSinceVerified(userId);
+export async function setVerified(userId, on) { await S.client.setVerified(userId, on); emit('verified'); }
+// Avisos de segurança desta conversa (S1): troca de chave de quem está nela.
+export function roomWarnings(view) {
+  const ids = new Set(view.members.filter((m) => m.active && m.userId !== S.client.userId).map((m) => m.userId));
+  return S.client.warnings.filter((w) => w.kind === 'key_changed' && ids.has(w.userId));
+}
 
 // ---------- tempo real e push ----------
 let ws = null, wsRetry = null, pollTimer = null;

@@ -6,15 +6,18 @@ import { formatTime, formatDateTime } from '../packages/protocol/src/time.js';
 import { preparePhoto } from '../media.js';
 import { editPhoto } from '../editor.js';
 import { openCamera } from '../camera.js';
-import { openMedia, onceButton, playAudio, openDoc, isPdf } from './viewer.js';
+import { openMedia, onceButton, playAudio, openDoc, isPdf, closeIfGone } from './viewer.js';
 import { MAX_DOC_BYTES } from '../packages/protocol/src/documents.js';
 import { validDocName } from '../packages/protocol/src/envelope.js';
 import { prepareVideo } from '../video-prep.js';
 import { startRecording, fmtDuration } from '../audio.js';
 import { roomMenu } from './room-menu.js';
+import { verifySheet } from './verify.js';
+import { warningText } from '../security-text.js';
 import { nativePickerAvailable, selectNativeAttachment, readNativeAttachment } from '../attachment-picker.js';
 import { sensitiveScope } from '../sensitive-scope.js';
 import { normalize } from '../packages/protocol/src/nickname.js';
+import { EDIT_WINDOW_MS } from '../packages/protocol/src/reconcile.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 const EMOJIS = ['😀', '😂', '🥲', '😍', '😘', '😎', '🤔', '😴', '😢', '😡', '👍', '👎', '👏', '🙏', '💪', '❤️', '🔥', '✨', '🎉', '🌙', '☀️', '🌧️', '☕', '🍕'];
@@ -77,7 +80,7 @@ export async function chatScreen(go, { roomId, attachment = null }) {
     try {
       const prepared = await preparePhoto(f); // recodificada, sem metadados
       await sendPhoto(prepared.bytes, prepared.mime, once);
-    } catch (e) { toast(`Não enviou: ${errText(e)}`); }
+    } catch (e) { sendFailed(e); }
   };
 
   // Foto (da câmera do app ou da galeria): editor → cifra → envia.
@@ -90,7 +93,7 @@ export async function chatScreen(go, { roomId, attachment = null }) {
       await S.client.sendMedia(roomId, p.bytes, { mode: once ? 'once' : 'media', mime: p.mime, caption });
       p.bytes.fill(0);
       await render();
-    } catch (e) { toast(`Não enviou: ${errText(e)}`); }
+    } catch (e) { sendFailed(e); }
     finally { bytes.fill(0); }
   }
 
@@ -133,7 +136,7 @@ export async function chatScreen(go, { roomId, attachment = null }) {
       bar.removeAttribute('value');
       await S.client.sendMedia(roomId, bytes, { mode: once ? 'once' : 'media', mime: 'video/mp4', duration, caption: takeCaption(once) });
       await render();
-    } catch (e) { toast(`Não enviou: ${errText(e)}`); }
+    } catch (e) { sendFailed(e); }
     finally { bytes?.fill(0); videoJob = null; progressBar.hidden = true; progressBar.replaceChildren(); }
   }
 
@@ -160,7 +163,7 @@ export async function chatScreen(go, { roomId, attachment = null }) {
       const m = await client.sendMedia(roomId, bytes, { mode: 'doc', mime, name });
       if (m.quota?.evicted?.length) toast('Documento enviado. O mais antigo foi apagado para todos (limite de 3).');
       await render();
-    } catch (e) { toast(`Não enviou: ${errText(e)}`); }
+    } catch (e) { sendFailed(e); }
     finally { bytes?.fill(0); }
   }
 
@@ -232,7 +235,7 @@ export async function chatScreen(go, { roomId, attachment = null }) {
         if (!audioDraft || !scope.valid()) return;
         const draft = audioDraft; audioDraft = null; recBar.hidden = true;
         try { await client.sendMedia(roomId, draft.bytes, { mode: 'media', mime: draft.mime, duration: draft.ms }); if (scope.valid()) await render(); }
-        catch (e) { if (scope.valid()) toast(`Não enviou: ${errText(e)}`); }
+        catch (e) { if (scope.valid()) sendFailed(e); }
         finally { draft.bytes.fill(0); }
       } }));
   }
@@ -271,7 +274,7 @@ export async function chatScreen(go, { roomId, attachment = null }) {
     const mine = m.sender === S.client.userId;
     const opts = [{ label: 'Responder', value: 'reply' }];
     if (m.kind !== 'media' || m.body?.mode !== 'once') opts.push({ label: 'Reagir', value: 'react' });
-    if (mine && m.kind === 'text') opts.push({ label: 'Editar', value: 'edit' });
+    if (mine && m.kind === 'text' && (S.clock.now() ?? Date.now()) - m.acceptedAt < EDIT_WINDOW_MS) opts.push({ label: 'Editar', value: 'edit' });
     opts.push({ label: 'Apagar para mim', value: 'me', danger: true });
     if (mine) opts.push({ label: 'Apagar para todos', value: 'all', danger: true });
     const c = await choiceSheet(`Some em ${formatDateTime(m.expiresAt)} (horário de Brasília)`, opts);
@@ -284,18 +287,19 @@ export async function chatScreen(go, { roomId, attachment = null }) {
         input.focus();
         const done = async () => { editing = false; const t = input.value.trim(); input.value = ''; if (t && t !== m.text) await S.client.edit(roomId, m.msgId, t); await render(); };
         input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); input.onkeydown = null; done(); } };
-        toast('Edite e aperte Enter. A mensagem fica com "*editado" e o mesmo prazo.');
+        toast('Edite e aperte Enter. A mensagem fica com "editada" e o mesmo prazo.');
       }
       if (c === 'me' && await confirmSheet('Apagar só para você? Os outros continuam vendo até vencer.', 'Apagar para mim')) await S.client.deleteForMe(m.msgId);
       if (c === 'all' && await confirmSheet('Apagar para todos? Some de todos os aparelhos assim que eles se conectarem.', 'Apagar para todos')) {
-        if (m.kind === 'media') await S.client.api.post(`/v1/media/${m.body.mediaId}/revoke`).catch(() => {});
-        await S.client.deleteForAll(roomId, m.msgId);
+        await S.client.deleteForAll(roomId, m.msgId, { mediaId: m.kind === 'media' ? m.body?.mediaId : null });
       }
       await render();
     } catch (e) { toast(`Não deu: ${errText(e)}`); }
   }
 
   function bubble(m, byId) {
+    // Aviso de segurança dentro da conversa (S1), como no WhatsApp.
+    if (m.sys) return h('li', { class: 'msg-sys', role: 'button', onclick: () => verifySheet(m.sys.userId) }, `🔒 ${warningText(m.sys)}`);
     const mine = m.sender === S.client.userId;
     const parts = [];
     if (view.kind !== 'direct' && !mine) parts.push(h('span', { class: 'who', text: session.nameOf(m.sender) }));
@@ -306,19 +310,21 @@ export async function chatScreen(go, { roomId, attachment = null }) {
     }
     else parts.push(h('span', { class: 'text', text: m.text }));
     const meta = [h('time', { text: formatTime(m.acceptedAt) })];
-    if (m.edited) meta.push(h('span', { text: '*editado' }));
+    if (m.edited) meta.push(h('span', { text: 'editada' }));
     const reacts = Object.values(m.reactions ?? {});
     if (reacts.length) meta.push(h('span', { class: 'reacts', text: reacts.join('') }));
     parts.push(h('span', { class: 'meta' }, meta));
     return h('li', { class: mine ? 'msg mine' : 'msg', onclick: (e) => { if (!e.target.closest('.hold, .open, .audio-box')) actions(m); } }, parts);
   }
 
+  // Visualizador ligado à mensagem: fecha quando ela vence ou some (F07).
+  const viewOpts = (m) => ({ signal: scope.signal, msgId: m.msgId, expiresIn: m.expiresAt - (S.clock.now() ?? Date.now()) });
   function mediaBlock(m, mine) {
     const load = (options) => client.openMedia(m, options);
     const what = mediaName(m);
     if (m.body.mode === 'doc') {
       if (!m.body.key) return h('span', { class: 'media-tag', text: `Documento · ${m.body.name ?? ''}` });
-      return h('button', { class: 'open media-tag', text: `Documento · ${m.body.name ?? 'sem nome'} · abrir`, onclick: () => openDoc(load, m.body.name, m.body.mime, { signal: scope.signal }).catch((e) => toast(`Não abriu: ${errText(e)}`)) });
+      return h('button', { class: 'open media-tag', text: `Documento · ${m.body.name ?? 'sem nome'} · abrir`, onclick: () => openDoc(load, m.body.name, m.body.mime, viewOpts(m)).catch((e) => toast(`Não abriu: ${errText(e)}`)) });
     }
     if (m.body.mode === 'once') {
       const a = what === 'Foto' ? 'a' : 'o';
@@ -329,14 +335,14 @@ export async function chatScreen(go, { roomId, attachment = null }) {
         if (!scope.valid()) return;
         if (err) toast('Não foi possível abrir. A visualização pode ter sido consumida; ela não será repetida automaticamente.');
         await render().catch(() => {});
-      }, { signal: scope.signal });
+      }, viewOpts(m));
     }
     if (/^audio\//.test(m.body.mime)) {
       const host = h('span', { class: 'audio-host' });
-      return h('span', {}, h('button', { class: 'open media-tag', text: `Áudio · ${fmtDuration(m.body.duration ?? 0)} · tocar`, onclick: () => playAudio(load, m.body.mime, host, { signal: scope.signal }).catch((e) => toast(`Não tocou: ${errText(e)}`)) }), host);
+      return h('span', {}, h('button', { class: 'open media-tag', text: `Áudio · ${fmtDuration(m.body.duration ?? 0)} · tocar`, onclick: () => playAudio(load, m.body.mime, host, viewOpts(m)).catch((e) => toast(`Não tocou: ${errText(e)}`)) }), host);
     }
     const label = what === 'Vídeo' ? `Vídeo · ${fmtDuration(m.body.duration ?? 0)} · tocar para ver` : 'Foto · tocar para ver';
-    return h('button', { class: 'open media-tag', text: label, onclick: () => openMedia(load, m.body.mime, { signal: scope.signal }).catch((e) => toast(`Não abriu: ${errText(e)}`)) });
+    return h('button', { class: 'open media-tag', text: label, onclick: () => openMedia(load, m.body.mime, viewOpts(m)).catch((e) => toast(`Não abriu: ${errText(e)}`)) });
   }
 
   const nodes = new Map();
@@ -361,17 +367,22 @@ export async function chatScreen(go, { roomId, attachment = null }) {
         if (r.blocked) { log.replaceChildren(h('li', { class: 'note', text: 'Sem conexão confiável com o servidor: as mensagens ficam escondidas até reconectar.' })); nodes.clear(); return; }
         const bottom = !rendered || atBottom(), top = log.scrollTop;
         const byId = new Map(r.render.map((m) => [m.msgId, m]));
-        const list = term ? r.render.filter((m) => normalize((m.kind === 'media' ? m.body?.caption ?? m.body?.name ?? '' : m.text) ?? '').includes(term)) : r.render;
+        let list = term ? r.render.filter((m) => normalize((m.kind === 'media' ? m.body?.caption ?? m.body?.name ?? '' : m.text) ?? '').includes(term)) : r.render;
+        if (!term) {
+          const notes = session.roomWarnings(view).map((w) => ({ msgId: `w:${w.userId}:${w.at}`, sys: w, acceptedAt: w.at }));
+          if (notes.length) list = [...list, ...notes].sort((a, b) => a.acceptedAt - b.acceptedAt);
+        }
         const wanted = new Set(list.map((m) => m.msgId));
         for (const [id, entry] of nodes) if (!wanted.has(id)) { entry.el.remove(); nodes.delete(id); unseen.delete(id); }
+        if (!term) closeIfGone((id) => byId.has(id));
         for (const note of log.querySelectorAll('li.note')) note.remove();
         list.forEach((m, i) => {
-          const signature = JSON.stringify([m.text, m.body?.caption, m.body?.key == null, m.consumed, m.edited, m.reactions, m.replyTo && [byId.has(m.replyTo), byId.get(m.replyTo)?.text]]);
+          const signature = m.sys ? 'sys' : JSON.stringify([m.text, m.body?.caption, m.body?.key == null, m.consumed, m.edited, m.reactions, m.replyTo && [byId.has(m.replyTo), byId.get(m.replyTo)?.text]]);
           let entry = nodes.get(m.msgId);
           if (!entry || entry.signature !== signature) {
             const next = { el: bubble(m, byId), signature };
             if (entry) entry.el.replaceWith(next.el);
-            else if (rendered && !bottom && m.sender !== client.userId) unseen.add(m.msgId);
+            else if (rendered && !bottom && !m.sys && m.sender !== client.userId) unseen.add(m.msgId);
             entry = next; nodes.set(m.msgId, entry);
           }
           if (log.children[i] !== entry.el) log.insertBefore(entry.el, log.children[i] ?? null);
@@ -411,8 +422,22 @@ export async function chatScreen(go, { roomId, attachment = null }) {
     })();
   }
   const timer = setInterval(() => render().catch(() => {}), 30_000); // vencidas somem sozinhas
-  const off = session.onChange((w) => { if (w === 'synced') render().catch(() => {}); });
+  // F18: membros, liderança e encerramento também mudam pela sincronização.
+  const refreshView = async () => {
+    const v = await session.roomView(roomId, true);
+    if (!v || !scope.valid()) return;
+    if (v.closed !== view.closed || v.leader !== view.leader) return go('chat', { roomId });
+    view = v;
+  };
+  const off = session.onChange((w) => { if (w === 'synced') { render().catch(() => {}); refreshView().catch(() => {}); } if (w === 'verified') render().catch(() => {}); });
   return () => { scope.cancel(); clearInterval(timer); off(); if (draftTimer) { clearTimeout(draftTimer); saveDraft(); } };
+}
+
+// Mídia pausada porque a chave de alguém conferido mudou (S1): abre a
+// verificação dessa pessoa.
+function sendFailed(e) {
+  if (e?.code === 'key_unverified') { toast(errText(e)); if (e.userIds?.[0]) verifySheet(e.userIds[0]); return; }
+  toast(`Não enviou: ${errText(e)}`);
 }
 
 function mediaName(m) {

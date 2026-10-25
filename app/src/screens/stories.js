@@ -40,8 +40,7 @@ export async function storiesScreen(go, { attachment = null } = {}) {
         mine ? h('button', { class: 'secondary small', text: 'Apagar', onclick: async () => {
           if (!await confirmSheet('Apagar esta story para todos agora?', 'Apagar')) return;
           try {
-            await S.client.api.post(`/v1/media/${m.body.mediaId}/revoke`).catch(() => {});
-            await S.client.deleteForAll(CIRCLE_ROOM_ID, m.msgId);
+            await S.client.deleteForAll(CIRCLE_ROOM_ID, m.msgId, { mediaId: m.body.mediaId });
             await render();
           } catch (e) { toast(`Não deu: ${errText(e)}`); }
         } }) : null);
@@ -58,7 +57,9 @@ export async function storiesScreen(go, { attachment = null } = {}) {
 // Publicar: escolher arquivo, audiência (padrão: todo o círculo), prazo e legenda.
 function compose(go, selectedFile = null) {
   const S = session.S;
-  const people = Object.entries(S.nicknames).filter(([u]) => u !== S.client.userId);
+  // S3: só quem a administradora confirmou pode ser audiência.
+  const roster = S.client.circleRoster();
+  const people = Object.entries(S.nicknames).filter(([u]) => u !== S.client.userId && (!roster || roster.includes(u)));
   if (!people.length) return toast('Ainda não há outras pessoas no círculo.');
   // Câmera do app sempre; galeria só com o modo máximo desligado.
   const file = h('input', { id: 'story-file', type: 'file', accept: 'image/*,video/*', hidden: session.maxMode() || nativePickerAvailable() });

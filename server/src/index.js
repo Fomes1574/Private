@@ -199,6 +199,9 @@ route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/events', async ({ env, ctx, reque
   // Saiu ou foi removido: perde os direitos de mídia pendentes (§15.7).
   const gone = ev.type === 'leave' ? me.userId : ev.type === 'remove_member' ? ev.member : null;
   if (gone) ctx.waitUntil(Promise.all((await r.mediaIds()).map((id) => media(env, id).revokeMember(gone))));
+  // F05 (V7-008): desfazer vínculo ou encerrar o grupo revoga o ver uma vez
+  // pendente. Mídia comum fica só para leitura até vencer.
+  if (view.closed && ['unlink', 'close'].includes(ev.type)) await Promise.all((await r.mediaIds()).map((id) => media(env, id).closeRoom().catch(() => null)));
   await nudge(env, ctx, view.members.filter((m) => m.active && m.userId !== me.userId).map((m) => m.userId));
   return json(200, view);
 });
@@ -206,12 +209,33 @@ route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/mute', async ({ env, request, me,
 route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/messages', async ({ env, ctx, request, me, p }) => {
   const b = await readJson(request, 2 * 1024 * 1024);
   const kind = ['media', 'story'].includes(b.kind) ? b.kind : 'text';
-  const r = unwrap(await room(env, p[1]).send(me.userId, { msgId: assertId(b.msgId), kind, envelopes: b.envelopes, ttl: b.ttl === undefined ? undefined : Number(b.ttl) }));
+  // F04/F16: a mídia da mensagem precisa ser minha, desta conversa e já
+  // guardada. O servidor usa o que ELE registrou, nunca o que o cliente diz.
+  let info = null;
+  const mediaId = kind !== 'text' && b.mediaId !== undefined ? assertId(b.mediaId) : null;
+  if (mediaId) {
+    info = unwrap(await media(env, mediaId).describe());
+    if (info.sender !== me.userId || info.room !== p[1] || info.state !== 'active' || info.mode === 'visual') throw new HttpError(403, 'forbidden');
+  }
+  const msgId = assertId(b.msgId);
+  const r = unwrap(await room(env, p[1]).send(me.userId, { msgId, kind, envelopes: b.envelopes, ttl: b.ttl === undefined ? undefined : Number(b.ttl), mediaId }));
+  let quota;
+  if (info?.mode === 'doc' && !r.duplicate) quota = await publishDoc(env, ctx, me, { mediaId, msgId, info });
   await nudge(env, ctx, r.recipients, { silent: r.silent });
-  return json(r.duplicate ? 200 : 201, { acceptedAt: r.acceptedAt, expiresAt: r.expiresAt });
+  return json(r.duplicate ? 200 : 201, { acceptedAt: r.acceptedAt, expiresAt: r.expiresAt, ...(quota ? { quota } : {}) });
 });
 route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/messages/([A-Za-z0-9_-]{8,64})/delete', async ({ env, ctx, me, p }) => {
-  const r = unwrap(await room(env, p[1]).deleteForAll(me.userId, p[2]));
+  const r0 = room(env, p[1]);
+  const msg = await r0.messageInfo(p[2]);
+  if (!msg) throw new HttpError(404, 'not_found');
+  if (msg.sender !== me.userId) throw new HttpError(403, 'forbidden');
+  // F04: a mídia é revogada ANTES de sumir a mensagem. Se a revogação falhar,
+  // nada é apagado e o app avisa (nunca some da tela com a mídia viva).
+  if (msg.mediaId) {
+    const rv = await media(env, msg.mediaId).revokeAll(me.userId).catch(() => ({ error: 'unavailable' }));
+    if (rv.error && rv.error !== 'gone') throw new HttpError(503, 'revoke_failed');
+  }
+  const r = unwrap(await r0.deleteForAll(me.userId, p[2]));
   await quota(env, me.userId).release(p[2]); // se era documento, a vaga volta (§16)
   await nudge(env, ctx, r.recipients.filter((u) => u !== me.userId));
   return json(200, { ok: true });
@@ -314,6 +338,14 @@ route('POST', '/v1/media/([A-Za-z0-9_-]{8,64})/open', async ({ env, ctx, me, p }
   });
   return new Response(stream, { headers });
 });
+// Só nos testes locais (S13): dispara o alarme de vencimento de uma mídia.
+// Não existe em produção: exige TEST_HOOKS=1 (nunca configurado no deploy)
+// e endereço local.
+route('POST', '/__test/media/([A-Za-z0-9_-]{8,64})/alarm', async ({ env, url, p }) => {
+  if (env.TEST_HOOKS !== '1' || !['127.0.0.1', 'localhost'].includes(url.hostname)) throw new HttpError(404, 'not_found');
+  await media(env, p[1]).expireNow();
+  return json(200, { ok: true });
+}, { open: true });
 route('POST', '/v1/media/([A-Za-z0-9_-]{8,64})/revoke', async ({ env, me, p }) => {
   const r = unwrap(await media(env, p[1]).revokeAll(me.userId)); // só o autor (conferido no DO)
   await quota(env, me.userId).release(p[1]);
@@ -412,6 +444,26 @@ route('POST', '/v1/vault/kill', async ({ env, request }) => json(200, unwrap(awa
 route('GET', '/v1/docs/mine', async ({ env, me }) => json(200, { active: await quota(env, me.userId).active(), max: MAX_ACTIVE_DOCS }));
 
 // Documento publicado: cota global de 3 por pessoa (V6-019, V6-020).
+// Cota de documentos (§16). Desde F16 roda no próprio envio da mensagem; a
+// rota separada fica para APKs antigos. Se a cota falhar, o documento não
+// fica publicado pela metade: mensagem apagada para todos e mídia revogada.
+async function publishDoc(env, ctx, me, { mediaId, msgId, info }) {
+  const doc = { docId: mediaId, room: info.room, msgId, size: info.size, expiresAt: info.expiresAt };
+  const r = await quota(env, me.userId).publish(me.userId, doc).catch(() => ({ error: 'unavailable' }));
+  if (r.error) {
+    await media(env, mediaId).revokeAll(me.userId, { system: true }).catch(() => null);
+    const del = await room(env, info.room).deleteForAll(me.userId, msgId, { system: true }).catch(() => null);
+    if (del?.recipients) await nudge(env, ctx, del.recipients.filter((u) => u !== me.userId));
+    throw new HttpError(r.error === 'too_large' ? 413 : 503, r.error);
+  }
+  // Limpeza física depois da transição lógica: mídia e tombstone para todos.
+  for (const ev of r.evicted) {
+    await media(env, ev.docId).revokeAll(me.userId, { system: true }).catch(() => null);
+    const del = await room(env, ev.room).deleteForAll(me.userId, ev.msgId, { system: true }).catch(() => null);
+    if (del?.recipients) await nudge(env, ctx, del.recipients.filter((u) => u !== me.userId));
+  }
+  return { evicted: r.evicted.map((e) => e.docId), active: r.active };
+}
 route('POST', '/v1/docs/publish', async ({ env, ctx, request, me }) => {
   const b = await readJson(request);
   const mediaId = assertId(b.mediaId), msgId = assertId(b.msgId);
@@ -420,15 +472,7 @@ route('POST', '/v1/docs/publish', async ({ env, ctx, request, me }) => {
   const info = unwrap(await media(env, mediaId).describe());
   if (info.mode !== 'doc' || info.sender !== me.userId || info.state !== 'active') throw new HttpError(403, 'forbidden');
   if ((await room(env, info.room).messageOwner(msgId)) !== me.userId) throw new HttpError(403, 'forbidden');
-  const doc = { docId: mediaId, room: info.room, msgId, size: info.size, expiresAt: info.expiresAt };
-  const r = unwrap(await quota(env, me.userId).publish(me.userId, doc));
-  // Limpeza física depois da transição lógica: mídia e tombstone para todos.
-  for (const ev of r.evicted) {
-    await media(env, ev.docId).revokeAll(me.userId, { system: true }).catch(() => null);
-    const del = await room(env, ev.room).deleteForAll(me.userId, ev.msgId, { system: true }).catch(() => null);
-    if (del?.recipients) await nudge(env, ctx, del.recipients.filter((u) => u !== me.userId));
-  }
-  return json(200, { evicted: r.evicted.map((e) => e.docId), active: r.active });
+  return json(200, await publishDoc(env, ctx, me, { mediaId, msgId, info }));
 });
 
 export default {

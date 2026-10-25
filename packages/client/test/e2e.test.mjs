@@ -163,8 +163,9 @@ test('story: só a audiência recebe e abre; apagar antes de vencer some para el
   assert.equal((await p.caio.stories()).length, 0, 'fora da audiência nem fica sabendo');
   assert.equal((await p.ana.stories()).length, 1, 'quem publicou vê a própria');
   await assert.rejects(p.ana.sendStory(pic, { mime: 'image/jpeg', audience: ['intruso0000'] }), /audiência/);
+  // Desde F04 o servidor revoga a mídia junto com "apagar para todos".
   await p.ana.deleteForAll(CIRCLE_ROOM_ID, st.msgId);
-  await p.ana.api.post(`/v1/media/${st.body.mediaId}/revoke`);
+  await assert.rejects(p.ana.api.post(`/v1/media/${st.body.mediaId}/revoke`), /404/, 'já revogada');
   await p.bia.sync();
   assert.equal((await p.bia.stories()).length, 0, 'apagada some');
   await assert.rejects(p.bia.openMedia(bs[0]), /404/);

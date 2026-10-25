@@ -21,6 +21,11 @@ export function reconcile({ messages, tombstones, hiddenForMe, trustedNow }) {
   return { render, destroy, blocked: false };
 }
 
+// Editar só nos primeiros 15 minutos, como no WhatsApp (D7). Quem recebe
+// aceita uma folga para atraso de rede; quem envia respeita os 15 minutos.
+export const EDIT_WINDOW_MS = 15 * 60_000;
+export const EDIT_GRACE_MS = 5 * 60_000;
+
 // Edição (V7-009): só o autor, versão crescente, mantém o prazo original.
 export function applyEdit(original, edit) {
   if (edit.sender !== original.sender) throw new Error('só o autor edita');

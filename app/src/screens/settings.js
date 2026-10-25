@@ -2,6 +2,7 @@
 // e a parte da administradora (convites, membros, recuperação).
 import { h, mount, header, toast, confirmSheet, choiceSheet, errText } from '../ui.js';
 import * as session from '../session.js';
+import { warningText, warningWhen } from '../security-text.js';
 import { CONFIG } from '../config.js';
 import { formatDateTime } from '../packages/protocol/src/time.js';
 import { avatar } from '../avatar.js';
@@ -22,7 +23,8 @@ export async function settingsScreen(go, { attachment = null } = {}) {
   if (!owner.valid()) return;
   const aboutText = h('span', { id: 'about', text: session.aboutOf(S.client.userId) ?? '—' });
   const meAvatar = h('span', {}, avatar(session.myNickname(), session.photoOf(S.client.userId), { big: true }));
-  const warnings = S.client.warnings.map((w) => h('li', { class: 'warn', text: warningText(w) }));
+  // Atividade de segurança (S1): guardada cifrada, mais recente primeiro.
+  const warnings = [...S.client.warnings].reverse().slice(0, 50).map((w) => h('li', { class: w.kind.startsWith('circle_') ? 'muted small' : 'warn' }, h('span', { text: warningText(w) }), ' ', h('time', { class: 'muted small', text: warningWhen(w) })));
 
   mount(h('div', {},
     header('Ajustes', { back: () => go('chats') }),
@@ -53,7 +55,7 @@ export async function settingsScreen(go, { attachment = null } = {}) {
         h('p', { class: 'muted small', text: 'Seu número de segurança (compare pessoalmente):' }),
         h('p', { class: 'code', text: fp }),
         h('p', { class: 'muted small' }, 'Versão do app: ', h('span', { class: 'code', text: CONFIG.versionCode }), '. Confira com o código publicado no GitHub.'),
-        warnings.length ? h('ul', { class: 'list' }, warnings) : null,
+        warnings.length ? h('details', {}, h('summary', { text: `Atividade de segurança (${warnings.length})` }), h('ul', { class: 'list' }, warnings)) : null,
         h('button', { class: 'secondary', text: 'Bloquear agora', onclick: async () => { await session.lock('manual'); go('unlock'); } })),
       h('section', { class: 'card' },
         h('h2', { text: 'Trocar de celular' }),
@@ -179,8 +181,11 @@ function adminSection(members) {
     } }),
     out,
     h('h3', { text: 'Pessoas' }),
+    // S3: só quem você confirma recebe apelidos, fotos e stories do círculo.
+    // Confira quem entrou (de preferência verificando o número) e confirme.
+    circleConfirm(members),
     h('ul', { class: 'list' }, members.filter((m) => m.userId !== S.client.userId).map((m) => h('li', {},
-      h('span', { class: 'grow', text: `${session.nameOf(m.userId)}${m.state === 'frozen' ? ' (congelada)' : ''}` }),
+      h('span', { class: 'grow', text: `${session.nameOf(m.userId)}${m.state === 'frozen' ? ' (congelada)' : ''}${session.circlePending(m.userId) ? ' · aguardando sua confirmação' : ''}` }),
       h('button', { class: 'secondary small', text: '…', 'aria-label': `Opções de ${session.nameOf(m.userId)}`, onclick: async () => {
         const c = await choiceSheet(session.nameOf(m.userId), [
           { label: m.state === 'frozen' ? 'Descongelar' : 'Congelar agora', value: 'freeze' },
@@ -192,9 +197,27 @@ function adminSection(members) {
           if (c === 'freeze') await S.client.api.post('/v1/admin/freeze', { userId: m.userId, frozen: m.state !== 'frozen' });
           if (c === 'recover') toast(`Recuperação: ${(await S.client.api.post('/v1/recovery/approve', { userId: m.userId })).state === 'waiting' ? 'espera de 24 h começou; todos foram avisados.' : 'falta o guardião autorizar.'}`);
           if (c === 'recinvite') { const r = await S.client.api.post('/v1/invites', { kind: 'recovery', forUser: m.userId }); out.textContent = r.token; }
-          if (c === 'remove' && await confirmSheet(`Remover ${session.nameOf(m.userId)} do círculo?`, 'Remover')) await S.client.api.post('/v1/admin/remove', { userId: m.userId });
+          if (c === 'remove' && await confirmSheet(`Remover ${session.nameOf(m.userId)} do círculo?`, 'Remover')) {
+            await S.client.api.post('/v1/admin/remove', { userId: m.userId });
+            await session.confirmCircle(members.filter((x) => x.userId !== m.userId && !session.circlePending(x.userId)).map((x) => x.userId)).catch(() => {});
+          }
         } catch (e) { toast(e.code === 'too_early' ? 'Ainda não passaram as 24 horas.' : `Não deu: ${errText(e)}`); }
       } })))));
+}
+
+function circleConfirm(members) {
+  const pending = members.filter((m) => session.circlePending(m.userId));
+  if (!pending.length) return h('p', { class: 'muted small', text: 'Todas as pessoas do círculo estão confirmadas por você.' });
+  const boxes = pending.map((m) => h('label', { class: 'check' }, h('input', { type: 'checkbox', value: m.userId }), `${session.nameOf(m.userId)} (entrou com convite)`));
+  return h('div', { class: 'card' },
+    h('p', { text: 'Confirme quem entrou no círculo. Só pessoas confirmadas recebem apelidos, fotos e stories. Na dúvida, verifique o número da pessoa antes (menu da conversa → Participantes).' }),
+    boxes,
+    h('button', { text: 'Confirmar selecionadas', onclick: async () => {
+      const chosen = boxes.map((b) => b.querySelector('input')).filter((i) => i.checked).map((i) => i.value);
+      if (!chosen.length) return toast('Marque quem confirmar.');
+      const keep = members.filter((m) => !session.circlePending(m.userId)).map((m) => m.userId);
+      try { await session.confirmCircle([...keep, ...chosen]); toast('Confirmado.'); for (const b of boxes) if (b.querySelector('input').checked) b.remove(); } catch (e) { toast(`Não deu: ${errText(e)}`); }
+    } }));
 }
 
 // Atualização (ADR 0006, V7-017): o service worker só troca de versão com
@@ -233,17 +256,6 @@ function updateSection() {
       offer.hidden = false;
     } }),
     offer);
-}
-
-function warningText(w) {
-  switch (w.kind) {
-    case 'key_changed': return `${session.nameOf(w.userId)} trocou de chave (aparelho novo ou recuperação). Verifiquem os números pessoalmente.`;
-    case 'message_rejected': return `Uma mensagem de ${session.nameOf(w.userId)} não passou na verificação e foi descartada sem abrir. Se repetir, verifiquem os números pessoalmente.`;
-    case 'unconfirmed_member': return 'O servidor indicou numa conversa alguém que a líder não anunciou. Nada foi enviado. Avisem a líder.';
-    case 'ttl_clamped': return 'O servidor tentou dar a uma mensagem um prazo maior que o combinado. O aparelho manteve o prazo certo.';
-    case 'membership_rejected': return `Um anúncio de membros de ${session.nameOf(w.from)} não veio da líder confirmada e foi ignorado.`;
-    default: return 'Aviso de segurança. Verifiquem os números pessoalmente.';
-  }
 }
 
 // Caixa de texto em folha (sem prompt() do navegador).

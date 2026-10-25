@@ -9,7 +9,7 @@
 // - nada aparece sem tempo confiável; apagadas e vencidas somem antes (§25.6).
 import { OlmAccount, OlmSession, sealOuter, parseOuter, b64, unb64 } from '../../crypto/index.js';
 import { encodeInner, decodeInner, INNER_VERSION } from '../../protocol/src/envelope.js';
-import { reconcile, applyEdit } from '../../protocol/src/reconcile.js';
+import { reconcile, applyEdit, EDIT_WINDOW_MS, EDIT_GRACE_MS } from '../../protocol/src/reconcile.js';
 import { CIRCLE_ROOM_ID } from '../../protocol/src/room.js';
 import { isValidTtl, MAX_TTL } from '../../protocol/src/ttl.js';
 import { encryptMedia, decryptMedia, newMediaKey } from './media-crypto.js';
@@ -35,6 +35,8 @@ export class MessengerClient {
     // Membros confirmados por conversa, só mudados por anúncio cifrado da
     // líder. O servidor não consegue incluir um "membro fantasma" (V7-014 nº 1).
     this.trusted = {};
+    // S8: quem foi conferido pessoalmente (userId -> chave conferida).
+    this.verified = {};
   }
 
   // ---------- identidade do aparelho ----------
@@ -87,6 +89,57 @@ export class MessengerClient {
     this.trusted = (await this.store.get('trusted')) ?? {};
     this.hidden = new Map(Object.entries((await this.store.get('hiddenForMe')) ?? {}));
     this.tombs = new Map(Object.entries((await this.store.get('tombstones')) ?? {}));
+    // S1: avisos de segurança ficam no banco cifrado (antes sumiam ao fechar).
+    this.warnings = (await this.store.get('warnings')) ?? [];
+    this.verified = (await this.store.get('verified')) ?? {};
+    this.circleAdmin = (await this.store.get('circleAdmin')) ?? null;
+  }
+
+  // ---------- círculo confirmado pela administradora (S3) ----------
+  // A administradora é quem criou o círculo (primeira identidade). Fica
+  // fixada no aparelho na primeira vez; o servidor não consegue trocá-la.
+  async circleAdminId() {
+    if (this.circleAdmin) return this.circleAdmin;
+    const first = Object.entries(this.known).filter(([, k]) => Number.isSafeInteger(k.joinedSeq)).sort((a, b) => a[1].joinedSeq - b[1].joinedSeq)[0];
+    if (!first || first[1].joinedSeq !== 0) return null;
+    this.circleAdmin = first[0];
+    await this.store.put('circleAdmin', this.circleAdmin);
+    return this.circleAdmin;
+  }
+  circleRoster() { return this.trusted[CIRCLE_ROOM_ID]?.members ?? null; }
+  // Só a administradora: confirma (assina, cifrado) quem está no círculo.
+  async confirmCircle(members) {
+    if ((await this.circleAdminId()) !== this.userId) throw new Error('só a administradora confirma o círculo');
+    const list = [this.userId, ...new Set(members.filter((u) => u !== this.userId))];
+    this.trusted[CIRCLE_ROOM_ID] = { members: list, leader: this.userId };
+    await this.store.put('trusted', this.trusted);
+    await this.sendInner(CIRCLE_ROOM_ID, 'membership', { members: list, leader: this.userId });
+  }
+
+  // ---------- avisos de segurança (S1) e verificação (S8) ----------
+  static WARN_TTL = 30 * 86_400_000;
+  warn(w) { this.warnings.push(w); this.warningsDirty = true; }
+  async saveWarnings() {
+    if (!this.warningsDirty) return;
+    const now = this.api.clock.now() ?? Date.now();
+    this.warnings = this.warnings.filter((w) => now - (w.at ?? now) < MessengerClient.WARN_TTL).slice(-200);
+    await this.store.put('warnings', this.warnings);
+    this.warningsDirty = false;
+  }
+  assertMediaAllowed(to) {
+    const changed = to.filter((u) => this.keyChangedSinceVerified(u));
+    if (changed.length) { const e = new Error('a chave de alguém que vocês conferiram mudou: confiram de novo antes de mandar mídia'); e.code = 'key_unverified'; e.userIds = changed; throw e; }
+  }
+  isVerified(userId) { return !!this.verified[userId] && this.verified[userId] === this.known[userId]?.curve; }
+  // Conferido e depois trocou de chave: o envio de mídia pausa até conferir
+  // de novo ou aceitar a chave nova.
+  keyChangedSinceVerified(userId) { return !!this.verified[userId] && this.verified[userId] !== this.known[userId]?.curve; }
+  async setVerified(userId, on) {
+    if (on) {
+      if (!this.known[userId]?.curve) throw new Error('chave desconhecida');
+      this.verified[userId] = this.known[userId].curve;
+    } else delete this.verified[userId];
+    await this.store.put('verified', this.verified);
   }
 
   async login() {
@@ -112,13 +165,17 @@ export class MessengerClient {
       if (prev && m.curve && prev.curve !== m.curve) {
         // Chave nova = aparelho novo ou recuperação. Aviso explícito; sessões
         // antigas com essa pessoa deixam de valer.
-        this.warnings.push({ kind: 'key_changed', userId: m.userId, at: this.api.clock.now() });
+        this.warn({ kind: 'key_changed', userId: m.userId, at: this.api.clock.now() ?? Date.now(), verified: !!this.verified[m.userId] });
         this.sessions.delete(m.userId);
       }
-      if (m.curve) this.known[m.userId] = { curve: m.curve, ed: m.ed, deviceId: m.deviceId };
+      if (m.curve) this.known[m.userId] = { curve: m.curve, ed: m.ed, deviceId: m.deviceId, joinedSeq: m.joinedSeq, state: m.state };
     }
+    // Quem saiu do círculo continua conhecido (avisos antigos), mas marcado.
+    const listed = new Set(members.map((m) => m.userId));
+    for (const [u, k] of Object.entries(this.known)) if (!listed.has(u)) k.state = 'removed';
     await this.store.put('directory', this.known);
     await this.persistCrypto();
+    await this.saveWarnings();
     return members;
   }
 
@@ -189,7 +246,7 @@ export class MessengerClient {
     if (!t) throw new Error('membros desta conversa ainda não confirmados pela líder: aguarde a sincronização');
     const extra = to.filter((u) => !t.members.includes(u));
     if (extra.length) {
-      this.warnings.push({ kind: 'unconfirmed_member', roomId, userIds: extra, at: this.api.clock.now() });
+      this.warn({ kind: 'unconfirmed_member', roomId, userIds: extra, at: this.api.clock.now() });
       throw new Error('o servidor indicou alguém que a líder não anunciou: envio recusado por segurança');
     }
   }
@@ -197,7 +254,7 @@ export class MessengerClient {
   roomEvent(roomId, ev) { return this.api.post(`/v1/rooms/${roomId}/events`, ev); }
 
   // Envia qualquer tipo de conteúdo interno a todos os membros ativos.
-  async sendInner(roomId, kind, body, { replyTo, msgKind = 'text', view = null, audience = null, ttl } = {}) {
+  async sendInner(roomId, kind, body, { replyTo, msgKind = 'text', view = null, audience = null, ttl, mediaId } = {}) {
     // Os dois pedidos vão juntos (menos idas e voltas em rede lenta, ex.: Tor);
     // a conferência de segurança termina antes de qualquer cifra.
     const [, room] = await Promise.all([
@@ -210,8 +267,23 @@ export class MessengerClient {
       if (!audience.length || audience.some((u) => !to.includes(u))) throw new Error('audiência inválida');
       to = [...new Set(audience)];
     }
+    // S3: no círculo com lista confirmada, quem a administradora não confirmou
+    // recebe um envelope de enchimento (o servidor exige um por membro e não
+    // distingue); só os confirmados recebem conteúdo.
+    let decoys = [];
+    const roster = roomId === CIRCLE_ROOM_ID && !audience ? this.circleRoster() : null;
+    if (roster) {
+      decoys = to.filter((u) => !roster.includes(u));
+      to = to.filter((u) => roster.includes(u));
+      if (decoys.length) {
+        const key = [...decoys].sort().join(',');
+        const last = [...this.warnings].reverse().find((w) => w.kind === 'unconfirmed_circle');
+        if (!last || last.userIds?.slice().sort().join(',') !== key) this.warn({ kind: 'unconfirmed_circle', userIds: decoys, at: this.api.clock.now() ?? Date.now() });
+      }
+    }
     if (kind !== 'membership') this.checkRecipients(roomId, room, to);
     else if (to.some((u) => !this.trusted[roomId]?.members.includes(u))) throw new Error('anúncio para quem não está confirmado: recusado');
+    if (msgKind !== 'text') this.assertMediaAllowed(to);
     const msgId = newMsgId();
     const inner = { v: INNER_VERSION, kind, msgId, room: roomId, sender: this.userId, policyRev: room.policyRev, body };
     const expect = ttl ?? (msgKind === 'media' ? room.mediaTtl : room.textTtl);
@@ -220,10 +292,15 @@ export class MessengerClient {
     const bytes = encodeInner(inner);
     const envelopes = {};
     for (const u of to) envelopes[u] = sealOuter(await this.sessionFor(u), bytes);
+    const fillLen = Object.values(envelopes)[0]?.length ?? 400;
+    for (const u of decoys) envelopes[u] = b64(crypto.getRandomValues(new Uint8Array(Math.floor(fillLen * 3 / 4))));
     await this.persistCrypto(); // ratchet salvo antes de transmitir
-    const r = await this.api.post(`/v1/rooms/${roomId}/messages`, { msgId, kind: msgKind, envelopes, ...(ttl ? { ttl } : {}) });
+    // mediaId liga a mensagem à mídia (F04/F16): apagar para todos revoga no
+    // servidor, e o documento entra na cota no mesmo envio.
+    const r = await this.api.post(`/v1/rooms/${roomId}/messages`, { msgId, kind: msgKind, envelopes, ...(ttl ? { ttl } : {}), ...(mediaId ? { mediaId } : {}) });
     const local = { msgId, room: roomId, sender: this.userId, kind, body, replyTo, acceptedAt: r.acceptedAt, expiresAt: r.expiresAt, mine: true };
     if (kind === 'text' || kind === 'media' || kind === 'story') await this.store.putMessage({ ...local, text: body.text });
+    if (r.quota) local.quota = r.quota;
     return local;
   }
 
@@ -233,6 +310,8 @@ export class MessengerClient {
   async edit(roomId, target, text) {
     const orig = await this.store.getMessage(target);
     if (!orig || orig.sender !== this.userId) throw new Error('só o autor edita');
+    if (orig.room !== roomId || orig.kind !== 'text') throw new Error('edição de outra conversa');
+    if ((this.api.clock.now() ?? Date.now()) - orig.acceptedAt > EDIT_WINDOW_MS) throw new Error('só dá para editar nos primeiros 15 minutos');
     const version = (orig.editVersion ?? 0) + 1;
     await this.store.putMessage(applyEdit(orig, { sender: this.userId, body: { target, text, version } }));
     return this.sendInner(roomId, 'edit', { target, text, version });
@@ -255,8 +334,11 @@ export class MessengerClient {
     await this.onDestroy(ids);
   }
 
-  async deleteForAll(roomId, msgId) {
+  async deleteForAll(roomId, msgId, { mediaId = null } = {}) {
     await this.api.post(`/v1/rooms/${roomId}/messages/${msgId}/delete`);
+    // O servidor já revoga a mídia ligada à mensagem (F04). Mensagens de antes
+    // dessa ligação: revoga aqui; "já não existe" é o resultado esperado.
+    if (mediaId) await this.api.post(`/v1/media/${mediaId}/revoke`).catch((e) => { if (![404, 410].includes(e.status)) throw e; });
     this.tombs.set(msgId, Date.now());
     await this.saveMarks();
     await this.destroy([msgId]);
@@ -281,13 +363,16 @@ export class MessengerClient {
 
   // ---------- mídia ----------
   async sendMedia(roomId, bytes, { mode = 'media', mime = 'application/octet-stream', caption, duration, name } = {}) {
+    // Confere antes de subir qualquer byte (nada fica órfão no servidor).
+    const view = await this.room(roomId);
+    this.assertMediaAllowed(view.members.filter((m) => m.active && m.userId !== this.userId).map((m) => m.userId));
     const key = await newMediaKey();
     const blob = await encryptMedia(key, bytes);
     const up = await this.api.post(`/v1/rooms/${roomId}/media?mode=${mode}`, blob);
     // A chave vai só dentro do envelope Olm de cada destinatário.
     const body = { mediaId: up.mediaId, key: b64(key), mime, mode, size: bytes.byteLength, ...(caption ? { caption } : {}), ...(duration ? { duration: Math.round(duration) } : {}), ...(name ? { name } : {}) };
     key.fill(0);
-    const msg = await this.sendInner(roomId, 'media', body, { msgKind: 'media' });
+    const msg = await this.sendInner(roomId, 'media', body, { msgKind: 'media', mediaId: up.mediaId });
     if (mode === 'once') {
       // Quem enviou não reabre (§15.6): a chave não fica nem no aparelho dele.
       const stored = await this.store.getMessage(msg.msgId);
@@ -295,7 +380,8 @@ export class MessengerClient {
       msg.body = { ...msg.body, key: null };
       await this.onDestroy([]);
     }
-    if (mode === 'doc') msg.quota = await this.api.post('/v1/docs/publish', { mediaId: up.mediaId, msgId: msg.msgId });
+    // Servidor antigo (sem F16): publica a cota pela rota separada.
+    if (mode === 'doc' && !msg.quota) msg.quota = await this.api.post('/v1/docs/publish', { mediaId: up.mediaId, msgId: msg.msgId });
     return msg;
   }
 
@@ -306,13 +392,16 @@ export class MessengerClient {
     const view = await this.room(CIRCLE_ROOM_ID);
     const circle = view.members.filter((m) => m.active && m.userId !== this.userId).map((m) => m.userId);
     if (!audience?.length || audience.some((u) => !circle.includes(u))) throw new Error('audiência inválida');
+    const roster = this.circleRoster();
+    if (roster && audience.some((u) => !roster.includes(u))) throw new Error('audiência inválida: alguém não foi confirmado pela administradora');
+    this.assertMediaAllowed(audience);
     const key = await newMediaKey();
     const blob = await encryptMedia(key, bytes);
     const q = new URLSearchParams({ mode: 'media', story: '1', audience: audience.join(','), ...(ttl ? { ttl: String(ttl) } : {}) });
     const up = await this.api.post(`/v1/rooms/${CIRCLE_ROOM_ID}/media?${q}`, blob);
     const body = { mediaId: up.mediaId, key: b64(key), mime, ...(caption ? { caption } : {}), ...(duration ? { duration: Math.round(duration) } : {}) };
     key.fill(0);
-    return this.sendInner(CIRCLE_ROOM_ID, 'story', body, { msgKind: 'story', audience, ttl, view });
+    return this.sendInner(CIRCLE_ROOM_ID, 'story', body, { msgKind: 'story', audience, ttl, view, mediaId: up.mediaId });
   }
   async stories() {
     const r = await this.view(CIRCLE_ROOM_ID);
@@ -386,7 +475,11 @@ export class MessengerClient {
     const after = (await this.store.get('secSeq')) ?? 0;
     const { events } = await this.api.get(`/v1/security-events?after=${after}`);
     if (!events.length) return [];
+    // Linha do tempo de segurança (S1/S3): entrou, saiu, trocou de aparelho.
+    // (aparelho novo começa do zero: o histórico antigo não vira aviso)
+    if (after > 0) for (const e of events) if (['joined', 'removed', 'device_changed', 'recovered'].includes(e.kind) && e.userId) this.warn({ kind: `circle_${e.kind}`, userId: e.userId, at: e.at });
     if (events.some((e) => ['device_changed', 'recovered', 'joined', 'removed', 'frozen', 'unfrozen'].includes(e.kind))) await this.refreshDirectory();
+    else await this.saveWarnings();
     await this.store.put('secSeq', events.at(-1).seq);
     return events;
   }
@@ -418,7 +511,7 @@ export class MessengerClient {
         const now = this.api.clock.now() ?? e.acceptedAt;
         const limit = Math.min(inner.ttl ? e.acceptedAt + inner.ttl * 1000 : Infinity, now + MAX_TTL * 1000);
         if (e.expiresAt > limit) {
-          this.warnings.push({ kind: 'ttl_clamped', roomId: e.room, at: now });
+          this.warn({ kind: 'ttl_clamped', roomId: e.room, at: now });
           e = { ...e, expiresAt: limit };
         }
         await this.apply(inner, e);
@@ -426,11 +519,12 @@ export class MessengerClient {
       } catch (err) {
         rejected.push({ msgId: e.msgId, sender: e.sender, reason: String(err.message || err) });
         // Falha de decifra ou de autenticação nunca passa em silêncio.
-        this.warnings.push({ kind: 'message_rejected', userId: e.sender, roomId: e.room, at: this.api.clock.now() });
+        this.warn({ kind: 'message_rejected', userId: e.sender, roomId: e.room, at: this.api.clock.now() });
       }
     }
     await this.persistCrypto(); // estado salvo antes de confirmar
     await this.saveMarks();
+    await this.saveWarnings();
     if (acks.envelopes.length || acks.tombstones.length) await this.api.post('/v1/ack', acks);
     return { received, rejected, tombstones: res.tombstones.length, more: res.more, security };
   }
@@ -442,13 +536,21 @@ export class MessengerClient {
       case 'media': return this.store.putMessage({ ...base, kind: 'media', body: inner.body });
       case 'story': return inner.room === CIRCLE_ROOM_ID ? this.store.putMessage({ ...base, kind: 'story', body: inner.body }) : undefined;
       case 'edit': {
+        // F09: mesma conversa, mesmo autor (applyEdit), só texto e dentro do
+        // prazo de edição (D7). Fora disso é ignorada.
         const orig = await this.store.getMessage(inner.body.target);
-        if (orig) await this.store.putMessage(applyEdit(orig, inner)); // applyEdit exige o mesmo autor
+        if (!orig || orig.room !== inner.room || orig.kind !== 'text') return;
+        if (e.acceptedAt - orig.acceptedAt > EDIT_WINDOW_MS + EDIT_GRACE_MS) return;
+        await this.store.putMessage(applyEdit(orig, inner));
         return;
       }
       case 'membership': return this.applyMembership(inner);
       case 'reaction': {
+        // F09: só na mesma conversa, só de quem é membro confirmado, nunca em
+        // ver uma vez.
         const orig = await this.store.getMessage(inner.body.target);
+        if (!orig || orig.room !== inner.room || orig.body?.mode === 'once') return;
+        if (inner.room !== CIRCLE_ROOM_ID && !this.trusted[inner.room]?.members.includes(inner.sender)) return;
         if (orig) await this.store.putMessage({ ...orig, reactions: { ...(orig.reactions ?? {}), [inner.sender]: inner.body.emoji } });
         return;
       }
@@ -461,6 +563,15 @@ export class MessengerClient {
   // confirmada (membro mais antigo, V6-023).
   async applyMembership(inner) {
     const { members, leader } = inner.body;
+    if (inner.room === CIRCLE_ROOM_ID) {
+      // Lista do círculo: só da administradora fixada (S3).
+      const admin = await this.circleAdminId();
+      if (!admin || inner.sender !== admin || leader !== admin) { this.warn({ kind: 'membership_rejected', roomId: inner.room, from: inner.sender, at: this.api.clock.now() }); return; }
+      this.trusted[CIRCLE_ROOM_ID] = { members, leader };
+      this.circleRosterChanged = true;
+      await this.store.put('trusted', this.trusted);
+      return;
+    }
     if (!members.includes(this.userId)) {
       delete this.trusted[inner.room]; // fui removida: nada mais a enviar aqui
     } else {
@@ -472,7 +583,7 @@ export class MessengerClient {
         const successor = t.members.find((u) => u !== t.leader && members.includes(u));
         ok = !members.includes(t.leader) && inner.sender === successor;
       }
-      if (!ok) { this.warnings.push({ kind: 'membership_rejected', roomId: inner.room, from: inner.sender, at: this.api.clock.now() }); return; }
+      if (!ok) { this.warn({ kind: 'membership_rejected', roomId: inner.room, from: inner.sender, at: this.api.clock.now() }); return; }
       this.trusted[inner.room] = { members, leader };
     }
     await this.store.put('trusted', this.trusted);
