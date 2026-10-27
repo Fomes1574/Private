@@ -5,6 +5,8 @@
 //   MP_VERSION=<n>        número da versão (inteiro crescente; padrão 1)
 //   MP_RELEASE_KEY=<pem>  chave Ed25519 PKCS#8 de assinatura. Sem ela, usa
 //                         chave efêmera e marca o build como de desenvolvimento.
+//   MP_NATIVE_RELEASE=1  APK: a raiz de confiança é a assinatura nativa,
+//                         não a chave da PWA. Desliga diagnóstico no JS.
 import { cp, mkdir, rm, writeFile, readFile, readdir, stat } from 'node:fs/promises';
 import { createHash, generateKeyPairSync, createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { join, relative } from 'node:path';
@@ -16,6 +18,8 @@ const api = (process.env.MP_API || 'http://localhost:8791').replace(/\/$/, '');
 const mode = process.env.MP_MODE || 'sw';
 const version = Number(process.env.MP_VERSION || 1);
 if (!Number.isSafeInteger(version) || version < 1) throw new Error('MP_VERSION inválido');
+const nativeRelease = process.env.MP_NATIVE_RELEASE === '1';
+if (nativeRelease && (mode !== 'plain' || process.env.MP_CSP_META !== '1' || process.env.MP_TEST_HOOKS === '1')) throw new Error('APK de produção exige modo plain, CSP no HTML e hooks desligados');
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 
 async function walk(dir) {
@@ -61,7 +65,7 @@ await writeFile(join(stage, 'vendor/qrcode/qrcode.mjs'), `${await readFile(join(
 // 2) Assinatura.
 let priv, devBuild = false;
 if (process.env.MP_RELEASE_KEY) priv = createPrivateKey(process.env.MP_RELEASE_KEY);
-else { priv = generateKeyPairSync('ed25519').privateKey; devBuild = true; }
+else { priv = generateKeyPairSync('ed25519').privateKey; devBuild = !nativeRelease; }
 const pubB64 = createPublicKey(priv).export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64');
 
 // 3) Manifesto do app e configuração.

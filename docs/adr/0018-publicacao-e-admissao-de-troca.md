@@ -29,6 +29,12 @@ O leitor conta bytes recebidos, independentemente de Content-Length, e cancela o
 
 ## Validação
 
+### Inspeção do APK publicado e correção complementar
+
+A inspeção binária da release 1.0.104 encontrou `devBuild: true`, também presente nas releases 1.0.102/103. Isso mantinha o console JavaScript de diagnóstico ativo no APK, contrariando o comentário de produção em `main.js`. Não é um gancho de teste (`testHooks` estava falso), mas é uma falha de configuração de privacidade.
+
+O empacotamento nativo de produção passa a informar `MP_NATIVE_RELEASE=1`: não precisa da chave Ed25519 da PWA, pois a integridade do APK usa a assinatura nativa permanente. Exige modo plain, CSP no HTML e hooks desligados; configura `devBuild: false` e desliga o console pelo guard já existente. O build comum de desenvolvimento continua marcado. Os workflows extraem `config.js` do APK efetivamente assinado e o validam antes de publicar ou testar no emulador. Há regressões de configuração válida, diagnóstico indevido e combinações inseguras. A próxima release substitui 1.0.104; API e PWA não mudam de comportamento por essa correção exclusiva do empacotamento Android.
+
 Regressões com SQLite real, fluxo limitado/cancelado, Unicode, timeout, autorização única/expirada, concorrência de replay, isolamento entre pessoas, recibo após reinício, revogação e prova da chave privada. Os testes de API, cliente e interface foram atualizados para exercitar a autorização real. CI e Android da implementação devem passar antes da publicação; resultados atuais em Actions. Os cenários de aparelho físico continuam pendentes até execução registrada.
 
 Referências: [OWASP DoS](https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html), [OWASP REST](https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html), [GitHub Actions seguro](https://docs.github.com/en/actions/reference/security/secure-use), [aviso undici](https://github.com/nodejs/undici/security/advisories/GHSA-xjj6-f33q-929c).

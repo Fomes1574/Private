@@ -72,6 +72,7 @@ jobs:
         working-directory: android-app
         env:
           MP_API: ${{ vars.MP_API_ORIGIN }}
+          MP_NATIVE_RELEASE: "1"
         run: |
           npm ci
           npm run sync
@@ -101,6 +102,8 @@ jobs:
           "$BT/zipalign" -p -f 4 android-app/android/app/build/outputs/apk/release/app-release-unsigned.apk "$d/aligned.apk"
           out="$RUNNER_TEMP/Pacto-Talk-$MP_VERSION_NAME.apk"
           "$BT/apksigner" sign --key "$d/key.der" --cert "$d/cert.pem" --v4-signing-enabled false --out "$out" "$d/aligned.apk"
+          unzip -p "$out" assets/public/config.js > "$RUNNER_TEMP/config-apk.js"
+          node scripts/android/verificar-config.mjs "$RUNNER_TEMP/config-apk.js"
           bash scripts/android/verificar-apk.sh "$out" "$FP" "$PKG" "$MP_VERSION_CODE" | tee "$RUNNER_TEMP/verificacao.txt"
           (cd "$RUNNER_TEMP" && sha256sum "Pacto-Talk-$MP_VERSION_NAME.apk" > "Pacto-Talk-$MP_VERSION_NAME.apk.sha256")
 

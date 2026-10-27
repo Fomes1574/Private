@@ -38,6 +38,7 @@ jobs:
         working-directory: android-app
         env:
           MP_API: ${{ vars.MP_API_ORIGIN || 'https://api.invalid' }}
+          MP_NATIVE_RELEASE: "1"
         run: |
           npm ci
           npm run sync
@@ -71,6 +72,8 @@ jobs:
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$BT/zipalign" -p -f 4 android-app/android/app/build/outputs/apk/release/app-release-unsigned.apk "$d/aligned.apk"
           "$BT/apksigner" sign --key "$d/key.der" --cert "$d/cert.pem" --v4-signing-enabled false --out "$RUNNER_TEMP/teste-release.apk" "$d/aligned.apk"
+          unzip -p "$RUNNER_TEMP/teste-release.apk" assets/public/config.js > "$RUNNER_TEMP/config-apk.js"
+          node scripts/android/verificar-config.mjs "$RUNNER_TEMP/config-apk.js"
           bash scripts/android/verificar-apk.sh "$RUNNER_TEMP/teste-release.apk" "$(cat "$d/sha256.txt")" com.pactotalk.app 1
           rm -rf "$d"
       - name: Liberar disco para o emulador
