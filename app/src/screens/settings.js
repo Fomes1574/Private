@@ -159,6 +159,14 @@ function notificationsBox() {
 }
 
 function pairForm() {
+  const authorization = h('p', { id: 'pair-authorization', class: 'code small', role: 'status' });
+  const generate = h('button', { type: 'button', class: 'secondary', text: 'Gerar autorização', onclick: async () => {
+    try {
+      const r = await session.S.client.api.post('/v1/devices/pair/permit');
+      authorization.textContent = r.token;
+      toast('Uso único, válido por 5 minutos. Digite no celular novo. Gerar outra invalida esta.');
+    } catch (err) { toast(`Não deu para autorizar: ${err.message}`); }
+  } });
   const id = h('input', { 'aria-label': 'Pedido', placeholder: 'Pedido', autocomplete: 'off', autocapitalize: 'off' });
   const code = h('input', { 'aria-label': 'Código', placeholder: 'Código de 8 números', inputmode: 'numeric', autocomplete: 'off' });
   const waiting = h('p', { id: 'pair-wait', class: 'muted small', role: 'status' });
@@ -173,7 +181,7 @@ function pairForm() {
       toast('Celular novo aprovado. Termine no celular novo.');
       session.waitReplaced({ onReplaced: () => location.reload() });
     } catch (err) { toast(err.status === 401 ? 'Código errado.' : 'Pedido não encontrado ou vencido.'); }
-  } }, id, code, h('button', { class: 'secondary', text: 'Aprovar celular novo' }), waiting);
+  } }, h('p', { class: 'muted small', text: 'Primeiro gere uma autorização e digite no celular novo. Depois confirme aqui o pedido e o código que ele mostrar.' }), generate, authorization, id, code, h('button', { class: 'secondary', text: 'Aprovar celular novo' }), waiting);
 }
 
 async function chooseGuardian(members) {

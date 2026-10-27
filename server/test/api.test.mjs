@@ -187,7 +187,8 @@ test('documentos: o 4º revoga o mais antigo e manda tombstone', async () => {
 test('troca de aparelho em duas fases: antigo aprova, novo guarda as chaves e confirma, só então o antigo cai', async () => {
   const newDev = await newDevice();
   const fresh = new Client(api.base);
-  const start = await fresh.post('/v1/devices/pair/start', { device: newDev.public });
+  const permit = (await people.bia.post('/v1/devices/pair/permit')).data.token;
+  const start = await fresh.post('/v1/devices/pair/start', { device: newDev.public, permit });
   assert.equal(start.status, 201);
   assert.equal((await people.bia.post('/v1/devices/pair/approve', { pairingId: start.data.pairingId, code: '00000000' })).status, 401);
   const ok = await people.bia.post('/v1/devices/pair/approve', { pairingId: start.data.pairingId, code: start.data.code });
@@ -220,7 +221,8 @@ test('troca durável: cofre registrado já no pedido; aprovado, vale para o apar
   const dev = await newDevice();
   const fresh = new Client(api.base);
   const verifier = Buffer.from(randomBytes(32)).toString('base64');
-  const start = await fresh.post('/v1/devices/pair/start', { device: dev.public, vault: { verifier, deadDays: 15 } });
+  const permit = (await people.bia.post('/v1/devices/pair/permit')).data.token;
+  const start = await fresh.post('/v1/devices/pair/start', { device: dev.public, permit, vault: { verifier, deadDays: 15 } });
   assert.equal(start.status, 201);
   assert.ok(start.data.vault.vaultId && start.data.vault.share, 'cofre já existe antes da aprovação');
   // O app fechou e abriu de novo antes da aprovação: o cofre abre com o PIN certo.
@@ -238,13 +240,15 @@ test('troca durável: cofre registrado já no pedido; aprovado, vale para o apar
 test('troca de aparelho: novo que some no meio não derruba ninguém; aprovar de novo substitui o pendente', async () => {
   const lost = await newDevice();
   const a = new Client(api.base);
-  const s1 = await a.post('/v1/devices/pair/start', { device: lost.public });
+  const p1 = (await people.caio.post('/v1/devices/pair/permit')).data.token;
+  const s1 = await a.post('/v1/devices/pair/start', { device: lost.public, permit: p1 });
   const ok1 = await people.caio.post('/v1/devices/pair/approve', { pairingId: s1.data.pairingId, code: s1.data.code });
   assert.equal(ok1.status, 200);
   // O celular novo "morreu" aqui. Caio tenta de novo com outro.
   const again = await newDevice();
   const b = new Client(api.base);
-  const s2 = await b.post('/v1/devices/pair/start', { device: again.public });
+  const p2 = (await people.caio.post('/v1/devices/pair/permit')).data.token;
+  const s2 = await b.post('/v1/devices/pair/start', { device: again.public, permit: p2 });
   const ok2 = await people.caio.post('/v1/devices/pair/approve', { pairingId: s2.data.pairingId, code: s2.data.code });
   assert.equal(ok2.status, 200);
   assert.equal((await people.caio.get('/v1/sync')).status, 200, 'antigo segue funcionando');

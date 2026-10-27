@@ -177,13 +177,13 @@ async function recoverAdmin(lock, pool, setupCode) {
 // e tudo (chaves, pedido) fica guardado cifrado ANTES de mostrar o código. Se
 // o app fechar em qualquer ponto, ao abrir com o PIN ele continua de onde
 // parou. Isso importa porque um app antigo se apaga logo depois de aprovar.
-export async function pairStart(lock) {
+export async function pairStart(lock, permit) {
   lock.pool = await openStore(lock.dek, { fresh: true });
   const pickleKey = vault.random(32);
   await S.store.put('pickleKey', vault.b64(pickleKey));
   S.client = makeClient(pickleKey);
   const device = await S.client.createDevice();
-  const start = await S.client.api.post('/v1/devices/pair/start', { device, vault: { verifier: lock.verifier, deadDays: DEFAULT_DEAD_DAYS } });
+  const start = await S.client.api.post('/v1/devices/pair/start', { device, permit, vault: { verifier: lock.verifier, deadDays: DEFAULT_DEAD_DAYS } });
   if (!start.vault) throw new Error('servidor sem troca durável; atualize a API antes');
   const { record, kek } = await lock.finish(start.vault);
   S.kek = kek;
@@ -194,7 +194,8 @@ export async function pairStart(lock) {
   return info;
 }
 export async function pairPoll(info, beforeUnlock) {
-  const st = await S.client.api.post('/v1/devices/pair/status', { pairingId: info.pairingId, authPub: info.authPub });
+  const signature = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, S.client.authKey.privateKey, new TextEncoder().encode(`mp-pair-status-v1:${info.pairingId}`));
+  const st = await S.client.api.post('/v1/devices/pair/status', { pairingId: info.pairingId, authPub: info.authPub, proof: vault.b64(new Uint8Array(signature)) });
   if (st.state === 'approved') await finishPairing(st, beforeUnlock);
   return st.state;
 }

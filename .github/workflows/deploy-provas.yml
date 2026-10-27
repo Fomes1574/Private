@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: deploy-provas
@@ -17,20 +18,26 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event.inputs.confirmar == 'PUBLICAR'
+    if: github.ref == 'refs/heads/ccr-de59a90b-gr4vug' && github.event.inputs.confirmar == 'PUBLICAR'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults: { run: { working-directory: deploy/provas } }
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WRANGLER_SEND_METRICS: "false"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { persist-credentials: false }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22" }
+      - name: Conferir CI do mesmo commit
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/verificar-ci.mjs
       - name: Conferir segredos (sem mostrar valores)
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           TOKEN_SECRET: ${{ secrets.PROVA_TOKEN_SECRET }}
           ACCESS: ${{ secrets.PROVA_ACCESS_CODE }}
         run: |
@@ -38,16 +45,21 @@ jobs:
             [ -n "${!v}" ] || { echo "Falta o segredo $v (veja docs/CLOUDFLARE_PASSO_A_PASSO.md)"; exit 1; }
           done
           [ ${#TOKEN_SECRET} -ge 32 ] || { echo "PROVA_TOKEN_SECRET precisa de 32+ caracteres"; exit 1; }
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Montar dist e conferir hashes das cópias de terceiros
         run: |
           node build.mjs
-          (cd ../../poc/03-banco-local-cifrado && npm ci && node vendor.mjs --check)
-          (cd ../../poc/06-video-safari && npm ci && node vendor.mjs --check)
+          (cd ../../poc/03-banco-local-cifrado && npm ci --ignore-scripts && node vendor.mjs --check)
+          (cd ../../poc/06-video-safari && npm ci --ignore-scripts && node vendor.mjs --check)
       - name: Publicar
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
       - name: Gravar segredos do Worker
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           TOKEN_SECRET: ${{ secrets.PROVA_TOKEN_SECRET }}
           ACCESS: ${{ secrets.PROVA_ACCESS_CODE }}
         run: |

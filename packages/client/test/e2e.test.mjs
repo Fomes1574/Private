@@ -206,7 +206,8 @@ test('troca de chave de alguém vira aviso de segurança', async () => {
   // Caio troca de aparelho (QR): chaves novas.
   const novo = newClient();
   const dev = await novo.createDevice();
-  const start = await novo.api.post('/v1/devices/pair/start', { device: dev });
+  const { token: permit } = await p.caio.api.post('/v1/devices/pair/permit');
+  const start = await novo.api.post('/v1/devices/pair/start', { device: dev, permit });
   const ok = await p.caio.api.post('/v1/devices/pair/approve', { pairingId: start.pairingId, code: start.code });
   Object.assign(novo, { userId: ok.userId, deviceId: ok.deviceId });
   await novo.saveDevice(); await novo.login();

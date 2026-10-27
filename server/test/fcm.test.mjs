@@ -131,7 +131,8 @@ test('FCM: aviso vazio, só para quem precisa, e limpeza de token', async () => 
   // - Bia troca de aparelho (o antigo é revogado e perde o push).
   const fresh = new Client(api.base);
   const newDev = await newDevice();
-  const start = await fresh.post('/v1/devices/pair/start', { device: newDev.public });
+  const permit = (await bia.post('/v1/devices/pair/permit')).data.token;
+  const start = await fresh.post('/v1/devices/pair/start', { device: newDev.public, permit });
   const ok = await bia.post('/v1/devices/pair/approve', { pairingId: start.data.pairingId, code: start.data.code });
   assert.equal(ok.status, 200);
   await fresh.login(newDev, ok.data.deviceId);

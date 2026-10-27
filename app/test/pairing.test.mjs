@@ -45,10 +45,18 @@ async function phone() {
   return { ctx, page };
 }
 // Celular novo pede a troca e mostra pedido/código.
-async function requestPair(p, pin) {
+async function requestPair(p, pin, old, oldPin) {
+  await old.bringToFront();
+  if (await old.$('#secret')) { await unlockWith(old, oldPin); await old.waitForSelector('#search'); }
+  if (await old.$('[aria-label=Ajustes]')) await old.click('[aria-label=Ajustes]');
+  await old.click('text=Gerar autorização');
+  await old.waitForFunction(() => document.querySelector('#pair-authorization')?.textContent.length === 24);
+  const permit = await old.textContent('#pair-authorization');
+  await p.bringToFront();
   await p.goto(APP);
   await p.click('text=Já uso em outro celular');
   await p.fill('#s1', pin); await p.fill('#s2', pin); await p.click('form button');
+  await p.fill('#pair-permit', permit); await p.click('text=Continuar troca');
   await p.waitForSelector('dd.code.big');
   return p.$$eval('dd.code', (els) => [els[0].textContent, els[1].textContent]);
 }
@@ -72,7 +80,7 @@ test('debug antigo aprova e se apaga na hora; novo morto antes da aprovação; a
   let b;
   ({ ctx: ctxB, page: b } = await phone());
   phoneB = b;
-  const [pairingId, code] = await requestPair(b, PIN2);
+  const [pairingId, code] = await requestPair(b, PIN2, a, PIN);
   // O app novo é fechado antes da aprovação: já guardou tudo.
   await b.reload();
   await b.waitForSelector('#secret');
@@ -103,11 +111,11 @@ test('código novo: novo morre depois da aprovação; antigo segue valendo e só
   ({ ctx: ctxC, page: c } = await phone());
   let commitBlocked = 0;
   await c.route('**/v1/devices/pair/commit', (r) => { commitBlocked++; r.abort(); });
-  const [pairingId, code] = await requestPair(c, PIN3);
+  const [pairingId, code] = await requestPair(c, PIN3, b, PIN2);
 
   await b.bringToFront();
   if (await b.$('#secret')) { await unlockWith(b, PIN2); await b.waitForSelector('#search', { timeout: 30000 }); }
-  await b.click('[aria-label=Ajustes]');
+  if (await b.$('[aria-label=Ajustes]')) await b.click('[aria-label=Ajustes]');
   await b.fill('[aria-label=Pedido]', pairingId);
   await b.fill('[aria-label=Código]', code);
   await b.click('text=Aprovar celular novo');

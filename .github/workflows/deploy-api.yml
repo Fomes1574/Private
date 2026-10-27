@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: deploy-api
@@ -18,36 +19,48 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event.inputs.confirmar == 'PUBLICAR-API'
+    if: github.ref == 'refs/heads/ccr-de59a90b-gr4vug' && github.event.inputs.confirmar == 'PUBLICAR-API'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults: { run: { working-directory: server } }
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WRANGLER_SEND_METRICS: "false"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { persist-credentials: false }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22" }
+      - name: Conferir CI do mesmo commit
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/verificar-ci.mjs
       - name: Conferir segredos e variáveis
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           SETUP_CODE: ${{ secrets.MP_SETUP_CODE }}
           APP_ORIGIN: ${{ vars.MP_APP_ORIGIN }}
         run: |
           [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "Faltam segredos da Cloudflare"; exit 1; }
           [ ${#SETUP_CODE} -ge 16 ] || { echo "MP_SETUP_CODE precisa de 16+ caracteres"; exit 1; }
           case "$APP_ORIGIN" in https://*) ;; *) echo "MP_APP_ORIGIN precisa ser https://..."; exit 1;; esac
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Testes antes de publicar
         run: npm test
       - name: Banco D1 (cria se não existir) e migrações
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           id=$(npx wrangler d1 list --json | node -e 'const l=JSON.parse(require("fs").readFileSync(0));const d=l.find(x=>x.name==="mp-db");process.stdout.write(d?d.uuid:"")')
           if [ -z "$id" ]; then npx wrangler d1 create mp-db >/dev/null; id=$(npx wrangler d1 list --json | node -e 'const l=JSON.parse(require("fs").readFileSync(0));process.stdout.write(l.find(x=>x.name==="mp-db").uuid)'); fi
           sed -i "s/^database_id = .*/database_id = \"$id\"/" wrangler.toml
           npx wrangler d1 migrations apply mp-db --remote
       - name: Bucket R2 da mídia cifrada (cria se não existir) e regra de 16 dias
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           npx wrangler r2 bucket info mp-media >/dev/null 2>&1 || npx wrangler r2 bucket create mp-media
           # Rede de segurança: mídia temporária (m/) não fica mais que 16 dias
@@ -57,10 +70,14 @@ jobs:
             || npx wrangler r2 bucket lifecycle list mp-media | grep -q apagar-16-dias
       - name: Publicar
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           APP_ORIGIN: ${{ vars.MP_APP_ORIGIN }}
         run: npx wrangler deploy --var APP_ORIGIN:"$APP_ORIGIN" --var VAPID_SUBJECT:"$APP_ORIGIN"
       - name: Segredos do Worker (VAPID gerado uma vez, sem aparecer no log)
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           SETUP_CODE: ${{ secrets.MP_SETUP_CODE }}
         run: |
           printf '%s' "$SETUP_CODE" | npx wrangler secret put SETUP_CODE
@@ -72,6 +89,8 @@ jobs:
           fi
       - name: Notificações do APK Android (FCM), se configurado
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           FCM: ${{ secrets.FCM_SERVICE_ACCOUNT }}
         run: |
           if [ -z "$FCM" ]; then echo "::warning::Sem FCM_SERVICE_ACCOUNT: o APK Android não recebe notificações (iPhone continua por Web Push)."; exit 0; fi

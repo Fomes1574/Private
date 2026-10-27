@@ -1,22 +1,3 @@
-# Exceções da auditoria de dependências. Cada uma com motivo e prazo: depois
-# do prazo, a auditoria volta a reprovar sozinha.
-
-# undici 7.29.1 vem só pelo wrangler/miniflare (servidor local dos testes e a
-# ferramenta de deploy, que só fala com a API da Cloudflare). Não vai no APK,
-# no PWA nem no Worker publicado. A versão corrigida (7.30.1) saiu em
-# 15/10/2026 e ainda não tem as 2 semanas exigidas para entrar; atualizar
-# assim que o prazo passar.
-[[IgnoredVulns]]
-id = "GHSA-xjj6-f33q-929c"
-ignoreUntil = 2026-10-30T00:00:00Z
-reason = "undici só em ferramenta de dev (wrangler); correção 7.30.1 com menos de 2 semanas"
-
-[[IgnoredVulns]]
-id = "GHSA-4qv8-2p9j-2685"
-ignoreUntil = 2026-10-30T00:00:00Z
-reason = "undici só em ferramenta de dev (wrangler); correção 7.30.1 com menos de 2 semanas"
-
-[[IgnoredVulns]]
-id = "GHSA-f72v-6w45-q472"
-ignoreUntil = 2026-10-30T00:00:00Z
-reason = "undici só em ferramenta de dev (wrangler); correção 7.30.1 com menos de 2 semanas"
+# Sem exceções vigentes. undici 7.30.1 é fixado nas quatro ferramentas de
+# desenvolvimento/publicação para corrigir os três avisos de 15/10/2026.
+# Atualização de segurança antecipada e validada; ver ADR 0018.

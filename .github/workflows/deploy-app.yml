@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: deploy-app
@@ -18,31 +19,37 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event.inputs.confirmar == 'PUBLICAR-APP'
+    if: github.ref == 'refs/heads/ccr-de59a90b-gr4vug' && github.event.inputs.confirmar == 'PUBLICAR-APP'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults: { run: { working-directory: app } }
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WRANGLER_SEND_METRICS: "false"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { persist-credentials: false }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22" }
+      - name: Conferir CI do mesmo commit
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/verificar-ci.mjs
       - name: Conferir segredos e variáveis (sem mostrar valores)
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           RELEASE_KEY: ${{ secrets.MP_RELEASE_KEY }}
           API: ${{ vars.MP_API_ORIGIN }}
         run: |
           [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "Faltam CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID"; exit 1; }
           case "$RELEASE_KEY" in *"-----BEGIN "*"-----"*) ;; *) echo "Falta o segredo MP_RELEASE_KEY (tools/gerar-chave-de-assinatura.html)"; exit 1;; esac
           case "$API" in https://*) ;; *) echo "A variável MP_API_ORIGIN precisa ser https://..."; exit 1;; esac
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Cópias de terceiros conferem com os pacotes travados
         run: |
-          (cd ../poc/03-banco-local-cifrado && npm ci && node vendor.mjs --check)
-          (cd ../poc/06-video-safari && npm ci && node vendor.mjs --check)
+          (cd ../poc/03-banco-local-cifrado && npm ci --ignore-scripts && node vendor.mjs --check)
+          (cd ../poc/06-video-safari && npm ci --ignore-scripts && node vendor.mjs --check)
       - name: Montar a release assinada
         env:
           MP_MODE: sw
@@ -54,6 +61,9 @@ jobs:
           node build.mjs
           grep -q 'BUILD DE DESENVOLVIMENTO' dist/RELEASE && { echo "Build sem a chave de assinatura"; exit 1; } || true
       - name: Publicar
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
       - name: Código da versão (conferir no app e guardar fora da Cloudflare)
         run: |

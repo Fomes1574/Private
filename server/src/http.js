@@ -17,10 +17,40 @@ export const fail = (status, code) => json(status, { error: code });
 
 export async function readJson(request, maxBytes = 64 * 1024) {
   const len = Number(request.headers.get('content-length') || 0);
-  if (len > maxBytes) throw new HttpError(413, 'too_large');
-  const text = await request.text();
-  if (text.length > maxBytes) throw new HttpError(413, 'too_large');
-  try { return JSON.parse(text); } catch { throw new HttpError(400, 'bad_json'); }
+  const reader = request.body?.getReader();
+  let timer;
+  try {
+    if (len > maxBytes) throw new HttpError(413, 'too_large');
+    if (!reader) throw new HttpError(400, 'bad_json');
+    // O cabeçalho pode faltar ou mentir. Conte bytes ANTES de decodificar e
+    // interrompa a leitura no primeiro excesso, inclusive em envio em partes.
+    let bytes = 0, text = '';
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new HttpError(408, 'request_timeout')), 15_000);
+    });
+    for (;;) {
+      const { done, value } = await Promise.race([reader.read(), deadline]);
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) throw new HttpError(413, 'too_large');
+      try { text += decoder.decode(value, { stream: true }); }
+      catch { throw new HttpError(400, 'bad_json'); }
+    }
+    try {
+      const body = JSON.parse(text + decoder.decode());
+      if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('object required');
+      return body;
+    } catch { throw new HttpError(400, 'bad_json'); }
+  } catch (error) {
+    // Não esperar cancel(): uma origem que não fecha o envio não deve
+    // manter a resposta de erro nem o Worker presos.
+    if (reader) void reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    reader?.releaseLock();
+  }
 }
 
 export const b64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));

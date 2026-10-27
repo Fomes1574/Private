@@ -40,7 +40,7 @@ function withLock(go, how) {
     h('h1', { text: 'Proteja este aparelho' }),
     h('p', { class: 'muted', text: 'Para abrir o app vão ser pedidos o Face ID (ou a digital) e um PIN só seu. Os dois juntos liberam a chave que cifra tudo neste aparelho.' }),
     lockSetupForm(async (lock) => {
-      if (how === 'pair') return pairScreen(go, lock);
+      if (how === 'pair') return pairPermitScreen(go, lock);
       tokenScreen(go, how, lock);
     })));
 }
@@ -65,9 +65,22 @@ function tokenScreen(go, how, lock) {
 }
 
 // Aparelho novo: mostra o código para o aparelho antigo aprovar (V7-015).
-async function pairScreen(go, lock) {
+function pairPermitScreen(go, lock) {
+  const input = h('input', { id: 'pair-permit', type: 'password', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', required: true });
+  const button = h('button', { class: 'block', text: 'Continuar troca' });
+  mount(h('main', {}, h('h1', { text: 'Autorize no celular antigo' }),
+    h('p', { text: 'No celular antigo atualizado: Ajustes → Trocar de celular → Gerar autorização. Cole aqui a autorização de uso único. Depois você ainda vai confirmar o novo aparelho no antigo.' }),
+    h('form', { onsubmit: async (e) => {
+      e.preventDefault(); button.disabled = true;
+      const permit = input.value.trim(); input.value = '';
+      await pairScreen(go, lock, permit);
+    } }, h('label', { for: 'pair-permit', text: 'Autorização do celular antigo' }), input, button)));
+}
+
+async function pairScreen(go, lock, permit) {
   let info;
-  try { info = await session.pairStart(lock); } catch (e) { toast(`Não deu: ${e.message}`); return welcome(go); }
+  try { info = await session.pairStart(lock, permit); }
+  catch (e) { toast(e.status === 401 ? 'Autorização inválida, usada ou vencida. Gere outra no celular antigo.' : `Não deu: ${e.message}`); return welcome(go); }
   return pairWaitScreen(go, info);
 }
 

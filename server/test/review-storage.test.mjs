@@ -108,3 +108,71 @@ test('R09: lease, colisão e retry ativo não sobrescrevem outra tentativa; limp
   assert.equal(first, second, 'revogações simultâneas compartilham limpeza');
   await Promise.all([first, second]); assert.equal(MEDIA.objects.size, 0);
 });
+
+const fakeDevice = () => ({ authPub: Buffer.concat([Buffer.from([4]), crypto.getRandomValues(new Uint8Array(64))]).toString('base64'), curve: Buffer.alloc(32, 1).toString('base64'), ed: Buffer.alloc(32, 2).toString('base64') });
+const pairingFixture = () => {
+  const ctx = context(), env = { MEDIA: r2() }, circle = new Circle(ctx, env);
+  const actor = circle.createIdentity(fakeDevice());
+  return { ctx, env, circle, actor };
+};
+
+test('E02: pedidos anônimos não ocupam fila nem cofre; autorização é única e vinculada à pessoa', async () => {
+  const { circle, actor } = pairingFixture(), device = fakeDevice();
+  for (let i = 0; i < 40; i++) assert.equal((await circle.pairStart({ device })).error, 'unauthorized');
+  assert.equal(circle.one('SELECT count(*) AS n FROM pairings').n, 0);
+  assert.equal(circle.one('SELECT count(*) AS n FROM vaults').n, 0);
+  const permit = (await circle.pairPermit(actor)).token;
+  const starts = await Promise.all([circle.pairStart({ device, permit }), circle.pairStart({ device, permit })]);
+  assert.equal(starts.filter((r) => r.pairingId).length, 1);
+  assert.equal(starts.filter((r) => r.error === 'unauthorized').length, 1);
+  const start = starts.find((r) => r.pairingId);
+  const other = circle.createIdentity(fakeDevice());
+  assert.equal((await circle.pairApprove(other, start)).error, 'forbidden');
+  assert.equal((await circle.pairApprove(actor, start)).pending, true);
+});
+
+test('E02: nova autorização invalida a anterior; reinício, vencimento e substituição preservam os outros', async () => {
+  let { ctx, env, circle, actor } = pairingFixture();
+  const other = circle.createIdentity(fakeDevice());
+  const ownToken = (await circle.pairPermit(actor)).token;
+  const own = await circle.pairStart({ device: fakeDevice(), permit: ownToken });
+  const otherToken = (await circle.pairPermit(other)).token;
+  const otherStart = await circle.pairStart({ device: fakeDevice(), permit: otherToken });
+  const invalid = (await circle.pairPermit(actor)).token;
+  const replacement = (await circle.pairPermit(actor)).token;
+  assert.equal((await circle.pairStart({ device: fakeDevice(), permit: invalid })).error, 'unauthorized');
+  circle = new Circle(ctx, env);
+  const next = await circle.pairStart({ device: fakeDevice(), permit: replacement });
+  assert.ok(next.pairingId);
+  assert.equal((await circle.pairStatus(own.pairingId, '')).state, 'expired');
+  assert.ok(circle.one('SELECT 1 FROM pairings WHERE pairing_id = ?', otherStart.pairingId));
+  assert.equal(circle.one('SELECT count(*) AS n FROM pairings').n, 2);
+  const expires = (await circle.pairPermit(actor)).token;
+  circle.now = () => Date.now() + 300_001;
+  assert.equal((await circle.pairStart({ device: fakeDevice(), permit: expires })).error, 'unauthorized');
+});
+
+test('E04: chave pública alheia + pedido inventado não revelam identidade; recibo correto sobrevive a reinício', async () => {
+  let { ctx, env, circle, actor } = pairingFixture();
+  const device = fakeDevice(), permit = (await circle.pairPermit(actor)).token;
+  const start = await circle.pairStart({ device, permit });
+  assert.equal((await circle.pairStatus(start.pairingId, fakeDevice().authPub)).state, 'expired');
+  const approved = await circle.pairApprove(actor, start);
+  assert.deepEqual(await circle.pairStatus('unknown-pairing', device.authPub), { state: 'expired' });
+  circle = new Circle(ctx, env);
+  assert.deepEqual(await circle.pairStatus(start.pairingId, device.authPub), { state: 'approved', deviceId: approved.deviceId, userId: actor.userId });
+  circle.sql.exec("UPDATE devices SET state = 'revoked' WHERE device_id = ?", approved.deviceId);
+  assert.deepEqual(await circle.pairStatus(start.pairingId, device.authPub), { state: 'expired' });
+});
+
+test('E04: aprovação legada só é retomada com prova da chave privada, nunca apenas com a chave pública', async () => {
+  const { circle, actor } = pairingFixture();
+  const kp = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']);
+  const authPub = Buffer.from(await crypto.subtle.exportKey('raw', kp.publicKey)).toString('base64');
+  const deviceId = circle.addDevice(actor.userId, { ...fakeDevice(), authPub }, 'pending');
+  const id = 'legacy-pairing';
+  assert.deepEqual(await circle.pairStatus(id, authPub), { state: 'expired' });
+  const proof = Buffer.from(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, kp.privateKey, new TextEncoder().encode(`mp-pair-status-v1:${id}`))).toString('base64');
+  assert.deepEqual(await circle.pairStatus(id, authPub, proof), { state: 'approved', deviceId, userId: actor.userId });
+  assert.deepEqual(await circle.pairStatus('another-pairing', authPub, proof), { state: 'expired' });
+});

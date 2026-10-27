@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS otks (device_id TEXT NOT NULL, key_id TEXT NOT NULL, 
 CREATE TABLE IF NOT EXISTS fallback_keys (device_id TEXT PRIMARY KEY, key_id TEXT NOT NULL, key TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pairings (pairing_id TEXT PRIMARY KEY, code_hash TEXT NOT NULL, auth_pub TEXT NOT NULL, curve TEXT NOT NULL,
   ed TEXT NOT NULL, keys_json TEXT NOT NULL DEFAULT '{}', expires_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS pair_permits (user_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS pairing_owners (pairing_id TEXT PRIMARY KEY, user_id TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS pairing_receipts (pairing_id TEXT PRIMARY KEY, auth_pub TEXT NOT NULL, device_id TEXT NOT NULL, expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS recoveries (user_id TEXT PRIMARY KEY, state TEXT NOT NULL, by_admin TEXT, by_guardian TEXT,
   wait_until INTEGER, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS push_subs (device_id TEXT PRIMARY KEY, endpoint TEXT NOT NULL);
@@ -110,6 +113,9 @@ export class Circle extends DurableObject {
     this.sql.exec('DELETE FROM sessions WHERE expires_at <= ?', now);
     this.sql.exec('DELETE FROM challenges WHERE expires_at <= ?', now);
     this.sql.exec('DELETE FROM pairings WHERE expires_at <= ?', now);
+    this.sql.exec('DELETE FROM pair_permits WHERE expires_at <= ?', now);
+    this.sql.exec('DELETE FROM pairing_owners WHERE pairing_id NOT IN (SELECT pairing_id FROM pairings)');
+    this.sql.exec("DELETE FROM pairing_receipts WHERE expires_at <= ? OR device_id NOT IN (SELECT device_id FROM devices WHERE state IN ('active', 'pending'))", now);
     // Cofre de pedido que venceu sem aprovação some junto.
     this.dropVaults("device_id LIKE 'p:%' AND substr(device_id, 3) NOT IN (SELECT pairing_id FROM pairings)");
     this.expirePending();
@@ -356,36 +362,67 @@ export class Circle extends DurableObject {
   // `vault` (opcional): o aparelho novo já registra o cofre aqui, antes de
   // mostrar o código, e guarda tudo cifrado no aparelho. Se o app fechar no
   // meio da troca, ao abrir ele continua de onde parou.
-  async pairStart({ device, vault = null }) {
-    if (!checkDevice(device)) return { error: 'bad_device' };
-    if (vault && (!B64_32.test(vault.verifier ?? '') || !DEAD_DAYS.includes(vault.deadDays))) return { error: 'bad_request' };
-    this.prune();
-    if (this.one('SELECT count(*) AS n FROM pairings').n > 20) return { error: 'rate_limited' };
-    const pairingId = randomId(12);
-    const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 100_000_000).padStart(8, '0');
-    this.sql.exec('INSERT INTO pairings(pairing_id, code_hash, auth_pub, curve, ed, keys_json, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      pairingId, await sha256b64(code), device.authPub, device.curve, device.ed,
-      JSON.stringify({ otks: device.otks ?? {}, fallback: device.fallback ?? null }).slice(0, 16_000), this.now() + PAIRING_TTL);
-    let reg = null;
-    if (vault) {
-      const vaultId = randomId(18);
-      const { share, stored } = await this.newShare(vaultId);
-      this.sql.exec('INSERT INTO vaults(vault_id, user_id, device_id, verifier_hash, duress_hash, share, attempts, last_seen, dead_days, protection) VALUES (?, ?, ?, ?, NULL, ?, 0, ?, ?, 1)',
-        vaultId, '', pairVault(pairingId), await sha(vault.verifier), stored, this.now(), vault.deadDays);
-      reg = { vaultId, share };
-    }
-    return { pairingId, code, expiresAt: this.now() + PAIRING_TTL, vault: reg };
+  async pairPermit(actor) {
+    // Só quem já entrou no círculo pode reservar uma troca. Uma reserva
+    // por identidade; pedidos anônimos nunca ocupam a fila de outra pessoa.
+    const dev = this.activeDevice(actor.userId);
+    if (!dev || dev.device_id !== actor.deviceId) return { error: 'forbidden' };
+    const token = randomId(18), expiresAt = this.now() + PAIRING_TTL;
+    const hash = await sha256b64(token);
+    this.sql.exec('INSERT OR REPLACE INTO pair_permits(user_id, token_hash, expires_at) VALUES (?, ?, ?)', actor.userId, hash, expiresAt);
+    return { token, expiresAt };
+  }
+
+  async pairStart({ device, vault = null, permit }) {
+    return this.state.blockConcurrencyWhile(async () => {
+      if (!checkDevice(device)) return { error: 'bad_device' };
+      if (vault && (!B64_32.test(vault.verifier ?? '') || !DEAD_DAYS.includes(vault.deadDays))) return { error: 'bad_request' };
+      if (typeof permit !== 'string' || !/^[A-Za-z0-9_-]{24}$/.test(permit)) return { error: 'unauthorized' };
+      const hash = await sha256b64(permit);
+      const owner = this.one('SELECT * FROM pair_permits WHERE token_hash = ? AND expires_at > ?', hash, this.now());
+      if (!owner || !this.activeDevice(owner.user_id)) return { error: 'unauthorized' };
+      // Consuma antes do primeiro await seguinte: replays concorrentes não
+      // podem criar vários pedidos com a mesma autorização.
+      this.sql.exec('DELETE FROM pair_permits WHERE token_hash = ?', hash);
+      this.prune();
+      const previous = this.q('SELECT pairing_id FROM pairing_owners WHERE user_id = ?', owner.user_id);
+      for (const p of previous) {
+        this.sql.exec('DELETE FROM pairings WHERE pairing_id = ?', p.pairing_id);
+        this.dropVaults('device_id = ?', pairVault(p.pairing_id));
+        this.sql.exec('DELETE FROM pairing_owners WHERE pairing_id = ?', p.pairing_id);
+      }
+      const pairingId = randomId(12);
+      const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 100_000_000).padStart(8, '0');
+      this.sql.exec('INSERT INTO pairings(pairing_id, code_hash, auth_pub, curve, ed, keys_json, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        pairingId, await sha256b64(code), device.authPub, device.curve, device.ed,
+        JSON.stringify({ otks: device.otks ?? {}, fallback: device.fallback ?? null }).slice(0, 16_000), this.now() + PAIRING_TTL);
+      this.sql.exec('INSERT INTO pairing_owners(pairing_id, user_id) VALUES (?, ?)', pairingId, owner.user_id);
+      let reg = null;
+      if (vault) {
+        const vaultId = randomId(18);
+        const { share, stored } = await this.newShare(vaultId);
+        this.sql.exec('INSERT INTO vaults(vault_id, user_id, device_id, verifier_hash, duress_hash, share, attempts, last_seen, dead_days, protection) VALUES (?, ?, ?, ?, NULL, ?, 0, ?, ?, 1)',
+          vaultId, '', pairVault(pairingId), await sha(vault.verifier), stored, this.now(), vault.deadDays);
+        reg = { vaultId, share };
+      }
+      return { pairingId, code, expiresAt: this.now() + PAIRING_TTL, vault: reg };
+    });
   }
 
   async pairApprove(actor, { pairingId, code }) {
     const p = this.one('SELECT * FROM pairings WHERE pairing_id = ?', pairingId);
     if (!p || p.expires_at <= this.now()) return { error: 'not_found' };
+    const owner = this.one('SELECT user_id FROM pairing_owners WHERE pairing_id = ?', pairingId);
+    if (owner && owner.user_id !== actor.userId) return { error: 'forbidden' };
     if (p.attempts >= 3) { this.sql.exec('DELETE FROM pairings WHERE pairing_id = ?', pairingId); return { error: 'not_found' }; }
     if (p.code_hash !== await sha256b64(String(code))) {
       this.sql.exec('UPDATE pairings SET attempts = attempts + 1 WHERE pairing_id = ?', pairingId);
       return { error: 'unauthorized' };
     }
+    // A leitura do hash é assíncrona: outro pedido pode ter aprovado antes.
+    if (!this.one('SELECT 1 FROM pairings WHERE pairing_id = ?', pairingId)) return { error: 'not_found' };
     this.sql.exec('DELETE FROM pairings WHERE pairing_id = ?', pairingId);
+    this.sql.exec('DELETE FROM pairing_owners WHERE pairing_id = ?', pairingId);
     // Duas fases: aqui o novo fica PENDENTE e o antigo continua valendo. Só
     // quando o novo prova que guardou as chaves (login com a chave dele +
     // cofre registrado) é que ele confirma e o antigo cai (pairCommit). Se o
@@ -394,6 +431,7 @@ export class Circle extends DurableObject {
     let keys = {};
     try { keys = JSON.parse(p.keys_json); } catch {}
     const deviceId = this.addDevice(actor.userId, { authPub: p.auth_pub, curve: p.curve, ed: p.ed, ...keys }, 'pending');
+    this.sql.exec('INSERT INTO pairing_receipts(pairing_id, auth_pub, device_id, expires_at) VALUES (?, ?, ?, ?)', pairingId, p.auth_pub, deviceId, this.now() + PENDING_TTL);
     this.sql.exec('UPDATE vaults SET device_id = ?, user_id = ? WHERE device_id = ?', deviceId, actor.userId, pairVault(pairingId));
     return { userId: actor.userId, deviceId, pending: true };
   }
@@ -411,11 +449,25 @@ export class Circle extends DurableObject {
   }
 
   // O aparelho novo consulta se já foi aprovado (pelo id que só ele conhece).
-  pairStatus(pairingId, authPub) {
-    const pending = this.one('SELECT 1 FROM pairings WHERE pairing_id = ?', pairingId);
-    if (pending) return { state: 'pending' };
+  async pairStatus(pairingId, authPub, proof = null) {
+    const pending = this.one('SELECT auth_pub, expires_at FROM pairings WHERE pairing_id = ?', pairingId);
+    if (pending && pending.expires_at > this.now() && pending.auth_pub === authPub) return { state: 'pending' };
     this.expirePending();
-    const dev = this.one("SELECT device_id, user_id FROM devices WHERE auth_pub = ? AND state IN ('active', 'pending')", authPub);
+    // Conhecer uma chave pública não prova que se iniciou aquele pedido.
+    // O recibo liga o id aleatório do pedido ao aparelho aprovado, inclusive
+    // após reinício e confirmação. Nunca procurar só por auth_pub.
+    let dev = this.one("SELECT d.device_id, d.user_id FROM pairing_receipts r JOIN devices d ON d.device_id = r.device_id WHERE r.pairing_id = ? AND r.auth_pub = ? AND r.expires_at > ? AND d.auth_pub = r.auth_pub AND d.state IN ('active', 'pending')", pairingId, authPub, this.now());
+    // Compatibilidade: o servidor antigo apagava o pedido sem deixar recibo.
+    // Só o próprio aparelho, provando posse da chave privada, pode retomar
+    // uma aprovação anterior à atualização. Sem prova, não há busca por chave.
+    if (!dev && typeof authPub === 'string' && P256_RE.test(authPub) && typeof proof === 'string' && /^[A-Za-z0-9+/]{86}==$/.test(proof)) {
+      try {
+        const key = await crypto.subtle.importKey('raw', unb64(authPub), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+        if (await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, unb64(proof), new TextEncoder().encode(`mp-pair-status-v1:${pairingId}`))) {
+          dev = this.one("SELECT device_id, user_id FROM devices WHERE auth_pub = ? AND state IN ('active', 'pending')", authPub);
+        }
+      } catch {}
+    }
     return dev ? { state: 'approved', deviceId: dev.device_id, userId: dev.user_id } : { state: 'expired' };
   }
 

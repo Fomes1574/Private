@@ -120,14 +120,15 @@ route('POST', '/v1/auth/session', async ({ env, request }) => {
 route('POST', '/v1/devices/pair/start', async ({ env, request }) => {
   const b = await readJson(request);
   const vault = b.vault ? { verifier: b.vault.verifier, deadDays: Number(b.vault.deadDays ?? 15) } : null;
-  return json(201, unwrap(await circle(env).pairStart({ device: b.device, vault })));
+  return json(201, unwrap(await circle(env).pairStart({ device: b.device, vault, permit: b.permit })));
 }, { open: true });
 route('POST', '/v1/devices/pair/status', async ({ env, request }) => {
   const b = await readJson(request);
-  return json(200, await circle(env).pairStatus(assertId(b.pairingId), String(b.authPub)));
+  return json(200, await circle(env).pairStatus(assertId(b.pairingId), String(b.authPub), b.proof));
 }, { open: true });
 
 // ---------- autenticadas ----------
+route('POST', '/v1/devices/pair/permit', async ({ env, me }) => json(201, unwrap(await circle(env).pairPermit(me))));
 route('POST', '/v1/auth/logout', async ({ env, request }) => {
   await circle(env).logout(request.headers.get('authorization').slice(7));
   return json(200, { ok: true });
@@ -266,7 +267,7 @@ route('POST', '/v1/ack', async ({ env, request, me }) => {
 });
 
 // Mídia
-route('GET', '/v1/capabilities', async () => json(200, { mediaUploadIds: 1, vaultMigration: 1 }));
+route('GET', '/v1/capabilities', async () => json(200, { mediaUploadIds: 1, vaultMigration: 1, pairingPermit: 1 }));
 route('POST', '/v1/rooms/([A-Za-z0-9_-]{8,64})/media', async ({ env, request, me, p, url }) => {
   const mode = ['once', 'media', 'doc'].includes(url.searchParams.get('mode')) ? url.searchParams.get('mode') : null;
   if (!mode) throw new HttpError(400, 'bad_mode');

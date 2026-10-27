@@ -1,5 +1,7 @@
 # Migrar a administradora do APK de debug para o APK de distribuição
 
+> **Atualização de 27/10/2026 — ADR 0018:** o roteiro abaixo descreve a migração anterior à exigência de autorização de troca. O debug legado não tem “Gerar autorização” e não pode ser atualizado com outra chave. Depois do deploy novo, a administradora desse debug deve usar no APK de distribuição “Administradora: instalar ou recuperar”, com seu código de instalação guardado fora do app. A recuperação mantém a identidade de administradora e começa sem histórico, desconectando o antigo. Não desinstale o debug antes de confirmar a conta no novo. Para membros que ainda estejam num debug não atualizável, seguir a recuperação existente com administradora/guardião. Quem já usa o APK de distribuição atualiza por cima normalmente e então usa a troca com autorização. Não inicie o procedimento antigo abaixo após o deploy novo.
+
 ## Por que não dá para "atualizar por cima"
 
 O APK de debug instalado (pacote `com.mensageiro.privado`) foi assinado pelo

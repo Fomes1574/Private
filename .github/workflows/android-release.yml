@@ -17,24 +17,32 @@ on:
 
 permissions:
   contents: write # criar a Release
+  actions: read
 
 concurrency: { group: android-release, cancel-in-progress: false }
 
 jobs:
   release:
-    if: github.event.inputs.confirmar == 'PUBLICAR-APK'
+    if: github.ref == 'refs/heads/ccr-de59a90b-gr4vug' && github.event.inputs.confirmar == 'PUBLICAR-APK'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     environment: release
     env:
       PKG: com.pactotalk.app
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { persist-credentials: false }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22" }
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with: { distribution: temurin, java-version: "21" }
 
+      - name: Conferir CI do mesmo commit
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRE_ANDROID: "1"
+        run: node scripts/verificar-ci.mjs
       - name: Conferir segredos e variáveis
         env:
           KEY: ${{ secrets.ANDROID_SIGNING_KEY }}

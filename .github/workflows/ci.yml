@@ -2,7 +2,9 @@ name: ci
 
 on:
   push:
+    branches: [ccr-de59a90b-gr4vug]
   pull_request:
+  workflow_dispatch:
 
 # Menor privilégio: o CI só lê o repositório.
 permissions:
@@ -15,10 +17,11 @@ concurrency:
 jobs:
   segredos:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { fetch-depth: 0, persist-credentials: false }
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with: { go-version: "1.27", cache: false }
       - name: gitleaks (histórico inteiro)
         run: |
@@ -27,10 +30,11 @@ jobs:
 
   dependencias:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { persist-credentials: false }
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with: { go-version: "1.27", cache: false }
       - name: osv-scanner (todas as lockfiles)
         run: |
@@ -45,15 +49,16 @@ jobs:
 
   provas-wasm:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       matrix:
         prova: [01-vodozemac-wasm, 02-passkey-prf-pin]
     # (o pacote de cripto do app tem job próprio: cripto-app)
     defaults: { run: { working-directory: "poc/${{ matrix.prova }}" } }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { persist-credentials: false }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22" }
       - name: Ferramentas Rust travadas
         run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
@@ -65,11 +70,12 @@ jobs:
 
   prova-03:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults: { run: { working-directory: poc/03-banco-local-cifrado } }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { persist-credentials: false }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22" }
       - run: npm ci
       - name: Cópia do SQLite confere com o pacote travado
@@ -78,34 +84,40 @@ jobs:
 
   prova-04:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults: { run: { working-directory: poc/04-atualizacao-sw } }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { persist-credentials: false }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22" }
       - run: npm test
 
   protocolo:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults: { run: { working-directory: packages/protocol } }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { persist-credentials: false }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22" }
       - run: npm test
+      - name: Regras de publicação
+        working-directory: .
+        run: node --test tools/publicacao.test.mjs
       - name: Mesmo resultado em outro fuso horário
         env: { TZ: "Asia/Tokyo" }
         run: npm test
 
   cripto-app:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults: { run: { working-directory: packages/crypto } }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { persist-credentials: false }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22" }
       - run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
       - name: Build reproduzível (o WASM no repositório tem que bater)
@@ -116,11 +128,12 @@ jobs:
 
   cliente:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     needs: [cripto-app]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { persist-credentials: false }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22" }
       - run: npm ci
         working-directory: server
@@ -131,12 +144,13 @@ jobs:
 
   app:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     needs: [cripto-app]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         # Histórico inteiro: o teste de atualização instala com um commit antigo.
         with: { persist-credentials: false, fetch-depth: 0 }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22" }
       - run: npm ci
         working-directory: server
@@ -154,11 +168,12 @@ jobs:
 
   servidor:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults: { run: { working-directory: server } }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { persist-credentials: false }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22" }
       - run: npm ci
       - name: API inteira no workerd local (D1, Durable Objects e R2)
@@ -171,11 +186,12 @@ jobs:
 
   prova-05:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults: { run: { working-directory: poc/05-ver-uma-vez } }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { persist-credentials: false }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22" }
       - run: npm ci
       - name: Worker local (workerd) nos modos DO e R2
@@ -184,11 +200,12 @@ jobs:
 
   prova-06:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults: { run: { working-directory: poc/06-video-safari } }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { persist-credentials: false }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22" }
       - run: npm ci
       - name: Cópia da mediabunny confere com o pacote travado
@@ -197,11 +214,12 @@ jobs:
 
   navegador:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     needs: [provas-wasm, prova-03, prova-04, prova-05, prova-06]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { persist-credentials: false }
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22" }
       - name: Worker de deploy das provas (mesmos cabeçalhos da Cloudflare)
         working-directory: deploy/provas
