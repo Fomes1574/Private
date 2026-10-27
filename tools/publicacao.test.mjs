@@ -6,6 +6,7 @@ const run = (path, changes = {}) => ({ id: 1, path: `.github/workflows/${path}.y
 
 test('publicação exige sucesso do mesmo commit; APK também exige o teste Android', () => {
   assert.doesNotThrow(() => assertValidated([run('ci')], sha));
+  assert.doesNotThrow(() => assertValidated([run('ci', { event: 'workflow_dispatch' }), run('android', { event: 'workflow_dispatch' })], sha, { android: true }));
   assert.throws(() => assertValidated([run('ci')], sha, { android: true }));
   assert.doesNotThrow(() => assertValidated([run('ci'), run('android')], sha, { android: true }));
   for (const changes of [{ conclusion: 'failure' }, { status: 'in_progress' }, { head_sha: 'b'.repeat(40) }, { head_branch: 'outra' }, { event: 'pull_request' }]) assert.throws(() => assertValidated([run('ci', changes)], sha));
