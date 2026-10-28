@@ -70,7 +70,10 @@ async function audit(name) {
       if (layer === document && bar && !bar.contains(el) && bar.contains(hit)) continue; // rolou para baixo do cabeçalho
       if (hit && hit !== el && !el.contains(hit) && !hit.contains(el)) out.push(`coberto: "${label}" por <${hit.tagName.toLowerCase()} class="${hit.className?.baseVal ?? hit.className}">`);
       if (Math.min(r.width, r.height) < 24 && !el.matches('input[type=checkbox], input[type=radio]')) out.push(`pequeno demais (${Math.round(r.width)}x${Math.round(r.height)}): "${label}"`);
-      if (r.right > vw + 1) out.push(`passa da tela: "${label}"`);
+      // Dentro de uma barra que rola de lado (editor, tela de preparar), o
+      // item é alcançado arrastando a barra: não é problema.
+      const scroller = (() => { for (let p = el.parentElement; p; p = p.parentElement) { const o = getComputedStyle(p).overflowX; if ((o === 'auto' || o === 'scroll') && p.scrollWidth > p.clientWidth) return p; } return null; })();
+      if (r.right > vw + 1 && !scroller) out.push(`passa da tela: "${label}"`);
     }
     if (document.documentElement.scrollWidth > vw + 1) out.push(`rolagem lateral: ${document.documentElement.scrollWidth}px`);
     return out;
@@ -82,7 +85,7 @@ async function audit(name) {
 test('E4: telas em tamanho de celular, botões alcançáveis e com nome', async () => {
   ctx = await browser();
   page = await ctx.newPage();
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: Number(process.env.MP_VIEWPORT_W || 390), height: 844 }); // 360 = celular pequeno
   await virtualAuthenticator(page);
   await page.goto(`${APP}/#instalar`);
   await audit('01-boas-vindas');
