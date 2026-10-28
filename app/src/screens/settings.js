@@ -262,7 +262,7 @@ function emergencySection() {
   } });
   return h('section', { class: 'card' },
     h('h2', { text: 'Proteções de emergência' }),
-    h('label', { for: 'dead-days', text: 'Apagar tudo deste aparelho se o app ficar sem abrir por' }), sel,
+    h('label', { for: 'dead-days', text: 'Apagar os dados se o app ficar sem abrir por' }), sel,
     duressBtn, killBtn,
     h('label', { for: 'lock-after', text: 'Trancar ao sair do app' }), lockSel());
 }
