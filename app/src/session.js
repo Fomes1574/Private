@@ -344,10 +344,14 @@ async function afterUnlock({ loggedIn = false } = {}) {
   // E3: a lista aparece já com o que está no aparelho; diretório e
   // sincronização seguem por trás (nessa ordem: o cliente serializa) e a tela
   // se atualiza com o aviso "synced". Enviar sempre confere as chaves antes.
+  // Trancar no meio interrompe esse trabalho: não é erro (a próxima abertura
+  // relê tudo; o que estava na memória já foi descartado).
   const client = S.client;
-  client.refreshDirectory().then(() => mark('unlock:directory'), (e) => console.error('diretório', e?.message))
-    .then(() => (S.client === client ? syncNow() : null))
-    .then(() => mark('unlock:sync'), (e) => console.error('sincronização falhou', e?.message));
+  const live = () => S.unlocked && !S.locking && S.client === client;
+  const report = (what) => (e) => { if (live()) console.error(what, e?.message); };
+  client.refreshDirectory().then(() => mark('unlock:directory'), report('diretório'))
+    .then(() => (live() ? syncNow() : null))
+    .then(() => mark('unlock:sync'), report('sincronização falhou'));
   connectLive();
   // Token novo ou permissão retirada nas configurações: acerta no servidor.
   // D15: o app não usa notificações. Quem tinha ligado é desligado aqui
