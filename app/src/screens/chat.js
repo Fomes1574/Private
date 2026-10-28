@@ -1,6 +1,7 @@
 // Conversa 1:1 ou grupo. Só horário (Brasília) em cada mensagem; nada de
 // visto, entregue, online ou digitando (V6-022). Texto sempre como texto.
-import { h, mount, header, toast, choiceSheet, iconSheet, confirmSheet, errText, onLongPress } from '../ui.js';
+import { h, mount, header, toast, choiceSheet, iconSheet, iconButton, confirmSheet, errText, onLongPress } from '../ui.js';
+import { icon } from '../icons.js';
 import * as session from '../session.js';
 import { formatTime, formatDateTime } from '../packages/protocol/src/time.js';
 import { preparePhoto } from '../media.js';
@@ -39,7 +40,7 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
   let term = '';
   const searchIn = h('input', { id: 'chat-search', type: 'search', placeholder: 'Buscar nesta conversa', autocomplete: 'off', 'aria-label': 'Buscar nesta conversa' });
   const searchBar = h('div', { class: 'search-bar row', hidden: true }, searchIn,
-    h('button', { class: 'icon', 'aria-label': 'Fechar busca', text: '×', onclick: () => { term = ''; searchIn.value = ''; searchBar.hidden = true; render(); } }));
+    iconButton('close', 'Fechar busca', () => { term = ''; searchIn.value = ''; searchBar.hidden = true; render(); }));
   searchIn.oninput = () => { term = normalize(searchIn.value.trim()); render(); };
   const log = h('ol', { class: 'messages', role: 'log', 'aria-live': 'polite' });
   const input = h('textarea', { id: 'composer', rows: '1', maxlength: '4000', placeholder: 'Mensagem', autocomplete: 'off', autocorrect: 'off', spellcheck: 'false', 'aria-label': 'Mensagem' });
@@ -69,7 +70,7 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
     session.setDraft(roomId, '').catch(() => {});
     // Aparece na hora como "enviando…" (em rede lenta, como Tor, a ida e volta
     // demora); some ao confirmar ou volta para a caixa se falhar.
-    const pending = h('li', { class: 'msg mine pending' }, h('span', { class: 'text', text }), h('span', { class: 'meta' }, h('span', { 'aria-label': 'enviando', text: '🕓' })));
+    const pending = h('li', { class: 'msg mine pending' }, h('span', { class: 'text', text }), h('span', { class: 'meta' }, h('span', { 'aria-label': 'enviando', title: 'enviando' }, icon('clock', 13))));
     log.querySelector('li.note')?.remove();
     log.append(pending);
     pending.scrollIntoView({ block: 'end' });
@@ -84,14 +85,14 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
       pending.remove();
       // F10: sem rede, a mensagem já está na fila e vai sozinha; voltar o
       // texto para a caixa faria a pessoa mandar de novo (duplicada).
-      if (e.code === 'pending' || e.code === 'send_failed') { clearTimeout(draftTimer); await session.setDraft(roomId, ''); setReply(null); toast('Sem conexão: a mensagem ficou na fila (🕓) e vai sozinha quando a rede voltar.'); await render(); return; }
+      if (e.code === 'pending' || e.code === 'send_failed') { clearTimeout(draftTimer); await session.setDraft(roomId, ''); setReply(null); toast('Sem conexão. A mensagem vai sozinha quando a rede voltar.'); await render(); return; }
       input.value = text; session.setDraft(roomId, text).catch(() => {}); toast(e.code === 'gone' ? 'Conversa encerrada.' : `Não enviou: ${errText(e)}`);
     }
   };
   const setReply = (m) => {
     replyTo = m?.msgId ?? null;
     replyBar.hidden = !m;
-    replyBar.replaceChildren(...(m ? [h('span', { class: 'muted', text: `Respondendo: ${preview(m)}` }), h('button', { class: 'icon', 'aria-label': 'Cancelar resposta', text: '×', onclick: () => setReply(null) })] : []));
+    replyBar.replaceChildren(...(m ? [h('span', { class: 'muted', text: `Respondendo: ${preview(m)}` }), iconButton('close', 'Cancelar resposta', () => setReply(null))] : []));
   };
 
   fileIn.onchange = async () => {
@@ -350,7 +351,7 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
       } }));
   }
   let micStart = null;
-  const micButton = h('button', { class: 'icon', 'aria-label': 'Gravar áudio', text: '🎙',
+  const micButton = h('button', { class: 'icon', 'aria-label': 'Gravar áudio', title: 'Gravar áudio',
     onpointerdown: (e) => { if (e.button !== 0) return; e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); micStart = { x: e.clientX, y: e.clientY }; mic(); },
     onpointermove: (e) => {
       if (!micStart) return;
@@ -360,29 +361,29 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
     onpointerup: (e) => { e.preventDefault(); const was = micStart; micStart = null; if (was && !locked) finishRecording(); },
     onpointercancel: () => { if (!locked) discardAudio(); micStart = null; },
     onclick: (e) => { if (e.detail === 0) { if (recording) finishRecording(); else mic(); } },
-  });
+  }, icon('mic', 22));
 
   const emojiPanel = h('div', { class: 'emoji-panel', hidden: true }, EMOJIS.map((e) => h('button', { class: 'emoji', type: 'button', text: e, onclick: () => { input.value += e; input.focus(); } })));
 
   mount(h('div', { class: 'chat' },
-    header(session.roomTitle(view), { back: () => go('chats'), actions: [h('button', { class: 'icon', 'aria-label': 'Menu da conversa', text: '⋮', onclick: async () => { const r = await roomMenu(go, roomId); if (r === 'search') { searchBar.hidden = false; searchIn.focus(); return; } if (r === 'poll') { const q = await pollSheet(); if (q && scope.valid()) { try { await client.sendPoll(roomId, q.question, q.options, q.multi); await render(); } catch (e) { sendFailed(e); } } return; } if (r === 'refresh') return go('chat', { roomId }); } })] }),
+    header(session.roomTitle(view), { back: () => go('chats'), actions: [iconButton('more', 'Menu da conversa', async () => { const r = await roomMenu(go, roomId); if (r === 'search') { searchBar.hidden = false; searchIn.focus(); return; } if (r === 'poll') { const q = await pollSheet(); if (q && scope.valid()) { try { await client.sendPoll(roomId, q.question, q.options, q.multi); await render(); } catch (e) { sendFailed(e); } } return; } if (r === 'refresh') return go('chat', { roomId }); })] }),
     h('div', { class: 'policy muted small', text: policyLine(view) }),
     searchBar, selBar, pinBar,
     log,
     view.closed || !session.imActive(view) ? h('p', { class: 'note center-text', text: view.closed ? 'Conversa encerrada. O que já existe continua só para leitura até vencer.' : 'Você saiu deste grupo. O que já existe continua só para leitura até vencer.' }) :
       h('footer', { class: 'composer' }, replyBar, recBar, progressBar, emojiPanel,
         h('div', { class: 'row' },
-          h('button', { class: 'icon', 'aria-label': 'Anexar foto ou vídeo', text: '+', onclick: attach }),
+          iconButton('plus', 'Anexar foto ou vídeo', attach),
           input,
-          h('button', { class: 'icon', 'aria-label': 'Emojis', text: '☺', onclick: () => { emojiPanel.hidden = !emojiPanel.hidden; } }),
+          iconButton('smile', 'Emojis', () => { emojiPanel.hidden = !emojiPanel.hidden; }),
           micButton,
-          h('button', { class: 'send', 'aria-label': 'Enviar', text: '➤', onclick: send })),
+          h('button', { class: 'send', 'aria-label': 'Enviar', title: 'Enviar', onclick: send }, icon('send', 22))),
         fileIn)));
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
   if (privateQuote) {
     replyBar.hidden = false;
     replyBar.replaceChildren(h('span', { class: 'muted', text: `Respondendo em particular: ${privateQuote.name}: ${privateQuote.text}` }),
-      h('button', { class: 'icon', 'aria-label': 'Cancelar resposta', text: '×', onclick: () => { privateQuote = null; replyBar.hidden = true; replyBar.replaceChildren(); } }));
+      iconButton('close', 'Cancelar resposta', () => { privateQuote = null; replyBar.hidden = true; replyBar.replaceChildren(); }));
   }
   // @menção no grupo (b.10): sugestões dos membros enquanto digita.
   const mentionBox = h('div', { class: 'mention-box', hidden: true });
@@ -465,7 +466,7 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
     if (!pins.length) return pinBar.replaceChildren();
     const last = pins.at(-1);
     pinBar.replaceChildren(h('button', { class: 'row-btn small', onclick: () => { const t = nodes.get(last.target)?.el; if (t) { t.scrollIntoView({ block: 'center' }); t.classList.add('flash'); setTimeout(() => t.classList.remove('flash'), 1200); } } },
-      h('span', { text: `📌 ${pins.length > 1 ? `${pins.length} fixadas · ` : ''}${preview(last.message)}` })));
+      icon('pin', 16), h('span', { text: `${pins.length > 1 ? `${pins.length} fixadas · ` : ''}${preview(last.message)}` })));
   }
   // Apagar como no WhatsApp: "para todos" só se todas forem suas.
   async function deleteMessages(list) {
@@ -554,7 +555,7 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
     if (!session.imActive(view) || view.closed) return toast('Você não está mais nesta conversa.');
     try { await client.vote(roomId, m.msgId, choices); await render(); } catch (e) { toast(`Não votou: ${errText(e)}`); }
   } }) : null;
-  let extraMeta = (m) => (m.starred ? [h('span', { 'aria-label': 'favorita', text: '⭐' })] : []);
+  let extraMeta = (m) => (m.starred ? [h('span', { 'aria-label': 'favorita', title: 'favorita' }, icon('star', 12))] : []);
 
   // Visualizador ligado à mensagem: fecha quando ela vence ou some (F07).
   const viewOpts = (m) => ({ signal: scope.signal, msgId: m.msgId, expiresIn: m.expiresAt - (S.clock.now() ?? Date.now()) });
@@ -572,7 +573,7 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
       // O núcleo do cliente já apaga a chave depois da tentativa; aqui só redesenha.
       return onceButton('Abrir uma vez', load, m.body.mime, async (err) => {
         if (!scope.valid()) return;
-        if (err) toast('Não foi possível abrir. A visualização pode ter sido consumida; ela não será repetida automaticamente.');
+        if (err) toast('Não abriu. Se já tinha sido aberta, não abre de novo.');
         await render().catch(() => {});
       }, viewOpts(m));
     }
@@ -609,7 +610,7 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
         renderAgain = false;
         const r = await client.view(roomId);
         if (!scope.valid()) return;
-        if (r.blocked) { log.replaceChildren(h('li', { class: 'note', text: 'Sem conexão confiável com o servidor: as mensagens ficam escondidas até reconectar.' })); nodes.clear(); return; }
+        if (r.blocked) { log.replaceChildren(h('li', { class: 'note', text: 'Sem conexão. As mensagens aparecem quando a rede voltar.' })); nodes.clear(); return; }
         const bottom = !rendered || atBottom(), top = log.scrollTop;
         const byId = new Map(r.render.map((m) => [m.msgId, m]));
         let list = term ? r.render.filter((m) => normalize((m.kind === 'media' ? m.body?.caption ?? m.body?.name ?? '' : m.text) ?? '').includes(term)) : r.render;
@@ -645,13 +646,13 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
           }
           if (log.children[i] !== entry.el) log.insertBefore(entry.el, log.children[i] ?? null);
         });
-        // Na fila (F10): aparecem com 🕓 até o servidor aceitar.
+        // Na fila (F10): aparecem com o relógio até o servidor aceitar.
         for (const el of log.querySelectorAll('li.queued')) el.remove();
         const queued = term ? [] : (await client.outbox()).filter((o) => o.roomId === roomId && o.local);
         for (const o of queued) {
           const failed = o.state === 'failed' || o.state === 'staging';
           const el = h('li', { class: 'msg mine pending queued' }, h('span', { class: 'text', text: o.local.kind === 'media' ? mediaName(o.local) : o.local.body?.text ?? '' }),
-            h('span', { class: 'meta', 'aria-label': failed ? 'falhou' : 'na fila', text: failed ? 'Falhou' : '🕓' }),
+            failed ? h('span', { class: 'meta', 'aria-label': 'falhou', text: 'Falhou' }) : h('span', { class: 'meta', 'aria-label': 'na fila', title: 'na fila' }, icon('clock', 13)),
             h('button', { class: 'secondary small', text: 'Remover da fila', onclick: async () => { await client.cancelQueued(o.payload.msgId); if (scope.valid()) await render(); } }));
           if (failed && o.state !== 'staging') el.append(h('button', { class: 'secondary small', text: 'Tentar novamente', onclick: async () => { try { await client.retryQueued(o.payload.msgId); } catch (e) { sendFailed(e); } if (scope.valid()) await render(); } }));
           log.append(el);
@@ -768,7 +769,7 @@ function messageSheet(title, reactions, options) {
 // verificação dessa pessoa.
 function sendFailed(e) {
   if (e?.code === 'key_unverified') { toast(errText(e)); if (e.userIds?.[0]) verifySheet(e.userIds[0]); return; }
-  if (e?.code === 'pending') { toast('Sem conexão: ficou na fila (🕓) e vai sozinha quando a rede voltar.'); return; }
+  if (e?.code === 'pending') { toast('Sem conexão. Vai sozinha quando a rede voltar.'); return; }
   toast(`Não enviou: ${errText(e)}`);
 }
 

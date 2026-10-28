@@ -145,7 +145,7 @@ test('foto de ver uma vez: tocar abre, soltar mantém, fechar consome uma vez s�
   await bia.page.click('.once-open');
   await bia.page.waitForSelector('.viewer img', { timeout: 15000 });
   const overlayText = await bia.page.textContent('.viewer');
-  assert.equal(overlayText.trim(), '×', 'só o botão de fechar, sem marca, nome ou data');
+  assert.equal(overlayText.trim(), '', 'só o botão de fechar (ícone), sem marca, nome ou data');
   await bia.page.waitForTimeout(250);
   assert.ok(await bia.page.$('.viewer img'), 'soltar o dedo não fecha nem perde a imagem');
   await bia.page.click('.viewer [aria-label=Fechar]');
@@ -574,7 +574,7 @@ test('menu da conversa: buscar, silenciar, fixar, arquivar e apagar conversa só
   await bia.page.waitForFunction(() => /silenciada/.test(document.querySelector('#toast').textContent));
   await menu(bia, 'Fixar no topo');
   await bia.page.click('[aria-label=Voltar]');
-  await bia.page.waitForSelector('.row-btn .title >> text=/📌 Ana 🔕/');
+  await bia.page.waitForSelector('.row-btn .title:has-text("Ana"):has([aria-label=fixada]):has([aria-label=silenciada])');
   assert.match(await bia.page.textContent('.list:not(.results) li:first-child'), /Ana/, 'fixada no topo');
   // Arquivar o grupo e apagá-lo só deste aparelho.
   await bia.page.click('.row-btn:has(.title:has-text("Família"))');

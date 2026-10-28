@@ -29,7 +29,7 @@ export async function settingsScreen(go, { attachment = null } = {}) {
 
   mount(h('div', {},
     header('Ajustes', { back: () => go('chats') }),
-    h('main', {},
+    h('main', { class: 'settings' },
       h('section', { class: 'card' },
         h('h2', { text: 'Você' }),
         h('div', { class: 'row' }, meAvatar,
@@ -53,7 +53,7 @@ export async function settingsScreen(go, { attachment = null } = {}) {
         } })),
       h('section', { class: 'card' },
         h('h2', { text: 'Segurança' }),
-        h('p', { class: 'muted small', text: 'Seu número de segurança (compare pessoalmente):' }),
+        h('p', { class: 'muted small', text: 'Seu número de segurança' }),
         h('p', { class: 'code', text: fp }),
         h('p', { class: 'muted small' }, 'Versão ', h('span', { class: 'code', text: CONFIG.versionCode })),
         warnings.length ? h('details', {}, h('summary', { text: `Atividade de segurança (${warnings.length})` }), h('ul', { class: 'list' }, warnings)) : null,
@@ -199,7 +199,7 @@ function updateSection() {
   ask({ type: 'status' }).then((r) => { current.textContent = r.pinned ? `v${r.pinned.version} · ${fmt(r.pinned.code)}` : '—'; });
   return h('section', { class: 'card' },
     h('h2', { text: 'Atualização' }),
-    h('p', { class: 'muted small', text: 'Versão em uso (compare o código com o publicado no GitHub):' }), current,
+    h('p', { class: 'muted small', text: 'Versão em uso (confira com o código publicado no GitHub)' }), current,
     h('button', { class: 'secondary', text: 'Procurar atualização', onclick: async () => {
       const r = await ask({ type: 'check', channel: 'estavel' });
       if (!r.ok) return toast(r.refused ? `Nenhuma atualização aceita: ${r.error}.` : `Erro: ${r.error}`);
@@ -262,9 +262,9 @@ function emergencySection() {
   } });
   return h('section', { class: 'card' },
     h('h2', { text: 'Proteções de emergência' }),
-    h('label', { for: 'dead-days', text: 'Destruir a chave se o aparelho ficar sem abrir o app por' }), sel,
+    h('label', { for: 'dead-days', text: 'Apagar tudo deste aparelho se o app ficar sem abrir por' }), sel,
     duressBtn, killBtn,
-    h('label', { for: 'lock-after', text: 'Trancar (tirar as chaves da memória) ao sair do app' }), lockSel());
+    h('label', { for: 'lock-after', text: 'Trancar ao sair do app' }), lockSel());
 }
 
 function lockSel() {

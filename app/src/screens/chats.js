@@ -2,7 +2,8 @@
 // da última mensagem, contador de não lidas, fixar (até 3), arquivar,
 // marcar como não lida e excluir. Tudo só neste aparelho; nada de online,
 // visto ou digitando (V6-022).
-import { h, mount, header, toast, choiceSheet, confirmSheet, onLongPress, errText } from '../ui.js';
+import { h, mount, header, iconButton, toast, choiceSheet, confirmSheet, onLongPress, errText } from '../ui.js';
+import { icon } from '../icons.js';
 import * as session from '../session.js';
 import { searchByText } from '../packages/protocol/src/search.js';
 import { pendingAttachment, takeAttachment, discardAttachment } from '../attachment-picker.js';
@@ -38,7 +39,7 @@ export async function chatsScreen(go) {
   };
   const selected = pendingAttachment();
   const attachmentCard = selected ? h('div', { class: 'card' },
-    h('p', { text: 'Anexo selecionado. Continue após desbloquear.' }),
+    h('p', { text: 'Uma foto ou arquivo está esperando.' }),
     h('button', { text: 'Continuar com o anexo', onclick: () => { const attachment = takeAttachment(); if (attachment) go(attachment.pick.target === 'settings' ? 'settings' : attachment.pick.target === 'stories' ? 'stories' : 'chat', { roomId: attachment.roomId, attachment }); } }),
     h('button', { class: 'secondary', text: 'Descartar anexo', onclick: () => { discardAttachment(); attachmentCard.remove(); } })) : null;
   // S3: a administradora vê quem ainda espera confirmação no círculo.
@@ -48,16 +49,16 @@ export async function chatsScreen(go) {
     const n = yes ? session.circlePendingCount() : 0;
     adminCard.hidden = !n && (yes || !!S.client.circleRoster());
     adminCard.className = 'card';
-    adminCard.replaceChildren(...(yes && n ? [h('p', { text: `${n} ${n > 1 ? 'pessoas aguardam' : 'pessoa aguarda'} sua confirmação no círculo.` }), h('button', { class: 'secondary', text: 'Conferir em Ajustes', onclick: () => go('settings') })] : !yes && !S.client.circleRoster() ? [h('p', { text: 'Aguardando confirmação da administradora. Os perfis e stories ficam protegidos até a aprovação.' }), h('button', { class: 'secondary', text: 'Verificar administradora', onclick: async () => { const id = await S.client.circleAdminId(); if (id) await verifySheet(id); } })] : []));
+    adminCard.replaceChildren(...(yes && n ? [h('p', { text: `${n} ${n > 1 ? 'pessoas aguardam' : 'pessoa aguarda'} sua confirmação no círculo.` }), h('button', { class: 'secondary', text: 'Conferir em Ajustes', onclick: () => go('settings') })] : !yes && !S.client.circleRoster() ? [h('p', { text: 'Falta a administradora confirmar sua entrada. Até lá, perfis e stories ficam fechados.' }), h('button', { class: 'secondary', text: 'Verificar administradora', onclick: async () => { const id = await S.client.circleAdminId(); if (id) await verifySheet(id); } })] : []));
   }
 
   mount(h('div', {},
     header('Conversas', { actions: [
-      h('button', { class: 'icon', 'aria-label': 'Anotações', text: '✎', onclick: () => go('notes') }),
-      h('button', { class: 'icon', 'aria-label': 'Stories', text: '◎', onclick: () => go('stories') }),
-      h('button', { class: 'icon', 'aria-label': 'Novo grupo', text: '+', onclick: () => go('newGroup') }),
-      h('button', { class: 'icon', 'aria-label': 'Ajustes', text: '⚙', onclick: () => go('settings') }),
-    ] }),
+      iconButton('note', 'Anotações', () => go('notes')),
+      iconButton('stories', 'Stories', () => go('stories')),
+      iconButton('group', 'Novo grupo', () => go('newGroup')),
+      iconButton('settings', 'Ajustes', () => go('settings')),
+    ], large: true }),
     h('main', {}, attachmentCard, adminCard, search, results, archToggle, list)));
 
   const flag = (v, k) => !!S.rooms[v.roomId]?.[k];
@@ -89,7 +90,9 @@ export async function chatsScreen(go) {
     const btn = h('button', { class: 'row-btn', onclick: () => go('chat', { roomId: v.roomId }) },
       avatar(session.roomTitle(v), session.roomPhoto(v)),
       h('span', { class: 'grow' },
-        h('span', { class: 'title', text: (flag(v, 'pinned') ? '📌 ' : '') + session.roomTitle(v) + (muted ? ' 🔕' : '') }),
+        h('span', { class: 'title' }, session.roomTitle(v),
+          flag(v, 'pinned') ? h('span', { class: 'flag', role: 'img', 'aria-label': 'fixada', title: 'fixada' }, icon('pin', 14)) : null,
+          muted ? h('span', { class: 'flag', role: 'img', 'aria-label': 'silenciada', title: 'silenciada' }, icon('mute', 14)) : null),
         h('span', { class: unread ? 'preview unread small' : 'muted small preview', text: session.previewOf(v, last) })),
       h('span', { class: 'row-side' },
         last ? h('time', { class: unread ? 'small unread-time' : 'muted small', text: listTime(last.acceptedAt, S.clock.now() ?? Date.now()) }) : null,

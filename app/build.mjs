@@ -71,7 +71,7 @@ const pubB64 = createPublicKey(priv).export({ format: 'der', type: 'spki' }).sub
 // 3) Manifesto do app e configuração.
 const manifest = {
   id: '/', name: 'Pacto Talk', short_name: 'Pacto Talk', start_url: './', scope: './', display: 'standalone',
-  background_color: '#0B1220', theme_color: '#0B1220',
+  background_color: '#0F1115', theme_color: '#0F1115',
   icons: [{ src: 'icon-180.png', sizes: '180x180', type: 'image/png' }, { src: 'icon-512.webp', sizes: '512x512', type: 'image/webp' }],
 };
 await writeFile(join(stage, 'manifest.webmanifest'), JSON.stringify(manifest, null, 2));

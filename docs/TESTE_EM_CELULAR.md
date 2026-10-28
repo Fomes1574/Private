@@ -48,6 +48,7 @@ Legenda: ✅ ok · ❌ falhou (anote o que viu) · — não se aplica
 | 21 | Cinco fotos, escolha individual | Escolha cinco, edite/legende cada uma; marque duas como ver uma vez, depois três, todas e nenhuma em lotes separados | Cada foto preserva edição/legenda/modo; prévias não mostram conteúdo de ver uma vez; destinatário abre somente as permitidas | | |
 | 22 | Borracha e ① na câmera | Câmera do app → foto → Editar: desenhe, toque na borracha e apague só um pedaço, depois "Desfazer". Na tela de preparar, toque no ① ao lado da legenda | A borracha apaga só o desenho, nunca a foto; desfazer devolve. ① liga "ver uma vez" e tira a legenda | | |
 | 23 | Ajustes enxutos | Abra Ajustes | Sem "Notificações", sem "Guardião", sem "Fotos íntimas" e sem a opção de prévia (a prévia aparece sempre na lista; ver uma vez nunca) | | |
+| 24 | Nova interface (E4) | Percorra lista, conversa, anexar, preparar foto, editor, ajustes, novo grupo, anotações e stories; toque em todos os ícones do topo e da caixa de mensagem. Ative "reduzir movimento" no sistema e repita | Todo ícone faz o que o nome diz; nada fica escondido atrás do teclado ou de outro botão; textos curtos e sem corte; sem animação com "reduzir movimento" | | |
 
 ## Também anotar
 

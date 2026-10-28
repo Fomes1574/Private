@@ -1,5 +1,6 @@
 // Visualizadores vinculados à sessão/tela. D6: tocar para abrir; X/voltar fecha.
 import { h } from '../ui.js';
+import { icon } from '../icons.js';
 import { scriptURL } from '../tt.js';
 import { sensitiveScope } from '../sensitive-scope.js';
 
@@ -47,7 +48,7 @@ function show(bytes, mime, entry, once = false, round = false) {
     : h('img', { src: entry.url, alt: once ? 'Foto de visualização única' : 'Foto', draggable: 'false' });
   if (round) media.classList.add('round'); // vídeo redondo (D)
   entry.overlay = h('div', { class: 'viewer', role: 'dialog', 'aria-modal': 'true', oncontextmenu: (e) => e.preventDefault() }, media,
-    h('button', { class: 'viewer-close', 'aria-label': 'Fechar', text: '×', onclick: closeMedia }));
+    h('button', { class: 'viewer-close', 'aria-label': 'Fechar', onclick: closeMedia }, icon('close', 22)));
   document.body.append(entry.overlay);
 }
 export async function openPhoto(load, mime, options) {
@@ -93,7 +94,7 @@ export async function openText(load, name, options) {
   if (!usable(entry)) return;
   entry.overlay = h('div', { class: 'viewer doc', role: 'dialog', 'aria-modal': 'true', 'aria-label': name || 'Documento', oncontextmenu: (e) => e.preventDefault(), oncopy: (e) => e.preventDefault() },
     h('div', { class: 'doc-head' }, h('span', { text: name || 'Documento' })), h('pre', { class: 'doc-text', text }),
-    h('button', { class: 'viewer-close', 'aria-label': 'Fechar', text: '×', onclick: closeMedia }));
+    h('button', { class: 'viewer-close', 'aria-label': 'Fechar', onclick: closeMedia }, icon('close', 22)));
   document.body.append(entry.overlay);
 }
 export const isPdf = (b) => b.length > 5 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46 && b[4] === 0x2d;
@@ -114,7 +115,7 @@ export async function openPdf(load, name, options) {
     const status = h('p', { class: 'muted small pdf-status', role: 'status', text: 'Abrindo…' });
     entry.overlay = h('div', { class: 'viewer doc pdf', role: 'dialog', 'aria-modal': 'true', 'aria-label': name || 'PDF', oncontextmenu: (e) => e.preventDefault() },
       h('div', { class: 'doc-head' }, h('span', { text: name || 'PDF' })), h('div', { class: 'pdf-scroll' }, status, pages),
-      h('button', { class: 'viewer-close', 'aria-label': 'Fechar', text: '×', onclick: closeMedia }));
+      h('button', { class: 'viewer-close', 'aria-label': 'Fechar', onclick: closeMedia }, icon('close', 22)));
     document.body.append(entry.overlay);
     let task;
     entry.cleanup = () => {

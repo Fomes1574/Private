@@ -5,7 +5,7 @@ import { h, mount, toast, confirmSheet } from '../ui.js';
 import * as session from '../session.js';
 import { lockSetupForm } from './lock-setup.js';
 
-const TAGLINE = 'O único lugar verdadeiramente seguro para o pacto.';
+const TAGLINE = 'Só entre vocês.';
 
 export function welcome(go) {
   const isSetup = location.hash === '#instalar';
@@ -30,15 +30,15 @@ function installHint() {
   if (standalone) return null;
   const ios = /iPhone|iPad/.test(navigator.userAgent);
   return h('p', { class: 'note', text: ios
-    ? 'Para usar de verdade, instale: Compartilhar → Adicionar à Tela de Início, e abra pelo ícone. O Safari e o app instalado guardam dados separados.'
-    : 'Abra pelo app instalado para guardar seus dados com mais segurança.' });
+    ? 'Instale antes de usar: Compartilhar → Adicionar à Tela de Início. O Safari e o app instalado não dividem os dados.'
+    : 'Use pelo app instalado.' });
 }
 
 // Antes de falar com o servidor, cria o cofre (Face ID + PIN).
 function withLock(go, how) {
   mount(h('main', {},
     h('h1', { text: 'Proteja este aparelho' }),
-    h('p', { class: 'muted', text: 'Para abrir o app vão ser pedidos o Face ID (ou a digital) e um PIN só seu. Os dois juntos liberam a chave que cifra tudo neste aparelho.' }),
+    h('p', { class: 'muted', text: 'Para abrir o app: Face ID (ou digital) e um PIN só seu.' }),
     lockSetupForm(async (lock) => {
       if (how === 'pair') return pairPermitScreen(go, lock);
       tokenScreen(go, how, lock);
@@ -69,7 +69,7 @@ function pairPermitScreen(go, lock) {
   const input = h('input', { id: 'pair-permit', type: 'password', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', required: true });
   const button = h('button', { class: 'block', text: 'Continuar troca' });
   mount(h('main', {}, h('h1', { text: 'Autorize no celular antigo' }),
-    h('p', { text: 'No celular antigo atualizado: Ajustes → Trocar de celular → Gerar autorização. Cole aqui a autorização de uso único. Depois você ainda vai confirmar o novo aparelho no antigo.' }),
+    h('p', { text: 'No celular antigo: Ajustes → Trocar de celular → Gerar autorização. Cole aqui o que aparecer lá.' }),
     h('form', { onsubmit: async (e) => {
       e.preventDefault(); button.disabled = true;
       const permit = input.value.trim(); input.value = '';
@@ -117,7 +117,7 @@ function emergency(go) {
   const input = h('input', { id: 'kill', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', placeholder: 'xxxx xxxx xxxx xxxx xxxx xxxx' });
   mount(h('main', {},
     h('h1', { text: 'Perdi meu celular' }),
-    h('p', { text: 'Digite o código de emergência que você anotou. O celular perdido perde a chave na hora: o que está guardado nele vira ruído e a sessão cai. Depois, peça à administradora a recuperação da conta.' }),
+    h('p', { text: 'Digite o código de emergência que você anotou. O celular perdido fica ilegível na hora. Depois, peça à administradora para recuperar sua conta.' }),
     h('form', { onsubmit: async (e) => {
       e.preventDefault();
       try { await session.useKillCode(input.value); input.value = ''; toast('Pronto. Se o código estiver certo, o celular perdido já não abre mais nada.'); welcome(go); }

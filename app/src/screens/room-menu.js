@@ -163,7 +163,7 @@ async function membersSheet(v) {
   }
   const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'sheet-box' },
     S.rooms[v.roomId]?.description ? h('p', { class: 'muted', text: S.rooms[v.roomId].description }) : null,
-    h('p', { text: 'Para verificar alguém, encontrem-se e leiam o QR ou comparem o número de segurança. Se baterem, ninguém está no meio.' }),
+    h('p', { text: 'Encontrem-se e leiam o QR um do outro, ou comparem os números. Se baterem, ninguém está no meio.' }),
     h('ul', { class: 'list' }, rows),
     h('button', { class: 'block', text: 'Fechar', onclick: () => sheet.remove() })));
   document.body.append(sheet);
@@ -187,12 +187,12 @@ async function gallerySheet(roomId) {
   const r = await session.S.client.view(roomId);
   const media = r.render.filter((m) => m.kind === 'media' && m.body?.mode !== 'once').reverse();
   const starred = r.render.filter((m) => m.starred).reverse();
-  const label = (m) => m.kind === 'media' ? `${m.body.mode === 'doc' ? `📄 ${m.body.name ?? 'Documento'}` : /^audio\//.test(m.body.mime) ? '🎤 Áudio' : /^video\//.test(m.body.mime) ? '🎥 Vídeo' : '📷 Foto'}` : (m.text ?? m.body?.question ?? '').slice(0, 80);
+  const label = (m) => m.kind === 'media' ? (m.body.mode === 'doc' ? `Documento · ${m.body.name ?? 'sem nome'}` : /^audio\//.test(m.body.mime) ? 'Áudio' : /^video\//.test(m.body.mime) ? 'Vídeo' : 'Foto') : (m.text ?? m.body?.question ?? '').slice(0, 80);
   const row = (m) => h('li', { class: 'small' }, `${label(m)} · ${session.nameOf(m.sender)} · ${formatDateTime(m.acceptedAt)}`);
   const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'sheet-box' },
     h('h2', { text: 'Mídia e documentos' }),
     media.length ? h('ul', { class: 'list' }, media.map(row)) : h('p', { class: 'muted small', text: 'Nada por aqui.' }),
-    h('h2', { text: 'Favoritas ⭐' }),
+    h('h2', { text: 'Favoritas' }),
     starred.length ? h('ul', { class: 'list' }, starred.map(row)) : h('p', { class: 'muted small', text: 'Segure uma mensagem e toque em Favoritar. Favoritas ficam só neste aparelho e somem quando a mensagem vence.' }),
     h('button', { class: 'block', text: 'Fechar', onclick: () => sheet.remove() })));
   document.body.append(sheet);

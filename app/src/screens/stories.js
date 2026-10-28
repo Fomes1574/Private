@@ -1,7 +1,7 @@
 // Stories (§22): foto ou vídeo para quem a pessoa escolher no círculo, com
 // prazo (24 h por padrão, dentro de 12 h–15 d). Sem contagem nem lista de
 // quem viu. Quem publicou pode apagar antes de vencer (some para todos).
-import { h, mount, header, toast, confirmSheet, errText } from '../ui.js';
+import { h, mount, header, iconButton, toast, confirmSheet, errText } from '../ui.js';
 import * as session from '../session.js';
 import { formatTime, formatDateTime } from '../packages/protocol/src/time.js';
 import { TTL_OPTIONS, describeTtl, DAY } from '../packages/protocol/src/ttl.js';
@@ -19,9 +19,9 @@ export async function storiesScreen(go, { attachment = null } = {}) {
   const owner = sensitiveScope({ transient: false });
   const list = h('ul', { class: 'list' });
   mount(h('div', {},
-    header('Stories', { back: () => go('chats'), actions: [h('button', { class: 'icon', 'aria-label': 'Publicar story', text: '+', onclick: () => compose(go) })] }),
+    header('Stories', { back: () => go('chats'), actions: [iconButton('plus', 'Publicar story', () => compose(go))] }),
     h('main', {},
-      h('p', { class: 'muted small', text: 'Ninguém fica sabendo quem viu. Cada story some no prazo escolhido.' }),
+      h('p', { class: 'muted small', text: 'Ninguém sabe quem viu. Cada story some no prazo.' }),
       list)));
 
   const render = async () => {
@@ -109,7 +109,7 @@ function compose(go, selectedFile = null) {
     h('p', { text: 'Nova story' }),
     h('div', { class: 'row' }, camBtn('Câmera: foto', 'photo'), camBtn('Câmera: vídeo', 'video')), shotInfo,
     session.maxMode() ? null : nativePickerAvailable() ? h('button', { type: 'button', class: 'secondary', text: 'Galeria', onclick: async () => { const got = await pickInApp(null, { media: true, target: 'stories' }, () => session.S.unlocked).catch(() => null); if (got) { close(); go('stories', { attachment: got }); } } }) : h('label', { for: 'story-file', text: 'Ou da galeria: foto ou vídeo (até 5 min)' }), file,
-    selectedFile ? h('p', { text: 'Arquivo selecionado. Revise a audiência e a legenda antes de publicar.' }) : null,
+    selectedFile ? h('p', { text: 'Confira quem vai ver e a legenda.' }) : null,
     h('fieldset', {}, h('legend', { text: 'Quem pode ver' }), boxes),
     h('label', { for: 'story-ttl', text: 'Some em' }), ttl,
     caption, status,

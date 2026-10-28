@@ -22,6 +22,7 @@ export function h(tag, attrs = {}, ...children) {
 
 export function mount(node) {
   const root = document.getElementById('root');
+  node.classList?.add('screen-in'); // entrada curta (some com "reduzir movimento")
   root.replaceChildren(node);
   window.scrollTo(0, 0);
 }
@@ -45,9 +46,13 @@ export function clearOverlays() {
   for (const el of document.querySelectorAll('.sheet, .viewer, .editor, .camera')) el.remove();
 }
 
-export function header(title, { back, actions = [] } = {}) {
-  return h('header', { class: 'bar' },
-    back ? h('button', { class: 'icon', 'aria-label': 'Voltar', onclick: back, text: '‹' }) : h('span', { class: 'spacer' }),
+// Botão só com ícone: o nome vai para o leitor de tela (aria-label).
+export const iconButton = (name, label, onclick, extra = {}) => h('button', { class: 'icon', 'aria-label': label, title: label, onclick, ...extra }, icon(name, 22));
+
+// Cabeçalho. `large`: título grande à esquerda (lista de conversas).
+export function header(title, { back, actions = [], large = false } = {}) {
+  return h('header', { class: large ? 'bar large' : 'bar' },
+    back ? iconButton('back', 'Voltar', back) : large ? null : h('span', { class: 'spacer' }),
     h('h1', { text: title }),
     h('div', { class: 'actions' }, actions));
 }
@@ -73,7 +78,7 @@ export function choiceSheet(title, options) {
       h('div', { class: 'sheet-box' },
         h('p', { class: 'muted', text: title }),
         options.map((o) => h('button', { class: o.danger ? 'danger block' : 'secondary block', text: o.label, onclick: () => close(o.value) })),
-        h('button', { class: 'block', text: 'Fechar', onclick: () => close(null) })));
+        h('button', { class: 'block ghost', text: 'Fechar', onclick: () => close(null) })));
     document.body.append(sheet);
   });
 }
@@ -86,7 +91,7 @@ export function iconSheet(label, options) {
       h('div', { class: 'sheet-box' },
         h('span', { class: 'grip', 'aria-hidden': 'true' }),
         h('div', { class: 'icon-grid' }, options.map((o) => h('button', { class: `icon-choice tone-${o.icon}`, onclick: () => close(o.value) }, h('span', { class: 'icon-tile' }, icon(o.icon, 28)), h('span', { text: o.label })))),
-        h('button', { class: 'secondary block', text: 'Fechar', onclick: () => close(null) })));
+        h('button', { class: 'block ghost', text: 'Fechar', onclick: () => close(null) })));
     document.body.append(sheet);
   });
 }

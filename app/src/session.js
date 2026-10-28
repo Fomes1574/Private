@@ -705,9 +705,9 @@ export function previewOf(view, last) {
   let what;
   if (last.kind === 'media') {
     const mime = last.body?.mime ?? '';
-    const base = last.body?.mode === 'doc' ? '📄 Documento' : /^audio\//.test(mime) ? '🎤 Áudio' : /^video\//.test(mime) ? '🎥 Vídeo' : '📷 Foto';
+    const base = last.body?.mode === 'doc' ? 'Documento' : /^audio\//.test(mime) ? 'Áudio' : /^video\//.test(mime) ? 'Vídeo' : 'Foto';
     what = last.body?.mode === 'once' ? `${base} de ver uma vez` : last.body?.caption ? `${base} · ${last.body.caption}` : base;
-  } else if (last.kind === 'poll') what = `📊 ${last.body?.question ?? 'Enquete'}`;
+  } else if (last.kind === 'poll') what = `Enquete: ${last.body?.question ?? ''}`;
   else what = last.text ?? '';
   return (who + what).replace(/\s+/g, ' ').slice(0, 80);
 }

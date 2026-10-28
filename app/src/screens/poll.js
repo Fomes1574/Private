@@ -35,7 +35,7 @@ export function pollBlock(m, { onVote, me }) {
   const counts = m.body.options.map((_, i) => Object.values(votes).filter((c) => c.includes(i)).length);
   const total = Object.values(votes).filter((c) => c.length).length;
   return h('div', { class: 'poll' },
-    h('strong', { text: `📊 ${m.body.question}` }),
+    h('strong', { text: m.body.question }),
     h('span', { class: 'muted small', text: m.body.multi ? 'Escolha uma ou mais' : 'Escolha uma' }),
     m.body.options.map((o, i) => h('button', { class: mine.has(i) ? 'poll-option on' : 'poll-option', type: 'button', 'aria-pressed': String(mine.has(i)), onclick: (e) => {
       e.stopPropagation();

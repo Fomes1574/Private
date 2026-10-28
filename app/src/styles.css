@@ -1,13 +1,14 @@
-/* Paleta do aplicativo Pacto Talk. */
+/* Paleta do aplicativo Pacto Talk (E4): fundo quase preto, um verde só. */
 :root {
-  --bg: #0B1220; --bar: #0E1728; --card: #131D31; --in: #172338; --out: #1D3A63;
-  --text: #E8EEF8; --muted: #93A1B8; --accent: #6CB4FF; --danger: #FF7A7A; --warn: #F5C26B;
+  --bg: #0F1115; --bar: #0F1115; --card: #1A1D23; --in: #1C2027; --out: #1E4D3A; --line: #242830;
+  --text: #ECEEF1; --muted: #9AA1AC; --accent: #3DDC97; --accent-soft: #23382F; --ink: #0F1115;
+  --danger: #F28B82; --warn: #FDD663; --radius: 16px;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 -apple-system, system-ui, sans-serif; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif; -webkit-text-size-adjust: 100%; }
 #root { min-height: 100%; padding-bottom: env(safe-area-inset-bottom); }
 main { padding: 16px max(16px, env(safe-area-inset-left)) 24px max(16px, env(safe-area-inset-right)); display: grid; gap: 12px; }
 main.center { min-height: 100vh; align-content: center; justify-items: stretch; text-align: center; }
@@ -21,7 +22,7 @@ p { margin: 0; }
 .brand-name { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: .2px; }
 label { display: block; text-align: left; color: var(--muted); font-size: 14px; margin: 8px 0 4px; }
 input, select, textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--in); background: var(--bar); color: var(--text); font: inherit; font-size: 16px; }
-button { padding: 12px 16px; border-radius: 12px; border: 0; background: var(--accent); color: #06101f; font: inherit; font-weight: 600; min-height: 44px; cursor: pointer; }
+button { padding: 12px 16px; border-radius: 14px; border: 0; background: var(--accent); color: var(--ink); font: inherit; font-weight: 600; min-height: 44px; cursor: pointer; }
 button.secondary { background: var(--in); color: var(--text); }
 button.danger { background: none; color: var(--danger); border: 1px solid var(--danger); }
 button.block { width: 100%; margin-top: 8px; }
@@ -195,3 +196,130 @@ button.link { background: none; border: 0; color: var(--accent, #6CB4FF); text-d
 .caption-row input { flex: 1; min-width: 0; }
 .caption-row .once-toggle { width: 44px; height: 44px; flex: none; color: #7BE8B8; font-size: 16px; }
 .editor .tool { display: inline-grid; place-items: center; min-width: 44px; }
+
+
+/* ===== E4: nova interface ===== */
+/* Toque: resposta curta; movimento some com "reduzir movimento". */
+button { transition: transform .12s ease, background-color .15s ease, opacity .15s; -webkit-tap-highlight-color: transparent; }
+button:active:not(:disabled) { transform: scale(.97); }
+input, select, textarea { background: var(--card); border: 1px solid transparent; border-radius: 14px; }
+input:focus, select:focus, textarea:focus { border-color: #2E6B52; outline: none; }
+button.ghost { background: transparent; color: var(--muted); }
+button.danger { border-color: rgba(242,139,130,.5); }
+.ico { display: block; flex: none; }
+@keyframes screen-in { from { opacity: 0; transform: translateY(6px); } }
+.screen-in { animation: screen-in .18s ease-out; }
+
+/* Cabeçalho: ícones desenhados; na lista, título grande à esquerda. */
+.bar { background: var(--bar); border-bottom: 1px solid var(--line); }
+button.icon { display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 22px; color: var(--text); }
+button.icon:hover { background: var(--card); }
+.bar.large { grid-template-columns: 1fr auto; border-bottom: 0; padding-top: calc(18px + env(safe-area-inset-top)); padding-left: max(20px, env(safe-area-inset-left)); }
+.bar.large h1 { text-align: left; font-size: 28px; font-weight: 700; letter-spacing: -.4px; }
+
+/* Lista de conversas: linhas soltas, avatar grande, verde só no que é novo. */
+.row-btn { background: transparent; border-radius: var(--radius); padding: 10px 12px; gap: 14px; min-height: 68px; }
+.row-btn:hover, .row-btn:active { background: var(--card); }
+.list { gap: 0; }
+.avatar { width: 52px; height: 52px; font-size: 19px; font-weight: 600; color: var(--ink); background: #9AA1AC; }
+.avatar.av-0 { background: #F2B880; } .avatar.av-1 { background: #8AB4F8; } .avatar.av-2 { background: #C5A3FF; }
+.avatar.av-3 { background: #F28B82; } .avatar.av-4 { background: #FDD663; } .avatar.av-5 { background: #7BE8B8; }
+.avatar.big { width: 64px; height: 64px; font-size: 24px; }
+.bar .avatar { width: 36px; height: 36px; font-size: 15px; }
+.title { font-size: 16px; }
+.preview { font-size: 14px; max-width: 58vw; }
+.unread-time { color: var(--accent); }
+.badge { background: var(--accent); color: var(--ink); min-width: 22px; height: 22px; line-height: 20px; padding: 1px 7px; }
+.badge.muted-badge { background: #3A3F48; color: var(--text); }
+#search, #chat-search { border-radius: 14px; padding-left: 14px; }
+.empty { text-align: center; padding: 48px 16px; line-height: 1.5; }
+
+/* Conversa: bolhas com canto de cauda, verde escuro para as minhas. */
+.policy { padding: 6px 16px; font-size: 12px; }
+.messages { padding-top: 12px; gap: 4px; }
+.msg { border-radius: 18px 18px 18px 6px; padding: 8px 12px; background: var(--in); line-height: 1.35; }
+.msg.mine { border-radius: 18px 18px 6px 18px; background: var(--out); }
+.msg .meta { font-size: 11px; }
+.msg.mine .meta { color: #A8D9C2; }
+.msg .who { color: var(--accent); }
+.msg .quote { border-left-color: var(--accent); border-radius: 4px; }
+@keyframes msg-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+.msg.pending { animation: msg-in .16s ease-out; }
+.day-sep span { background: var(--card); color: #C4C9D1; border-radius: 10px; }
+.media-tag { color: var(--accent); }
+.composer { background: var(--bg); border-top: 1px solid var(--line); }
+.composer .row { align-items: flex-end; gap: 6px; }
+.composer textarea, .composer #composer { border-radius: 22px; padding: 11px 16px; min-height: 44px; }
+.composer .send { width: 44px; height: 44px; min-width: 44px; padding: 0; border-radius: 22px; display: inline-grid; place-items: center; }
+.composer .row > button.icon:first-child { background: var(--card); }
+.mention { color: #8AB4F8; }
+
+/* Folhas: sobem da base; menus como lista, não como pilha de botões. */
+.sheet { background: rgba(5,6,8,.55); }
+.sheet-box { background: #171A1F; border-radius: 26px 26px 0 0; padding-top: 12px; }
+.sheet-box > p.muted:first-child, .sheet-box > .grip + p { text-align: center; }
+.sheet-box button.secondary.block { background: transparent; text-align: left; font-weight: 500; border-radius: 14px; margin-top: 0; }
+.sheet-box button.secondary.block:hover, .sheet-box button.secondary.block:active { background: var(--card); }
+.sheet-box button.danger.block { border: 0; text-align: left; margin-top: 0; }
+.sheet-box .row > button { flex: 1; }
+
+/* Aviso curto: acima da caixa de mensagem; não bloqueia toques. */
+#toast { top: auto; bottom: calc(84px + env(safe-area-inset-bottom)); background: #2A2F38; color: var(--text); border-radius: 999px; padding: 10px 18px; font-size: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.35); pointer-events: none; text-align: center; z-index: 60; }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
+#toast:not([hidden]) { animation: toast-in .18s ease-out; }
+
+/* Ajustes em grupos, como lista: rótulo pequeno, linhas com toque. */
+.settings { gap: 16px; }
+.settings .card { padding: 6px 0; gap: 0; border-radius: 20px; }
+.settings .card > h2 { font-size: 13px; font-weight: 600; color: var(--muted); padding: 10px 16px 6px; margin: 0; }
+.settings .card > p, .settings .card > label, .settings .card > select, .settings .card > details, .settings .card > form,
+.settings .card > .switch, .settings .card > .row, .settings .card > ul, .settings .card > div, .settings .card > h3 { margin-left: 16px; margin-right: 16px; }
+.settings .card > p { padding: 4px 0; }
+.settings .card > select, .settings .card > label { width: auto; }
+.settings .card > button.secondary, .settings .card > button:not(.block) { display: flex; width: 100%; align-items: center; justify-content: space-between; text-align: left; background: transparent; color: var(--text); font-weight: 500; border-radius: 0; min-height: 52px; padding: 0 16px; border-top: 1px solid var(--line); }
+.settings .card > button.secondary::after, .settings .card > button:not(.block)::after { content: ''; width: 8px; height: 8px; border-right: 2px solid #5A606B; border-top: 2px solid #5A606B; transform: rotate(45deg); flex: none; }
+.settings .card > button:active { background: #20242B; transform: none; }
+.settings .card > .row:first-of-type { margin-top: 4px; }
+.settings > section.card:last-child { background: transparent; }
+.settings details.card > summary { padding: 14px 16px; cursor: pointer; color: var(--muted); }
+
+/* Interruptor (modo máximo, disfarce…): bolinha que desliza, não caixinha. */
+.switch { align-items: center; padding: 10px 0; }
+.switch input[type=checkbox] { appearance: none; -webkit-appearance: none; width: 48px; height: 28px; min-height: 28px; padding: 0; border-radius: 14px; background: #3A3F48; position: relative; flex: none; order: 2; margin-left: auto; border: 0; cursor: pointer; transition: background-color .15s; }
+.switch input[type=checkbox]::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: var(--text); transition: transform .15s ease; }
+.switch input[type=checkbox]:checked { background: var(--accent); }
+.switch input[type=checkbox]:checked::after { transform: translateX(20px); }
+.switch > span { flex: 1; text-align: left; }
+
+/* Telas centrais (entrada, PIN): respiro e marca. */
+main.center { gap: 14px; }
+.logo { width: 84px; height: 84px; border-radius: 24px; }
+.brand-name { font-size: 28px; letter-spacing: -.4px; }
+.note { line-height: 1.5; }
+
+/* Preparar foto e editor: barras que rolam de lado em vez de quebrar. */
+.editor { background: #000; }
+.editor-bar { flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; padding: 2px 4px; scrollbar-width: none; }
+.editor-bar::-webkit-scrollbar { display: none; }
+.editor-bar > button { flex: none; }
+.editor .row.wrap { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.batch .send-batch { border-radius: 22px; }
+.once-toggle.on { background: var(--accent); color: var(--ink); }
+.batch-strip .thumb.on { border-color: var(--accent); }
+.editor [aria-pressed="true"] { outline: none; background: var(--text); color: var(--ink); }
+.poll-option.on { outline-color: var(--accent); }
+.rec-level { background: linear-gradient(90deg, var(--accent) calc(var(--lvl, 0) * 100%), rgba(127,127,127,.3) 0); }
+
+@media (prefers-reduced-motion: reduce) {
+  .screen-in, .msg.pending, #toast:not([hidden]), .sheet-box { animation: none; }
+  button, .switch input[type=checkbox], .switch input[type=checkbox]::after { transition: none; }
+  button:active:not(:disabled) { transform: none; }
+}
+.settings .code, .sheet .code.safety { word-break: normal; overflow-wrap: normal; font-size: 15px; letter-spacing: .3px; }
+.title .flag { display: inline-block; margin-left: 6px; color: var(--muted); vertical-align: -1px; }
+.msg .meta .ico { display: inline-block; vertical-align: -2px; }
+.pin-bar .row-btn, .row-btn.small { min-height: 44px; }
+/* Com folha ou tela cheia aberta, o aviso vai para o topo e não cobre opções. */
+body:has(.sheet, .editor, .camera, .viewer) #toast { bottom: auto; top: calc(12px + env(safe-area-inset-top)); }
+input[type=file] { padding: 8px; color: var(--muted); font-size: 14px; }
+input[type=file]::file-selector-button { background: #262B33; color: var(--text); border: 0; border-radius: 10px; padding: 8px 14px; margin-right: 10px; font: inherit; font-weight: 600; cursor: pointer; }

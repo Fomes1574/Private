@@ -7,7 +7,7 @@ export function nicknameScreen(go, { back = null } = {}) {
   mount(h('div', {},
     header('Seu apelido', { back: back ? () => go(back) : null }),
     h('main', {},
-      h('p', { class: 'muted', text: 'É como as pessoas do círculo vão te achar e te ver. Sem nome real, telefone ou e-mail.' }),
+      h('p', { class: 'muted', text: 'É assim que o círculo vai te ver. Evite seu nome real.' }),
       h('form', { onsubmit: async (e) => {
         e.preventDefault();
         const old = session.myNickname();

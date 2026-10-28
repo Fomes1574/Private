@@ -15,7 +15,7 @@ export async function unlockScreen(go, { again = false } = {}) {
   const input = h('input', { id: 'secret', type: 'password', inputmode: pk ? 'numeric' : 'text', autocomplete: 'current-password' });
   const btn = h('button', { class: 'block', text: 'Desbloquear' });
   session.prewarm();
-  const left = h('p', { class: 'muted', text: 'Quem conta os erros é o servidor: na 5ª tentativa errada seguida, os dados deste aparelho viram ilegíveis para sempre.' });
+  const left = h('p', { class: 'muted', text: '5 erros seguidos apagam os dados deste aparelho.' });
   mount(h('main', { class: 'center' },
     h('div', { class: 'logo', 'aria-hidden': 'true' }),
     h('form', { onsubmit: async (e) => {
@@ -44,7 +44,7 @@ export async function unlockScreen(go, { again = false } = {}) {
         if (err instanceof VaultWipedError) return go('welcome');
         if (err instanceof session.PairingExpiredError) { toast(err.message); return go('welcome'); }
         if (err instanceof WrongSecretError) { toast(err.left ? `PIN errado. Restam ${err.left} tentativa${err.left > 1 ? 's' : ''}.` : 'PIN errado.'); return unlockScreen(go, { again: true }); }
-        if (err instanceof OfflineError) { toast('Sem internet: o app só abre com conexão (protege contra cópia do aparelho).'); return; }
+        if (err instanceof OfflineError) { toast('Sem internet. O app só abre conectado.'); return; }
         toast(err.name === 'NotAllowedError' ? 'Face ID cancelado.' : err.status === 401 ? 'Este aparelho foi desconectado (troca de celular ou bloqueio).' : `Não deu: ${err.message}`);
       }
     } }, h('label', { for: 'secret', text: pk ? 'PIN' : 'Frase-senha' }), input, btn), left));

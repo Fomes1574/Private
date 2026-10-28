@@ -2,6 +2,7 @@
 // WhatsApp, mas só neste aparelho: nada vai ao servidor, fica no banco
 // cifrado e vence no prazo escolhido (passo 9).
 import { h, mount, header, toast, confirmSheet } from '../ui.js';
+import { icon } from '../icons.js';
 import * as session from '../session.js';
 import { TTL_OPTIONS, describeTtl, DAY } from '../packages/protocol/src/ttl.js';
 import { formatDateTime } from '../packages/protocol/src/time.js';
@@ -24,20 +25,20 @@ export async function notesScreen(go) {
       h('span', { class: 'text' }, ...formatted(n.text)),
       h('span', { class: 'meta' }, h('time', { text: `some ${formatDateTime(n.expiresAt)}` }),
         h('button', { class: 'secondary small', text: 'Apagar', onclick: async () => { if (await confirmSheet('Apagar esta anotação?', 'Apagar')) { await session.deleteNote(n.id); render(); } } }))))
-      : [h('li', { class: 'note', text: 'Nenhuma anotação. O que você escrever aqui fica só neste aparelho, cifrado, e some no prazo.' })]));
+      : [h('li', { class: 'note', text: 'Só neste aparelho. Some no prazo que você escolher.' })]));
   };
   mount(h('div', { class: 'chat' },
     header('Anotações', { back: () => go('chats') }),
     list,
     h('footer', { class: 'composer' }, h('div', { class: 'row' }, ttl), h('div', { class: 'row' }, input,
-      h('button', { class: 'send', 'aria-label': 'Salvar anotação', text: '➤', onclick: async () => {
+      h('button', { class: 'send', 'aria-label': 'Salvar anotação', title: 'Salvar anotação', onclick: async () => {
         const t = input.value.trim();
         if (!t) return;
         await session.addNote(t, Number(ttl.value));
         input.value = '';
         toast('Anotação salva só neste aparelho.');
         render();
-      } })))));
+      } }, icon('send', 22))))));
   await render();
   const off = session.onChange((what) => { if (what === 'synced' || what === 'notes') render().catch(() => {}); });
   scope.onCancel(off);
