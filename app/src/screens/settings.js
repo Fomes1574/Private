@@ -1,5 +1,6 @@
-// Ajustes: apelido, segurança, troca de celular, guardião, notificações,
-// e a parte da administradora (convites, membros, recuperação).
+// Ajustes: apelido, segurança, troca de celular, emergência, privacidade e a
+// parte da administradora (convites, membros, recuperação). Pouco texto: o que
+// precisa de explicação fica numa linha curta ou recolhido.
 import { h, mount, header, toast, confirmSheet, choiceSheet, errText } from '../ui.js';
 import * as session from '../session.js';
 import { warningText, warningWhen } from '../security-text.js';
@@ -54,21 +55,13 @@ export async function settingsScreen(go, { attachment = null } = {}) {
         h('h2', { text: 'Segurança' }),
         h('p', { class: 'muted small', text: 'Seu número de segurança (compare pessoalmente):' }),
         h('p', { class: 'code', text: fp }),
-        h('p', { class: 'muted small' }, 'Versão do app: ', h('span', { class: 'code', text: CONFIG.versionCode }), '. Confira com o código publicado no GitHub.'),
+        h('p', { class: 'muted small' }, 'Versão ', h('span', { class: 'code', text: CONFIG.versionCode })),
         warnings.length ? h('details', {}, h('summary', { text: `Atividade de segurança (${warnings.length})` }), h('ul', { class: 'list' }, warnings)) : null,
         h('button', { class: 'secondary', text: 'Bloquear agora', onclick: async () => { await session.lock('manual'); go('unlock'); } })),
       h('section', { class: 'card' },
         h('h2', { text: 'Trocar de celular' }),
-        h('p', { class: 'muted small', text: 'No celular novo, toque em "Já uso em outro celular". Ele mostra um pedido, um código e a impressão digital. Digite aqui os dois primeiros e confira o terceiro.' }),
+        h('p', { class: 'muted small', text: 'No celular novo: "Já uso em outro celular".' }),
         pairForm()),
-      h('section', { class: 'card' },
-        h('h2', { text: 'Guardião' }),
-        h('p', { class: 'muted small', text: 'Se você perder o celular, a administradora e o seu guardião precisam autorizar, e ainda há 24 horas de espera com aviso a todos.' }),
-        h('button', { class: 'secondary', text: 'Escolher guardião', onclick: () => chooseGuardian(me) })),
-      h('section', { class: 'card' },
-        h('h2', { text: 'Notificações' }),
-        h('p', { class: 'muted small', text: 'O aviso diz só "novas mensagens". Sem nome, grupo, quantidade ou prévia. A Apple ou o Google ainda veem que houve um aviso e quando.' }),
-        notificationsBox()),
       emergencySection(),
       h('section', { class: 'card' },
         h('h2', { text: 'Privacidade máxima' }),
@@ -78,28 +71,12 @@ export async function settingsScreen(go, { attachment = null } = {}) {
             toast(e.target.checked ? 'Modo máximo ligado: fotos e vídeos só pela câmera do app.' : 'Modo máximo desligado: a galeria volta a aparecer.');
           } }),
           h('span', {}, h('strong', { text: 'Modo máximo' }), h('br'),
-            h('span', { class: 'muted small', text: 'Fotos e vídeos só pela câmera do app: nada vai para a galeria, para a nuvem ou para pastas temporárias, e o original com localização e modelo do aparelho nunca existe. Desligar permite escolher da galeria (o original continua lá).' }))),
-        // D2: prévia na lista pode ser desligada (contador continua).
-        h('label', { class: 'switch' },
-          h('input', { id: 'show-preview', type: 'checkbox', checked: S.prefs.showPreview !== false, onchange: async (e) => { await session.setPrefs({ showPreview: e.target.checked }); } }),
-          h('span', {}, h('strong', { text: 'Mostrar prévia na lista' }), h('br'),
-            h('span', { class: 'muted small', text: 'Mostra o começo da última mensagem na lista de conversas. Desligado, aparece só "Nova mensagem". Ver uma vez nunca aparece.' }))),
-        // S5/D11: teclado anônimo no Android.
-        h('p', { class: 'muted small', text: 'Teclado anônimo: no Android, o app pede ao teclado que não aprenda nem guarde o que você digita aqui. Teclados de outras empresas podem ignorar o pedido; prefira o teclado do sistema. No iPhone use o teclado da Apple.' })),
-      h('section', { class: 'card' },
-        h('h2', { text: 'Fotos íntimas: como mandar com mais segurança' }),
-        h('ol', { class: 'small' },
-          h('li', { text: 'Verifique a pessoa uma vez, pessoalmente (menu da conversa → Participantes → Verificar).' }),
-          h('li', { text: 'Use a câmera do app e "ver uma vez".' }),
-          h('li', { text: 'Deixe o prazo da conversa no mais curto (12 h).' }),
-          h('li', { text: 'Use PIN de 8 números ou mais.' }),
-          h('li', { text: 'No iPhone o app não consegue bloquear print nem gravação de tela.' }),
-          h('li', { text: 'Mande só para quem você confia: o app protege o caminho, não a pessoa do outro lado.' }))),
+            h('span', { class: 'muted small', text: 'Fotos e vídeos só pela câmera do app.' })))),
       updateSection(),
       isAdmin ? adminSection(me) : null,
-      h('section', { class: 'card' },
-        h('h2', { text: 'O que este app não promete' }),
-        h('p', { class: 'muted small', text: 'No iPhone não dá para bloquear print. Quem recebe pode fotografar a tela. O servidor não lê o conteúdo, mas vê horários, tamanhos aproximados e quem fala com quem. Leitores de tela do sistema leem o que aparece.' })),
+      h('details', { class: 'card' },
+        h('summary', { text: 'Limites do app' }),
+        h('p', { class: 'muted small', text: 'No iPhone não dá para bloquear print. Quem recebe pode fotografar a tela. O servidor não lê o conteúdo, mas vê horários, tamanhos aproximados e quem fala com quem.' })),
       h('section', { class: 'card' },
         h('button', { class: 'danger block', text: 'Apagar tudo deste aparelho', onclick: async () => {
           if (await confirmSheet('Apagar todas as conversas e chaves deste aparelho? Não dá para desfazer.', 'Apagar tudo')) { await session.wipeEverything(); go('welcome'); }
@@ -119,43 +96,6 @@ export async function settingsScreen(go, { attachment = null } = {}) {
   }
   return () => owner.cancel();
 
-}
-
-// Estado sempre visível: aguardando permissão, ativado, recusado ou erro.
-// Nunca fica calado: toda tentativa termina num desses estados.
-const PUSH_TEXT = {
-  checking: 'Conferindo…',
-  off: 'Desativadas.',
-  waiting: 'Aguardando permissão… responda à pergunta do sistema.',
-  on: 'Ativadas neste aparelho.',
-  denied: 'Recusadas. Para ativar, libere as notificações do app nas configurações do sistema e toque em "Tentar de novo".',
-
-};
-function notificationsBox() {
-  const status = h('p', { id: 'push-state', class: 'small', role: 'status', 'aria-live': 'polite' });
-  const btn = h('button', { id: 'push-btn', class: 'secondary' });
-  const show = (state, detail) => {
-    status.dataset.state = state;
-    // Indisponível (sem service worker, ou Android sem serviços do Google) não
-    // é erro: só explica. Erro de verdade aparece como "Erro: …".
-    status.textContent = PUSH_TEXT[state] ?? (state === 'unavailable' ? detail : `Erro: ${detail ?? 'não deu para ativar.'}`);
-    btn.disabled = state === 'waiting' || state === 'checking';
-    btn.textContent = state === 'on' ? 'Desativar notificações' : state === 'denied' || state === 'error' || state === 'unavailable' ? 'Tentar de novo' : 'Ativar notificações';
-  };
-  btn.onclick = async () => {
-    const turningOff = status.dataset.state === 'on';
-    show('checking');
-    try {
-      await session.setPush(!turningOff, { onWaiting: () => show('waiting') });
-      show(turningOff ? 'off' : 'on');
-      toast(turningOff ? 'Notificações desativadas.' : 'Notificações ativadas.');
-    } catch (e) {
-      show(e.state ?? 'error', e.message);
-    }
-  };
-  show('checking');
-  session.pushState().then(({ state, detail }) => show(state, detail));
-  return h('div', {}, status, btn);
 }
 
 function pairForm() {
@@ -182,13 +122,6 @@ function pairForm() {
       session.waitReplaced({ onReplaced: () => location.reload() });
     } catch (err) { toast(err.status === 401 ? 'Código errado.' : 'Pedido não encontrado ou vencido.'); }
   } }, h('p', { class: 'muted small', text: 'Primeiro gere uma autorização e digite no celular novo. Depois confirme aqui o pedido e o código que ele mostrar.' }), generate, authorization, id, code, h('button', { class: 'secondary', text: 'Aprovar celular novo' }), waiting);
-}
-
-async function chooseGuardian(members) {
-  const S = session.S;
-  const u = await choiceSheet('Quem é seu guardião?', members.filter((m) => m.userId !== S.client.userId && m.state === 'active').map((m) => ({ label: session.nameOf(m.userId), value: m.userId })));
-  if (!u) return;
-  try { await S.client.api.post('/v1/me/guardian', { userId: u }); toast('Guardião definido.'); } catch (e) { toast(`Não deu: ${errText(e)}`); }
 }
 
 function adminSection(members) {
@@ -219,7 +152,10 @@ function adminSection(members) {
         ]);
         try {
           if (c === 'freeze') await S.client.api.post('/v1/admin/freeze', { userId: m.userId, frozen: m.state !== 'frozen' });
-          if (c === 'recover') toast(`Recuperação: ${(await S.client.api.post('/v1/recovery/approve', { userId: m.userId })).state === 'waiting' ? 'espera de 24 h começou; todos foram avisados.' : 'falta o guardião autorizar.'}`);
+          if (c === 'recover' && await confirmSheet(`Autorizar a recuperação de ${session.nameOf(m.userId)}? Faça isso só falando com a pessoa (ao vivo ou por vídeo).`, 'Autorizar')) {
+            await S.client.api.post('/v1/recovery/approve', { userId: m.userId });
+            toast('Espera de 24 h começou; todos foram avisados. Depois, emita o convite de recuperação.');
+          }
           if (c === 'recinvite') { const r = await S.client.api.post('/v1/invites', { kind: 'recovery', forUser: m.userId }); out.textContent = r.token; }
           if (c === 'remove' && await confirmSheet(`Remover ${session.nameOf(m.userId)} do círculo?`, 'Remover')) {
             await S.client.api.post('/v1/admin/remove', { userId: m.userId });
@@ -231,10 +167,10 @@ function adminSection(members) {
 
 function circleConfirm(members) {
   const pending = members.filter((m) => session.circlePending(m.userId));
-  if (!pending.length) return h('p', { class: 'muted small', text: 'Todas as pessoas do círculo estão confirmadas por você.' });
+  if (!pending.length) return h('p', { class: 'muted small', text: 'Todos confirmados.' });
   const boxes = pending.map((m) => h('label', { class: 'check' }, h('input', { type: 'checkbox', value: m.userId }), `${session.nameOf(m.userId)} (entrou com convite)`));
   return h('div', { class: 'card' },
-    h('p', { text: 'Confirme quem entrou no círculo. Só pessoas confirmadas recebem apelidos, fotos e stories. Na dúvida, verifique o número da pessoa antes (menu da conversa → Participantes).' }),
+    h('p', { text: 'Confirme quem entrou. Só confirmados recebem apelidos, fotos e stories.' }),
     boxes,
     h('button', { text: 'Confirmar selecionadas', onclick: async () => {
       const chosen = boxes.map((b) => b.querySelector('input')).filter((i) => i.checked).map((i) => i.value);
@@ -316,7 +252,7 @@ function emergencySection() {
     try {
       const code = await session.createKillCode();
       const box = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'sheet-box' },
-        h('p', { text: 'Anote no papel e guarde longe do celular (ou entregue ao seu guardião). Se perder o celular ou ele for levado, abra o app em qualquer aparelho → "Perdi meu celular" e digite este código: o celular perdido vira ruído na hora.' }),
+        h('p', { text: 'Anote no papel e guarde longe do celular. Perdeu o celular? Em qualquer aparelho: "Perdi meu celular" e este código. O celular perdido vira ruído na hora.' }),
         h('p', { class: 'code big', id: 'kill-code', text: code.match(/.{1,4}/g).join(' ') }),
         h('p', { class: 'muted small', text: 'Ele aparece só agora. O servidor guarda só um resumo dele.' }),
         h('button', { class: 'block', text: 'Já anotei', onclick: () => box.remove() })));
@@ -326,7 +262,6 @@ function emergencySection() {
   } });
   return h('section', { class: 'card' },
     h('h2', { text: 'Proteções de emergência' }),
-    h('p', { class: 'muted small', text: 'A chave deste aparelho depende do Face ID, do seu PIN e de uma parte guardada no servidor. Quem copia o celular não consegue testar PINs: é o servidor que conta os erros (5 errados seguidos e a chave é destruída).' }),
     h('label', { for: 'dead-days', text: 'Destruir a chave se o aparelho ficar sem abrir o app por' }), sel,
     duressBtn, killBtn,
     h('label', { for: 'lock-after', text: 'Trancar (tirar as chaves da memória) ao sair do app' }), lockSel());

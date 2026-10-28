@@ -1,5 +1,7 @@
 // Construção de interface sem HTML em texto: só createElement e textContent.
 // Mensagens nunca viram HTML (SECURITY.md) e isto funciona com Trusted Types.
+import { icon } from './icons.js';
+
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
@@ -72,6 +74,19 @@ export function choiceSheet(title, options) {
         h('p', { class: 'muted', text: title }),
         options.map((o) => h('button', { class: o.danger ? 'danger block' : 'secondary block', text: o.label, onclick: () => close(o.value) })),
         h('button', { class: 'block', text: 'Fechar', onclick: () => close(null) })));
+    document.body.append(sheet);
+  });
+}
+
+// Folha de anexar: botões grandes com ícone e uma palavra (D12).
+export function iconSheet(label, options) {
+  return new Promise((resolve) => {
+    const close = (v) => { sheet.remove(); resolve(v); };
+    const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': label, onclick: (e) => { if (e.target === sheet) close(null); } },
+      h('div', { class: 'sheet-box' },
+        h('span', { class: 'grip', 'aria-hidden': 'true' }),
+        h('div', { class: 'icon-grid' }, options.map((o) => h('button', { class: `icon-choice tone-${o.icon}`, onclick: () => close(o.value) }, h('span', { class: 'icon-tile' }, icon(o.icon, 28)), h('span', { text: o.label })))),
+        h('button', { class: 'secondary block', text: 'Fechar', onclick: () => close(null) })));
     document.body.append(sheet);
   });
 }

@@ -260,10 +260,12 @@ test('troca de aparelho: novo que some no meio não derruba ninguém; aprovar de
   assert.equal((await people.caio.get('/v1/sync')).status, 200);
 });
 
-test('recuperação: administradora + guardião, 24 h de espera, aparelho antigo cancela', async () => {
-  assert.equal((await people.bia.post('/v1/me/guardian', { userId: people.caio.userId })).status, 200);
-  assert.equal((await people.caio.post('/v1/recovery/approve', { userId: people.bia.userId })).data.state, 'collecting');
+test('recuperação (D16): só a administradora autoriza, 24 h de espera, aparelho antigo cancela', async () => {
+  assert.equal((await people.bia.post('/v1/me/guardian', { userId: people.caio.userId })).status, 404, 'guardião não existe mais');
+  assert.equal((await people.caio.post('/v1/recovery/approve', { userId: people.bia.userId })).status, 403, 'membro comum não autoriza');
+  assert.equal((await people.admin.post('/v1/recovery/approve', { userId: people.admin.userId })).status, 403, 'nem a si mesma');
   assert.equal((await people.admin.post('/v1/recovery/approve', { userId: people.bia.userId })).data.state, 'waiting');
+  assert.equal((await people.admin.post('/v1/recovery/approve', { userId: people.bia.userId })).status, 409, 'já está esperando');
   assert.equal((await people.admin.post('/v1/invites', { kind: 'recovery', forUser: people.bia.userId })).status, 425, 'nunca antes das 24 h');
   assert.equal((await people.bia.post('/v1/recovery/cancel')).status, 200);
   const ev = await people.caio.get('/v1/security-events');

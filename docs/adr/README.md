@@ -27,3 +27,5 @@ Estados usados: **Aceito** (decisão do proprietário), **Aceito como direção*
 | [0015](0015-a1-sessao-conversas-anexos.md) | A1: ciclo de sessão, conversa individual e retorno de anexos | Aceito pelo proprietário; liberação pendente de testes | Plano final de 25/10/2026, A1 e D6 |
 | [0016](0016-a2-b-c-d-privacidade-e-whatsapp.md) | A2, B, C e D: privacidade própria, funções como no WhatsApp | Aceito pelo proprietário; liberação pendente de testes | Plano final de 25/10/2026 |
 | [0017](0017-revisao-fila-cofre-e-revogacao.md) | Correções da revisão: confiança, cofre, fila e revogação duráveis | Implementado; liberação pendente de CI e aparelho | Revisão independente de 25/10/2026 |
+| [0018](0018-publicacao-e-admissao-de-troca.md) | Admissão de troca, limites de entrada e publicação verificada | Implementado e publicado em 27/10/2026 | Revisão de 27/10/2026 |
+| [0019](0019-galeria-ajustes-e-recuperacao.md) | Galeria sem PIN na volta rápida, sem notificações e recuperação sem guardião | Aprovado pelo proprietário; implementado na E1, pendente de CI e aparelho | Pedidos de 28/10/2026 (D12–D16) |

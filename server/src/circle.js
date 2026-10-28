@@ -472,35 +472,19 @@ export class Circle extends DurableObject {
   }
 
   // ---------- recuperação após perda do aparelho (V7-012) ----------
-  setGuardian(actor, guardian) {
-    if (guardian === actor.userId) return { error: 'bad_guardian' };
-    const g = this.identity(guardian);
-    if (!g || g.state !== 'active') return { error: 'not_found' };
-    this.sql.exec('UPDATE identities SET guardian = ? WHERE user_id = ?', guardian, actor.userId);
-    return { ok: true };
-  }
-
-  // Precisa da administradora E do guardião escolhido antes (ordem livre).
+  // D16: só a administradora autoriza (sem guardião). Começa a espera de
+  // 24 h com aviso a todos; o aparelho antigo, se ainda estiver com a
+  // pessoa, pode cancelar nesse tempo.
   recoveryApprove(actor, userId) {
     const target = this.identity(userId);
     if (!target || target.state === 'removed') return { error: 'not_found' };
-    if (actor.userId === userId) return { error: 'forbidden' };
-    const isAdmin = actor.isAdmin, isGuardian = target.guardian === actor.userId;
-    if (!isAdmin && !isGuardian) return { error: 'forbidden' };
-    let rec = this.one('SELECT * FROM recoveries WHERE user_id = ?', userId);
-    if (!rec || ['cancelled', 'done'].includes(rec.state)) {
-      this.sql.exec("INSERT OR REPLACE INTO recoveries(user_id, state, created_at) VALUES (?, 'collecting', ?)", userId, this.now());
-      rec = this.one('SELECT * FROM recoveries WHERE user_id = ?', userId);
-    }
-    if (rec.state !== 'collecting') return { error: 'bad_state' };
-    if (isAdmin) this.sql.exec('UPDATE recoveries SET by_admin = ? WHERE user_id = ?', actor.userId, userId);
-    if (isGuardian) this.sql.exec('UPDATE recoveries SET by_guardian = ? WHERE user_id = ?', actor.userId, userId);
-    rec = this.one('SELECT * FROM recoveries WHERE user_id = ?', userId);
-    if (rec.by_admin && rec.by_guardian) {
-      this.sql.exec("UPDATE recoveries SET state = 'waiting', wait_until = ? WHERE user_id = ?", this.now() + RECOVERY_WAIT, userId);
-      this.event('recovery_waiting', userId); // aviso a todos e ao aparelho antigo
-    }
-    return { state: this.one('SELECT state FROM recoveries WHERE user_id = ?', userId).state };
+    if (actor.userId === userId || !actor.isAdmin) return { error: 'forbidden' };
+    const rec = this.one('SELECT * FROM recoveries WHERE user_id = ?', userId);
+    if (rec && !['cancelled', 'done', 'collecting'].includes(rec.state)) return { error: 'bad_state' };
+    this.sql.exec("INSERT OR REPLACE INTO recoveries(user_id, state, created_at, by_admin, wait_until) VALUES (?, 'waiting', ?, ?, ?)",
+      userId, this.now(), actor.userId, this.now() + RECOVERY_WAIT);
+    this.event('recovery_waiting', userId); // aviso a todos e ao aparelho antigo
+    return { state: 'waiting' };
   }
 
   // O aparelho antigo, se ainda estiver com a pessoa, cancela.

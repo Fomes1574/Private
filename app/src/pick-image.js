@@ -4,7 +4,7 @@
 import { h, toast, choiceSheet } from './ui.js';
 import * as session from './session.js';
 import { openCamera } from './camera.js';
-import { nativePickerAvailable, selectNativeAttachment } from './attachment-picker.js';
+import { nativePickerAvailable, pickInApp, readNativeAttachment } from './attachment-picker.js';
 import { preparePhoto } from './media.js';
 
 function fromGallery() {
@@ -29,11 +29,15 @@ export async function pickImage({ maxSide = 512, square = false, facing = 'user'
     file = new Blob([shot.bytes], { type: 'image/jpeg' });
   } else {
     if (nativePickerAvailable()) {
-      await session.lock('file-picker');
-      await selectNativeAttachment(resume.roomId ?? null, { ...resume, square, maxSide });
-      return null;
+      // D13: volta rápida lê aqui mesmo; se trancou, a seleção espera o PIN.
+      const owner = session.S.client;
+      const open = () => session.S.unlocked && session.S.client === owner;
+      const got = await pickInApp(resume.roomId ?? null, { ...resume, square, maxSide }, open).catch(() => null);
+      if (!got) return null;
+      try { file = await readNativeAttachment(got, { signal: new AbortController().signal, allowed: open }); }
+      catch (e) { toast(e.message); return null; }
     }
-    file = await fromGallery();
+    else file = await fromGallery();
     if (!file) return null;
   }
   try { return (await preparePhoto(file, { maxSide, square })).bytes; }

@@ -10,7 +10,7 @@ import { preparePhoto } from '../media.js';
 import { prepareVideo } from '../video-prep.js';
 import { openMedia } from './viewer.js';
 import { sensitiveScope } from '../sensitive-scope.js';
-import { nativePickerAvailable, selectNativeAttachment, readNativeAttachment } from '../attachment-picker.js';
+import { nativePickerAvailable, pickInApp, readNativeAttachment } from '../attachment-picker.js';
 import { avatar } from '../avatar.js';
 import { openCamera } from '../camera.js';
 
@@ -108,7 +108,7 @@ function compose(go, selectedFile = null) {
   } },
     h('p', { text: 'Nova story' }),
     h('div', { class: 'row' }, camBtn('Câmera: foto', 'photo'), camBtn('Câmera: vídeo', 'video')), shotInfo,
-    session.maxMode() ? null : nativePickerAvailable() ? h('button', { type: 'button', class: 'secondary', text: 'Galeria', onclick: async () => { await session.lock('file-picker'); await selectNativeAttachment(null, { media: true, target: 'stories' }); } }) : h('label', { for: 'story-file', text: 'Ou da galeria: foto ou vídeo (até 5 min)' }), file,
+    session.maxMode() ? null : nativePickerAvailable() ? h('button', { type: 'button', class: 'secondary', text: 'Galeria', onclick: async () => { const got = await pickInApp(null, { media: true, target: 'stories' }, () => session.S.unlocked).catch(() => null); if (got) { close(); go('stories', { attachment: got }); } } }) : h('label', { for: 'story-file', text: 'Ou da galeria: foto ou vídeo (até 5 min)' }), file,
     selectedFile ? h('p', { text: 'Arquivo selecionado. Revise a audiência e a legenda antes de publicar.' }) : null,
     h('fieldset', {}, h('legend', { text: 'Quem pode ver' }), boxes),
     h('label', { for: 'story-ttl', text: 'Some em' }), ttl,

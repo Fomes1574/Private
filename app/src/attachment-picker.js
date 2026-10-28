@@ -1,4 +1,5 @@
 // Só o token nativo (nenhum conteúdo) atravessa o bloqueio do seletor.
+import { beginPickerTrip, endPickerTrip } from './picker-trip.js';
 const plugin = () => globalThis.Capacitor?.isNativePlatform?.() ? globalThis.Capacitor.Plugins?.AttachmentPicker : null;
 let pending = null;
 export const nativePickerAvailable = () => !!plugin();
@@ -10,6 +11,28 @@ export async function selectNativeAttachment(roomId, pick) {
 export function pendingAttachment() {
   if (pending && Date.now() - pending.at > 5 * 60_000) { pending = null; plugin()?.clear().catch(() => {}); }
   return pending;
+}
+// Espera o app voltar para a frente (o seletor nativo só libera a leitura
+// com a janela do app em foco). Desiste em 3 s; a leitura recusa se faltar.
+function foreground() {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const tick = () => (!document.hidden && document.hasFocus()) || Date.now() - t0 > 3000 ? setTimeout(resolve, 0) : setTimeout(tick, 50);
+    tick();
+  });
+}
+// D13: abre o seletor sem trancar antes. Voltando em até 2 minutos com o app
+// ainda aberto, devolve a seleção pronta para ler. Se trancou no caminho,
+// devolve null e a seleção espera o PIN (o desbloqueio leva de volta a ela).
+export async function pickInApp(roomId, pick, stillOpen) {
+  beginPickerTrip();
+  try { await selectNativeAttachment(roomId, pick); }
+  catch (e) { endPickerTrip(); throw e; }
+  await foreground();
+  endPickerTrip();
+  if (!pending || !stillOpen()) return null;
+  await plugin().authorize();
+  return takeAttachment();
 }
 export function takeAttachment() { const value = pendingAttachment(); pending = null; return value; }
 export function discardAttachment() { pending = null; return plugin()?.clear().catch(() => {}); }

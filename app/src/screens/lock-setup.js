@@ -34,5 +34,5 @@ export function lockSetupForm(onDone) {
       toast(err.name === 'NotAllowedError' ? 'Face ID cancelado.' : /PRF/.test(err.message) ? 'Este aparelho não liberou a chave pelo Face ID. Use a frase-senha.' : `Não deu: ${err.message}`);
     }
   } }, h('label', { for: 'mode', text: 'Como abrir o app' }), mode, label, s1, h('label', { for: 's2', text: 'Repita' }), s2, btn,
-  h('p', { class: 'note', text: 'Se esquecer o PIN ou perder o aparelho, o histórico se perde. A recuperação da conta precisa da administradora e do seu guardião, com 24 horas de espera.' }));
+  h('p', { class: 'note', text: 'Se esquecer o PIN ou perder o aparelho, o histórico se perde. A recuperação da conta precisa da administradora, com 24 horas de espera.' }));
 }

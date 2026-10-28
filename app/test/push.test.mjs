@@ -1,10 +1,7 @@
-// Botão de notificações: nunca fica calado. Testa os dois caminhos:
-// - web sem service worker (como o navegador comum): "Erro" com explicação;
-// - Android, com um plugin NovasMensagens FALSO no lugar do nativo: aguardando
-//   permissão → ativado; desativar; recusado; erro do serviço; permissão
-//   retirada nas configurações (descoberta no desbloqueio); apagar tudo.
-// O FCM de verdade e o aparelho de verdade ficam para o teste em celular
-// (docs/TESTE_EM_CELULAR.md). Isto aqui é simulação e não aprova nada sozinho.
+// D15: o app não tem mais notificações. Os Ajustes não mostram a seção, e um
+// aparelho que tinha ligado (APK com plugin NovasMensagens FALSO no lugar do
+// nativo) é desligado no desbloqueio: o servidor esquece o destino e o token
+// do aparelho é apagado. "Apagar tudo" também apaga o token.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -37,26 +34,19 @@ before(async () => {
 });
 after(async () => { await ctx?.close(); server?.close(); api?.stop(); });
 
-const stateText = () => page.textContent('#push-state');
-async function waitState(s) { await page.waitForFunction((x) => document.querySelector('#push-state')?.dataset.state === x, s, { timeout: 15000 }); }
-async function openSettings() {
-  if (await page.$('[aria-label=Voltar]')) await page.click('[aria-label=Voltar]');
-  await page.click('[aria-label=Ajustes]');
-  await page.waitForSelector('#push-state');
-}
-// Plugin nativo falso: o teste decide a permissão e o resultado do token.
+// Plugin nativo falso: conta quantas vezes o token foi apagado.
 const installFake = () => page.evaluate(() => {
-  const f = globalThis.__fake = { permission: 'prompt', configured: true, answer: null, tokenFails: false, unregistered: 0 };
+  const f = globalThis.__fake = { permission: 'granted', configured: true, unregistered: 0 };
   globalThis.Capacitor = { isNativePlatform: () => true, Plugins: { NovasMensagens: {
     status: async () => ({ configured: f.configured, permission: f.permission }),
-    requestPermission: () => new Promise((ok) => { f.answer = (p) => { f.permission = p; ok({ configured: true, permission: p }); }; }),
-    token: async () => { if (f.tokenFails) throw new Error('SERVICE_NOT_AVAILABLE'); return { token: `teste:${'a'.repeat(140)}` }; },
+    requestPermission: async () => ({ configured: true, permission: f.permission }),
+    token: async () => ({ token: `teste:${'a'.repeat(140)}` }),
     unregister: async () => { f.unregistered++; },
   } } };
 });
-const fake = () => page.evaluate(() => ({ ...globalThis.__fake, answer: undefined }));
+const fake = () => page.evaluate(() => ({ ...globalThis.__fake }));
 
-test('notificações: estados visíveis no navegador e no Android (plugin simulado)', async () => {
+test('D15: sem seção de notificações; quem tinha ligado é desligado no desbloqueio', async () => {
   ctx = await browser(); page = await ctx.newPage(); await virtualAuthenticator(page);
   page.on('request', (r) => { if (r.url().endsWith('/v1/push') && r.method() === 'POST') posts.push(JSON.parse(r.postData())); });
   await page.goto(`${APP}/#instalar`);
@@ -65,74 +55,31 @@ test('notificações: estados visíveis no navegador e no Android (plugin simula
   await page.fill('#token', SETUP); await page.click('text=Entrar');
   await page.fill('#nick', 'Ana'); await page.click('form button'); await page.waitForSelector('#search');
 
-  // Navegador sem service worker: erro explicado, nunca silêncio.
-  await openSettings();
-  await waitState('unavailable');
-  assert.match(await stateText(), /^Este navegador não oferece notificações aqui\./, 'indisponível explica, sem chamar de erro');
-  assert.equal(await page.textContent('#push-btn'), 'Tentar de novo');
+  await page.click('[aria-label=Ajustes]');
+  await page.waitForSelector('text=Trocar de celular');
+  assert.equal(await page.$('#push-state'), null);
+  assert.equal(await page.$('h2:text-is("Notificações")'), null);
+  assert.equal(await page.$('h2:text-is("Guardião")'), null);
+  assert.equal(await page.$('#show-preview'), null, 'prévia na lista é obrigatória');
+  assert.equal(await page.$('text=Fotos íntimas'), null);
+  await page.click('[aria-label=Voltar]');
 
-  // APK sem Firebase (o atual): explica que no Android não há aviso com o app fechado.
-  await page.evaluate(() => { globalThis.Capacitor = { isNativePlatform: () => true, Plugins: {} }; });
-  await openSettings();
-  await waitState('unavailable');
-  assert.match(await stateText(), /não usa serviços do Google/);
-
-  // Android com o plugin (APK futuro, simulado): aguardando permissão → ativado.
+  // Aparelho antigo com notificações ligadas: no desbloqueio, tudo desliga.
   await installFake();
-  await openSettings();
-  await waitState('off');
-  assert.equal(await page.textContent('#push-btn'), 'Ativar notificações');
-  posts.length = 0;
-  await page.click('#push-btn');
-  await waitState('waiting');
-  assert.match(await stateText(), /Aguardando permissão/);
-  assert.equal(await page.isDisabled('#push-btn'), true);
-  await page.evaluate(() => globalThis.__fake.answer('granted'));
-  await waitState('on');
-  assert.equal(await page.textContent('#push-btn'), 'Desativar notificações');
-  assert.deepEqual(posts, [{ fcm: `teste:${'a'.repeat(140)}` }], 'só o token deste aparelho vai ao servidor');
-
-  // Desativar: o servidor esquece e o token é apagado no aparelho.
-  posts.length = 0;
-  await page.click('#push-btn');
-  await waitState('off');
-  assert.deepEqual(posts, [{ endpoint: null }]);
-  assert.equal((await fake()).unregistered, 1);
-
-  // Recusado.
-  await page.evaluate(() => { globalThis.__fake.permission = 'prompt'; });
-  await page.click('#push-btn');
-  await waitState('waiting');
-  await page.evaluate(() => globalThis.__fake.answer('denied'));
-  await waitState('denied');
-  assert.match(await stateText(), /^Recusadas\./);
-  assert.equal(await page.textContent('#push-btn'), 'Tentar de novo');
-
-  // Erro do serviço de notificações.
-  await page.evaluate(() => { globalThis.__fake.permission = 'granted'; globalThis.__fake.tokenFails = true; });
-  await page.click('#push-btn');
-  await waitState('error');
-  assert.match(await stateText(), /^Erro: Não deu para registrar: .*SERVICE_NOT_AVAILABLE/);
-
-  // Ativado e, depois, permissão retirada nas configurações do Android: no
-  // próximo desbloqueio o servidor esquece o destino e a tela diz "Recusadas".
-  await page.evaluate(() => { globalThis.__fake.tokenFails = false; });
-  await page.click('#push-btn');
-  await waitState('on');
-  await page.evaluate(() => { globalThis.__fake.permission = 'denied'; });
+  await page.evaluate(() => globalThis.__mpTest.setPrefs({ push: true }));
   posts.length = 0;
   await page.evaluate(() => globalThis.__mpTest.lock('manual'));
   await page.waitForSelector('#secret');
   await page.fill('#secret', PIN);
   await page.click('text=Desbloquear');
   await page.waitForSelector('#search', { timeout: 30000 });
-  for (let i = 0; i < 50 && !posts.length; i++) await page.waitForTimeout(100);
-  assert.deepEqual(posts, [{ endpoint: null }], 'permissão retirada: servidor esquece');
-  await openSettings();
-  await waitState('denied');
+  await page.waitForFunction(() => globalThis.__fake.unregistered > 0, null, { timeout: 15000 });
+  assert.deepEqual(posts, [{ endpoint: null }], 'servidor esquece o destino');
+  assert.equal(await page.evaluate(() => globalThis.__mpTest.pushEnabled()), false);
 
   // Apagar tudo: o token do aparelho também some.
   const before = (await fake()).unregistered;
+  await page.click('[aria-label=Ajustes]');
   await page.click('text=Apagar tudo deste aparelho');
   await page.click('.sheet >> text=Apagar tudo');
   await page.waitForFunction((n) => globalThis.__fake.unregistered > n, before, { timeout: 15000 });

@@ -75,6 +75,32 @@ test('revisão: girar a foto deve preservar o desenho ou pedir confirmação',as
  }finally{await p.close();}
 });
 
+test('P2: borracha apaga parte do desenho sem apagar a foto; desfazer devolve',async()=>{
+ const p=await page();try{
+ await p.evaluate(async()=>{
+  const c=document.createElement('canvas');c.width=100;c.height=100;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,100,100);
+  const blob=await new Promise(r=>c.toBlob(r));const {editPhoto}=await import('/editor.js');window.editResult=editPhoto(new Uint8Array(await blob.arrayBuffer()),'image/png');
+ });
+ await p.locator('.editor-canvas').waitFor();
+ const box=await p.locator('.editor-canvas').boundingBox();
+ const line=async(a,b)=>{await p.mouse.move(box.x+box.width*a,box.y+box.height*.5);await p.mouse.down();await p.mouse.move(box.x+box.width*b,box.y+box.height*.5,{steps:8});await p.mouse.up();};
+ const count=()=>p.evaluate(()=>{const c=document.querySelector('.editor-canvas');const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let red=0,white=0;for(let i=0;i<d.length;i+=4){if(d[i]>230&&d[i+1]<130&&d[i+2]<130)red++;else if(d[i]>240&&d[i+1]>240&&d[i+2]>240)white++;}return {red,white};});
+ const blank=await count();
+ await line(.1,.9);
+ const drawn=await count();assert.ok(drawn.red>0);
+ await p.getByRole('button',{name:'Borracha',exact:true}).click();
+ assert.equal(await p.getByRole('button',{name:'Borracha',exact:true}).getAttribute('aria-pressed'),'true');
+ await line(.05,.5);
+ const erased=await count();
+ assert.ok(erased.red>0&&erased.red<drawn.red*.7,`apagou só uma parte (${drawn.red} → ${erased.red})`);
+ assert.ok(erased.white>drawn.white,'onde apagou aparece a foto de novo, não um buraco');
+ await p.getByRole('button',{name:'Desfazer',exact:true}).click();
+ assert.equal((await count()).red,drawn.red,'desfazer volta o que a borracha tirou');
+ await p.getByRole('button',{name:'Desfazer',exact:true}).click();
+ assert.equal((await count()).red,blank.red,'e depois o próprio traço');
+ }finally{await p.close();}
+});
+
 test('R04: cancelar QR antes da permissão impede câmera tardia de ficar ligada', async () => {
  const p=await page();try{
  await p.evaluate(async()=>{

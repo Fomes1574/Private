@@ -146,7 +146,6 @@ route('POST', '/v1/devices/pair/approve', async ({ env, request, me }) => {
   return json(200, unwrap(await circle(env).pairApprove(me, { pairingId: assertId(b.pairingId), code: String(b.code) })));
 });
 route('POST', '/v1/devices/pair/commit', async ({ env, me }) => json(200, unwrap(await circle(env).pairCommit(me))));
-route('POST', '/v1/me/guardian', async ({ env, request, me }) => json(200, unwrap(await circle(env).setGuardian(me, assertId((await readJson(request)).userId)))));
 route('POST', '/v1/recovery/approve', async ({ env, request, me }) => json(200, unwrap(await circle(env).recoveryApprove(me, assertId((await readJson(request)).userId)))));
 route('POST', '/v1/recovery/cancel', async ({ env, me }) => json(200, unwrap(await circle(env).recoveryCancel(me))));
 route('POST', '/v1/admin/freeze', async ({ env, request, me }) => {

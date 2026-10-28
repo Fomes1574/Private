@@ -35,7 +35,7 @@ Legenda: ✅ ok · ❌ falhou (anote o que viu) · — não se aplica
 | 8 | Mídia pesada | Vídeo de 5 min; vídeo 4K da galeria (modo máximo desligado); foto grande | Comprime antes de enviar; mostra erro claro se não der; nada sai sem cifra | | |
 | 9 | Privacidade ao minimizar | Abra uma conversa e vá aos recentes; tente print e gravar a tela; espelhe a tela (Cast) | Recentes sem conteúdo; print e gravação pretos ou bloqueados; app trancado ao voltar | | |
 | 10 | Prazos, apagar, ver uma vez, documentos | Mensagem de 12 h; apagar para todos; foto de ver uma vez; documento de texto e PDF | Somem no prazo (horário de Brasília); ver uma vez abre uma vez só; documento abre dentro do app, sem chamar outro app | | |
-| 11 | Seletor de arquivos (F17) e lote de fotos (D4) | Modo máximo desligado: anexar → Galeria, escolha 6; desbloqueie e "Continuar com o anexo" | App tranca ao abrir o seletor; ao voltar pede PIN; aceita só 5 e avisa; cada foto com edição, "1" e legenda próprios | | |
+| 11 | Galeria (D12/D13) e lote de fotos (D4) | Modo máximo desligado: anexar → Galeria. Escolha 6 itens entre fotos e um vídeo; volte em menos de 2 min. Repita demorando mais de 2 min no seletor | Abre o seletor de **fotos** do Android (grade, não a tela de Arquivos), só fotos e vídeos, no máximo 5. Volta rápida: **sem PIN**, direto na tela de preparar com as fotos; vídeo depois, com "normal" ou "ver uma vez". Mais de 2 min: pede PIN e, depois dele, volta **direto na conversa** com a seleção. Nada vai como documento | | |
 | 12 | Microfone (F12) e áudio (b.6) | Segure o microfone, deslize para a esquerda; segure e deslize para cima (cadeado), pause, pare, "Ouvir"; saia do app no meio | Cancelar e sair desligam o microfone na hora (ícone do sistema some); nada é enviado sozinho | | |
 | 13 | Teclado anônimo (S5) | Digite uma palavra rara no app; depois tente no teclado de outro app | O teclado do sistema não sugere a palavra fora do app | | |
 | 14 | Verificar contato (S8) | Menu da conversa → Participantes → Verificar; um lê o QR do outro (Android) ou comparam os números | Números iguais nos dois; "✓ Verificado". Depois que um trocar de aparelho: aviso na conversa e mídia pausada até conferir de novo | | |
@@ -46,6 +46,8 @@ Legenda: ✅ ok · ❌ falhou (anote o que viu) · — não se aplica
 | 19 | Troca interrompida | Feche o novo antes da aprovação e depois da aprovação; reabra com PIN e termine | Mesma conta; antigo permanece ativo até a confirmação; sem perder administradora | | |
 | 20 | Autorização vencida/usada | Use autorização já consumida ou espere 5 min antes de iniciar | Recusa clara; nenhum aparelho ativo é desconectado; gerar outra permite tentar novamente | | |
 | 21 | Cinco fotos, escolha individual | Escolha cinco, edite/legende cada uma; marque duas como ver uma vez, depois três, todas e nenhuma em lotes separados | Cada foto preserva edição/legenda/modo; prévias não mostram conteúdo de ver uma vez; destinatário abre somente as permitidas | | |
+| 22 | Borracha e ① na câmera | Câmera do app → foto → Editar: desenhe, toque na borracha e apague só um pedaço, depois "Desfazer". Na tela de preparar, toque no ① ao lado da legenda | A borracha apaga só o desenho, nunca a foto; desfazer devolve. ① liga "ver uma vez" e tira a legenda | | |
+| 23 | Ajustes enxutos | Abra Ajustes | Sem "Notificações", sem "Guardião", sem "Fotos íntimas" e sem a opção de prévia (a prévia aparece sempre na lista; ver uma vez nunca) | | |
 
 ## Também anotar
 

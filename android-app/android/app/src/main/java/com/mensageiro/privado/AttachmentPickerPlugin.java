@@ -4,7 +4,11 @@ import android.app.Activity;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.os.SystemClock;
+import android.os.ext.SdkExtensions;
+import android.provider.MediaStore;
+import android.content.res.AssetFileDescriptor;
 import android.provider.OpenableColumns;
 import android.util.Base64;
 import androidx.activity.result.ActivityResult;
@@ -21,8 +25,11 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
-// F17: só guarda a URI transitória, nunca copia para arquivo/cache. O retorno
-// do seletor exige PIN+biometria novamente antes de liberar metadados/bytes.
+// F17: só guarda a URI transitória, nunca copia para arquivo/cache. Os bytes
+// só saem com o app de volta à frente e liberado pelo JS (authorize): na volta
+// rápida (D13, até 2 min) o app continua aberto; depois disso, só após o PIN.
+// D12: fotos e vídeos vêm do seletor de fotos do Android (sem permissão de
+// arquivos, sem biblioteca do Google); documentos, do seletor de arquivos.
 @CapacitorPlugin(name = "AttachmentPicker")
 public class AttachmentPickerPlugin extends Plugin {
     // D4: até 5 itens numa seleção (fotos da galeria). Cada leitura diz o índice.
@@ -57,20 +64,42 @@ public class AttachmentPickerPlugin extends Plugin {
     public void authorize(PluginCall call) { authorized = true; call.resolve(); }
     @PluginMethod
     public void clear(PluginCall call) { String expected = call.getString("token"); if (expected == null || expected.equals(token)) reset(); call.resolve(); }
+    // Seletor de fotos do sistema: Android 13+, ou 11/12 com a atualização
+    // de sistema que o traz (extensão R ≥ 2).
+    private static boolean hasPhotoPicker() {
+        if (Build.VERSION.SDK_INT >= 33) return true;
+        return Build.VERSION.SDK_INT >= 30 && SdkExtensions.getExtensionVersion(Build.VERSION_CODES.R) >= 2;
+    }
+    private static Intent photoPickerIntent(String kind, boolean multiple) {
+        Intent intent = new Intent(MediaStore.ACTION_PICK_IMAGES);
+        // Sem tipo, o seletor mostra fotos e vídeos juntos (galeria).
+        if ("photo".equals(kind)) intent.setType("image/*");
+        if ("video".equals(kind)) intent.setType("video/*");
+        if (multiple) intent.putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX, MAX_ITEMS);
+        return intent;
+    }
+    private static Intent documentIntent(String kind, boolean multiple) {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("photo".equals(kind) ? "image/*" : "video".equals(kind) ? "video/*" : "*/*");
+        if ("doc".equals(kind)) intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"text/plain", "text/markdown", "text/csv", "application/pdf"});
+        if ("media".equals(kind)) intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
+        if (multiple) intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        return intent;
+    }
     @PluginMethod
     public void pick(PluginCall call) {
         if (picking) { call.reject("Já há um seletor aberto"); return; }
         reset(); picking = true;
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
         String kind = call.getString("kind", "photo");
-        intent.setType("photo".equals(kind) ? "image/*" : "video".equals(kind) ? "video/*" : "*/*");
-        if ("doc".equals(kind)) intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"text/plain", "text/markdown", "text/csv", "application/pdf"});
-        if ("media".equals(kind)) intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
-        if (Boolean.TRUE.equals(call.getBoolean("multiple", false))) intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        boolean multiple = Boolean.TRUE.equals(call.getBoolean("multiple", false));
         // Não usa takePersistableUriPermission nem permissão de armazenamento.
-        try { startActivityForResult(call, intent, "picked"); }
+        if (!"doc".equals(kind) && hasPhotoPicker()) {
+            try { startActivityForResult(call, photoPickerIntent(kind, multiple), "picked"); return; }
+            catch (Exception ignored) { /* aparelho sem o seletor: usa o de arquivos */ }
+        }
+        try { startActivityForResult(call, documentIntent(kind, multiple), "picked"); }
         catch (Exception e) { picking = false; reset(); call.reject("Seletor indisponível"); }
     }
     @ActivityCallback
@@ -98,12 +127,18 @@ public class AttachmentPickerPlugin extends Plugin {
         if (!permitted(call)) return;
         Uri uri = item(call);
         try (Cursor c = getContext().getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE}, null, null, null)) {
-            if (c == null || !c.moveToFirst() || c.isNull(1)) throw new Exception();
-            long size = c.getLong(1);
+            if (c == null || !c.moveToFirst()) throw new Exception();
+            long size = c.isNull(1) ? lengthOf(uri) : c.getLong(1);
             if (size <= 0 || size > 100L * 1024 * 1024) throw new Exception();
             JSObject out = new JSObject(); out.put("name", c.getString(0)); out.put("size", size);
             out.put("mime", getContext().getContentResolver().getType(uri)); call.resolve(out);
         } catch (Exception e) { reset(); call.reject("Não foi possível ler o tamanho do arquivo"); }
+    }
+    // Alguns provedores (fotos na nuvem) não informam o tamanho na consulta.
+    private long lengthOf(Uri uri) {
+        try (AssetFileDescriptor fd = getContext().getContentResolver().openAssetFileDescriptor(uri, "r")) {
+            return fd == null ? -1 : fd.getLength();
+        } catch (Exception e) { return -1; }
     }
     @PluginMethod
     public void read(PluginCall call) {

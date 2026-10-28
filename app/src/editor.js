@@ -1,7 +1,8 @@
-// Editor de foto (V6-025): girar, recortar, desenhar e escrever, tudo no
-// aparelho. Entra a foto já recodificada (sem metadados) e sai um JPEG novo.
+// Editor de foto (V6-025): girar, recortar, desenhar, apagar e escrever, tudo
+// no aparelho. Entra a foto já recodificada (sem metadados) e sai um JPEG novo.
 // Nada sobreposto automaticamente: só o que a própria pessoa desenhar.
 import { h } from './ui.js';
+import { icon } from './icons.js';
 import { sensitiveScope } from './sensitive-scope.js';
 
 const COLORS = ['#FFFFFF', '#000000', '#FF5A5A', '#FFD23F', '#3DDC97', '#6CB4FF'];
@@ -18,6 +19,9 @@ export function editPhoto(bytes, mime = 'image/jpeg', { signal } = {}) {
     let marks = []; // traços e textos, em coordenadas da imagem original
     const canvas = h('canvas', { class: 'editor-canvas', 'aria-label': 'Foto em edição' });
     const g = canvas.getContext('2d');
+    // Camada só das marcas: a borracha apaga desenho e texto, nunca a foto.
+    const layer = document.createElement('canvas');
+    const lg = layer.getContext('2d');
 
     // Geometria atual: imagem girada e recortada no centro.
     function geometry() {
@@ -26,29 +30,35 @@ export function editPhoto(bytes, mime = 'image/jpeg', { signal } = {}) {
       if (crop) { if (rw / rh > crop) cw = Math.round(rh * crop); else ch = Math.round(rw / crop); }
       return { rw, rh, cw, ch, ox: (rw - cw) / 2, oy: (rh - ch) / 2 };
     }
+    function place(ctx, { rw, rh, ox, oy }) {
+      ctx.translate(-ox, -oy);
+      ctx.translate(rw / 2, rh / 2);
+      ctx.rotate((rot * Math.PI) / 2);
+      ctx.translate(-src.width / 2, -src.height / 2);
+    }
     function draw() {
-      const { rw, rh, cw, ch, ox, oy } = geometry();
-      canvas.width = cw; canvas.height = ch;
-      g.save();
-      g.translate(-ox, -oy);
-      g.translate(rw / 2, rh / 2);
-      g.rotate((rot * Math.PI) / 2);
-      g.translate(-src.width / 2, -src.height / 2);
-      g.drawImage(src, 0, 0);
+      const geo = geometry();
+      canvas.width = layer.width = geo.cw; canvas.height = layer.height = geo.ch;
+      g.save(); place(g, geo); g.drawImage(src, 0, 0); g.restore();
+      lg.save(); place(lg, geo);
       for (const m of marks) {
-        if (m.kind === 'stroke') {
-          g.strokeStyle = m.color; g.lineWidth = m.width; g.lineCap = 'round'; g.lineJoin = 'round';
-          g.beginPath();
-          m.points.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
-          g.stroke();
+        lg.globalCompositeOperation = m.kind === 'erase' ? 'destination-out' : 'source-over';
+        if (m.kind === 'stroke' || m.kind === 'erase') {
+          lg.strokeStyle = m.kind === 'erase' ? '#000' : m.color; lg.lineWidth = m.width; lg.lineCap = 'round'; lg.lineJoin = 'round';
+          lg.beginPath();
+          m.points.forEach(([x, y], i) => (i ? lg.lineTo(x, y) : lg.moveTo(x, y)));
+          // Um toque só (sem arrastar) também marca ou apaga um ponto.
+          if (m.points.length === 1) lg.lineTo(m.points[0][0] + 0.01, m.points[0][1]);
+          lg.stroke();
         } else {
-          g.font = `700 ${m.size}px -apple-system, system-ui, sans-serif`;
-          g.textAlign = 'center'; g.textBaseline = 'middle';
-          g.lineWidth = Math.max(2, m.size / 8); g.strokeStyle = m.color === '#000000' ? '#FFFFFF' : '#000000';
-          g.strokeText(m.text, m.x, m.y); g.fillStyle = m.color; g.fillText(m.text, m.x, m.y);
+          lg.font = `700 ${m.size}px -apple-system, system-ui, sans-serif`;
+          lg.textAlign = 'center'; lg.textBaseline = 'middle';
+          lg.lineWidth = Math.max(2, m.size / 8); lg.strokeStyle = m.color === '#000000' ? '#FFFFFF' : '#000000';
+          lg.strokeText(m.text, m.x, m.y); lg.fillStyle = m.color; lg.fillText(m.text, m.x, m.y);
         }
       }
-      g.restore();
+      lg.restore();
+      g.drawImage(layer, 0, 0);
     }
     const toImage = (e) => {
       const r = canvas.getBoundingClientRect();
@@ -63,7 +73,9 @@ export function editPhoto(bytes, mime = 'image/jpeg', { signal } = {}) {
       e.preventDefault();
       if (mode === 'text') return placeText(toImage(e));
       canvas.setPointerCapture?.(e.pointerId);
-      stroke = { kind: 'stroke', color, width: Math.max(4, src.width / 120), points: [toImage(e)] };
+      stroke = mode === 'erase'
+        ? { kind: 'erase', width: Math.max(16, src.width / 30), points: [toImage(e)] }
+        : { kind: 'stroke', color, width: Math.max(4, src.width / 120), points: [toImage(e)] };
       marks.push(stroke);
     });
     canvas.addEventListener('pointermove', (e) => { if (stroke) { stroke.points.push(toImage(e)); draw(); } });
@@ -80,11 +92,11 @@ export function editPhoto(bytes, mime = 'image/jpeg', { signal } = {}) {
     // Marcas no espaço da imagem original: giram junto e sobrevivem ao recorte.
     const reshape = (fn) => { fn(); draw(); };
     const tool = (label, fn, extra = {}) => h('button', { type: 'button', class: 'secondary small', text: label, onclick: fn, ...extra });
-    const modeBtns = [tool('Desenhar', () => setMode('draw'), { 'aria-pressed': 'true' }), tool('Escrever', () => setMode('text'), { 'aria-pressed': 'false' })];
+    const modeBtn = (m, label, ico) => h('button', { type: 'button', class: 'secondary small tool', 'aria-label': label, title: label, 'aria-pressed': String(m === mode), onclick: () => setMode(m) }, ico ? icon(ico, 20) : label);
+    const modeBtns = { draw: modeBtn('draw', 'Desenhar', 'pen'), erase: modeBtn('erase', 'Borracha', 'eraser'), text: modeBtn('text', 'Escrever', null) };
     function setMode(m) {
       mode = m;
-      modeBtns[0].setAttribute('aria-pressed', String(m === 'draw'));
-      modeBtns[1].setAttribute('aria-pressed', String(m === 'text'));
+      for (const [k, b] of Object.entries(modeBtns)) b.setAttribute('aria-pressed', String(k === m));
       textIn.hidden = m !== 'text';
       if (m === 'text') textIn.focus();
     }
@@ -95,15 +107,15 @@ export function editPhoto(bytes, mime = 'image/jpeg', { signal } = {}) {
       return b;
     });
     let finished = false;
-    const done = (out) => { if (finished) { out?.bytes?.fill(0); return; } finished = true; overlay.replaceChildren(); overlay.remove(); canvas.width = 0; canvas.height = 0; marks = []; textIn.value = ''; src.close(); scope.finish(); resolve(out); };
+    const done = (out) => { if (finished) { out?.bytes?.fill(0); return; } finished = true; overlay.replaceChildren(); overlay.remove(); canvas.width = 0; canvas.height = 0; layer.width = layer.height = 0; marks = []; textIn.value = ''; src.close(); scope.finish(); resolve(out); };
     const overlay = h('div', { class: 'editor', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Editar foto' },
       h('div', { class: 'editor-bar row' },
         tool('Cancelar', () => done(null)),
         tool('Girar', () => reshape(() => { rot = (rot + 1) % 4; })),
         ...CROPS.map(([label, r]) => tool(label, () => reshape(() => { crop = r; }))),
-        tool('Desfazer', () => { marks.pop(); draw(); })),
+        h('button', { type: 'button', class: 'secondary small tool', 'aria-label': 'Desfazer', title: 'Desfazer', onclick: () => { marks.pop(); draw(); } }, icon('undo', 20))),
       h('div', { class: 'editor-stage' }, canvas),
-      h('div', { class: 'editor-bar row' }, ...modeBtns, ...swatches),
+      h('div', { class: 'editor-bar row' }, ...Object.values(modeBtns), ...swatches),
       textIn,
       h('div', { class: 'editor-bar row' },
         h('button', { type: 'button', class: 'block', text: 'Usar foto', onclick: async () => {

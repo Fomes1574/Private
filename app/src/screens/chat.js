@@ -1,6 +1,6 @@
 // Conversa 1:1 ou grupo. Só horário (Brasília) em cada mensagem; nada de
 // visto, entregue, online ou digitando (V6-022). Texto sempre como texto.
-import { h, mount, header, toast, choiceSheet, confirmSheet, errText, onLongPress } from '../ui.js';
+import { h, mount, header, toast, choiceSheet, iconSheet, confirmSheet, errText, onLongPress } from '../ui.js';
 import * as session from '../session.js';
 import { formatTime, formatDateTime } from '../packages/protocol/src/time.js';
 import { preparePhoto } from '../media.js';
@@ -16,7 +16,7 @@ import { prepareBatch } from './batch.js';
 import { pollSheet, pollBlock } from './poll.js';
 import { verifySheet } from './verify.js';
 import { warningText } from '../security-text.js';
-import { nativePickerAvailable, selectNativeAttachment, readNativeAttachment, clearNativeAttachment } from '../attachment-picker.js';
+import { nativePickerAvailable, pickInApp, readNativeAttachment, clearNativeAttachment } from '../attachment-picker.js';
 import { sensitiveScope } from '../sensitive-scope.js';
 import { normalize } from '../packages/protocol/src/nickname.js';
 import { EDIT_WINDOW_MS } from '../packages/protocol/src/reconcile.js';
@@ -97,12 +97,15 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
     if (!f || !scope.valid()) return;
     const { video, once, doc, hd, batch } = pick;
     if (batch) {
-      if (files.some((f) => /^video\//.test(f.type))) { if (files.length !== 1) return toast('Selecione até 5 fotos ou um vídeo por envio.'); return sendVideo(f, false); }
+      // Galeria (D12): fotos juntas na tela de preparar; vídeos um a um.
+      const chosen = files.slice(0, 5), videos = chosen.filter((x) => /^video\//.test(x.type));
       const prepared = [];
-      for (const file of files.slice(0, 5)) { try { const p = await preparePhoto(file, { maxSide: 4096, quality: 0.9 }); if (!scope.valid()) { p.bytes.fill(0); break; } prepared.push(p); } catch (e) { toast(errText(e)); } }
-      if (files.length > 5) toast('Dá para mandar até 5 fotos de uma vez. As outras ficaram de fora.');
+      for (const file of chosen) { if (videos.includes(file)) continue; try { const p = await preparePhoto(file, { maxSide: 4096, quality: 0.9 }); if (!scope.valid()) { p.bytes.fill(0); break; } prepared.push(p); } catch (e) { toast(errText(e)); } }
+      if (files.length > 5) toast('Dá para mandar até 5 de uma vez. Os outros ficaram de fora.');
       if (!scope.valid()) { for (const p of prepared) p.bytes.fill(0); return; }
-      return prepared.length ? sendBatch(prepared) : undefined;
+      if (prepared.length) await sendBatch(prepared);
+      for (const v of videos) if (scope.valid()) await sendVideo(v, false);
+      return;
     }
     if (hd) { try { const p = await preparePhoto(f, { maxSide: 4096, quality: 0.9 }); return sendPhoto(p.bytes, p.mime, false, { hd: true }); } catch (e) { return toast(`Não enviou: ${errText(e)}`); } }
     if (doc) return sendDoc(f);
@@ -202,10 +205,10 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
 
   // Câmera do app sempre; galeria só com o modo máximo desligado (Ajustes).
   const attach = async () => {
-    const opts = [{ label: '📷 Câmera', value: 'camera' }];
-    if (!session.maxMode()) opts.push({ label: '▧ Galeria', value: 'gallery' });
-    opts.push({ label: '▤ Documento', value: 'doc' });
-    const c = await choiceSheet('Enviar', opts);
+    const opts = [{ label: 'Câmera', icon: 'camera', value: 'camera' }];
+    if (!session.maxMode()) opts.push({ label: 'Galeria', icon: 'gallery', value: 'gallery' });
+    opts.push({ label: 'Documento', icon: 'document', value: 'doc' });
+    const c = await iconSheet('Enviar', opts);
     if (!c || !scope.valid()) return;
     if (c === 'camera') {
       let mode = 'photo', round = false;
@@ -219,8 +222,8 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
     pick = { doc: c === 'doc', batch: c === 'gallery', media: c === 'gallery' };
     if (nativePickerAvailable()) {
       await session.setDraft(roomId, input.value);
-      await session.lock('file-picker');
-      await selectNativeAttachment(roomId, { ...pick });
+      const got = await pickInApp(roomId, { ...pick }, scope.valid).catch((e) => { toast(`Não abriu a galeria: ${errText(e)}`); return null; });
+      if (got && scope.valid()) await useAttachment(got);
       return;
     }
     fileIn.multiple = pick.batch;
@@ -680,51 +683,57 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
   if (find) { searchBar.hidden = false; searchIn.value = find; term = normalize(find.trim()); }
   await render();
   if (!scope.valid()) return;
-  if (attachment && attachment.roomId === roomId) {
-    (async () => {
-      try {
-        const f = await readNativeAttachment(attachment, { signal: scope.signal, allowed: scope.valid, keep: !!attachment.pick.batch });
-        if (!scope.valid()) return;
-        if (attachment.pick.action === 'wallpaper') {
-          const p = await preparePhoto(f, { maxSide: 1280 });
-          try { if (scope.valid()) await session.setWallpaper(roomId, p.bytes); } finally { p.bytes.fill(0); }
-          if (scope.valid()) go('chat', { roomId });
-          return;
-        }
-        if (attachment.pick.action?.startsWith('room-')) {
-          const slot = attachment.pick.action === 'room-photo' ? 'photo' : 'background';
-          const p = await preparePhoto(f, { maxSide: slot === 'photo' ? 512 : 1280, square: slot === 'photo' });
-          try { if (scope.valid()) await session.setRoomVisual(roomId, slot, p.bytes); } finally { p.bytes.fill(0); }
-          if (scope.valid()) go('chat', { roomId });
-          return;
-        }
-        const { video, once, doc, hd, batch } = attachment.pick;
-        if (batch) {
-          if (/^video\//.test(f.type)) { if ((attachment.count ?? 1) !== 1) { await clearNativeAttachment(attachment); return toast('Selecione até 5 fotos ou um vídeo por envio.'); } await clearNativeAttachment(attachment); return sendVideo(f, false); }
-          const prepared = [];
-          try {
-            const files = [f];
-            for (let i = 1; i < (attachment.count ?? 1) && scope.valid(); i++) files.push(await readNativeAttachment(attachment, { signal: scope.signal, allowed: scope.valid, index: i, keep: true }));
-            if (files.some((file) => /^video\//.test(file.type))) throw new Error('Selecione até 5 fotos ou um vídeo por envio.');
-            for (const file of files) {
-              if (!scope.valid()) break;
-              const p = await preparePhoto(file, { maxSide: 4096, quality: 0.9 });
-              if (!scope.valid()) { p.bytes.fill(0); break; }
-              prepared.push(p);
-            }
-            if (attachment.dropped) toast('Dá para mandar até 5 fotos de uma vez. As outras ficaram de fora.');
-            if (prepared.length && scope.valid()) await sendBatch(prepared);
-          } finally { await clearNativeAttachment(attachment); for (const p of prepared) p.bytes.fill(0); }
+  // Anexo escolhido no seletor nativo: na volta rápida (D13) ou depois do PIN.
+  async function useAttachment(attachment) {
+    const opts = (index = 0, keep = false) => ({ signal: scope.signal, allowed: scope.valid, index, keep });
+    try {
+      if (attachment.pick.batch) return await useGallery(attachment);
+      const f = await readNativeAttachment(attachment, opts());
+      if (!scope.valid()) return;
+      if (attachment.pick.action === 'wallpaper') {
+        const p = await preparePhoto(f, { maxSide: 1280 });
+        try { if (scope.valid()) await session.setWallpaper(roomId, p.bytes); } finally { p.bytes.fill(0); }
+        if (scope.valid()) go('chat', { roomId });
+        return;
+      }
+      if (attachment.pick.action?.startsWith('room-')) {
+        const slot = attachment.pick.action === 'room-photo' ? 'photo' : 'background';
+        const p = await preparePhoto(f, { maxSide: slot === 'photo' ? 512 : 1280, square: slot === 'photo' });
+        try { if (scope.valid()) await session.setRoomVisual(roomId, slot, p.bytes); } finally { p.bytes.fill(0); }
+        if (scope.valid()) go('chat', { roomId });
+        return;
+      }
+      const { video, once, doc, hd } = attachment.pick;
+      if (hd) { const p = await preparePhoto(f, { maxSide: 4096, quality: 0.9 }); if (scope.valid()) await sendPhoto(p.bytes, p.mime, false, { hd: true }); else p.bytes.fill(0); return; }
+      if (doc) await sendDoc(f);
+      else if (video) await sendVideo(f, once);
+      else { const p = await preparePhoto(f); if (scope.valid()) await sendPhoto(p.bytes, p.mime, once); else p.bytes.fill(0); }
+    } catch (e) { if (scope.valid()) toast(`Não abriu o anexo: ${errText(e)}`); }
 
-          return;
+    // Galeria (D12): sempre como foto ou vídeo, nunca como documento. Lê tudo
+    // antes (a seleção nativa vence em 5 min); as fotos vão juntas para a tela
+    // de preparar e os vídeos, um a um, com a escolha de normal ou ver uma vez.
+    async function useGallery(sel) {
+      const prepared = [], videos = [];
+      try {
+        for (let i = 0; i < (sel.count ?? 1) && scope.valid(); i++) {
+          const file = await readNativeAttachment(sel, opts(i, true));
+          if (/^video\//.test(file.type)) { videos.push(file); continue; }
+          try {
+            const p = await preparePhoto(file, { maxSide: 4096, quality: 0.9 });
+            if (!scope.valid()) { p.bytes.fill(0); break; }
+            prepared.push(p);
+          } catch (e) { toast(errText(e)); }
         }
-        if (hd) { const p = await preparePhoto(f, { maxSide: 4096, quality: 0.9 }); if (scope.valid()) await sendPhoto(p.bytes, p.mime, false, { hd: true }); else p.bytes.fill(0); return; }
-        if (doc) await sendDoc(f);
-        else if (video) await sendVideo(f, once);
-        else { const p = await preparePhoto(f); if (scope.valid()) await sendPhoto(p.bytes, p.mime, once); else p.bytes.fill(0); }
-      } catch (e) { if (scope.valid()) toast(`Não abriu o anexo: ${errText(e)}`); }
-    })();
+      } finally { await clearNativeAttachment(sel); }
+      try {
+        if (sel.dropped) toast('Dá para mandar até 5 de uma vez. Os outros ficaram de fora.');
+        if (prepared.length && scope.valid()) await sendBatch(prepared);
+        for (const v of videos) if (scope.valid()) await sendVideo(v, false);
+      } finally { for (const p of prepared) p.bytes.fill(0); }
+    }
   }
+  if (attachment && attachment.roomId === roomId) useAttachment(attachment);
   const timer = setInterval(() => render().catch(() => {}), 30_000); // vencidas somem sozinhas
   // F18: membros, liderança e encerramento também mudam pela sincronização.
   const refreshView = async () => {

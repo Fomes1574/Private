@@ -326,7 +326,9 @@ async function afterUnlock({ loggedIn = false } = {}) {
   await syncNow();
   connectLive();
   // Token novo ou permissão retirada nas configurações: acerta no servidor.
-  if (pushEnabled()) push.refreshPush(S.client.api, true).catch(() => {});
+  // D15: o app não usa notificações. Quem tinha ligado é desligado aqui
+  // (servidor esquece o destino e o aparelho apaga a assinatura).
+  if (pushEnabled()) setPush(false).catch(() => {});
   else S.client.api.post('/v1/push', { endpoint: null }).catch(() => {});
   // S3: fixa quem é a administradora (primeira identidade do círculo).
   if (!S.client.circleAdmin) S.client.refreshDirectory().then(() => S.client?.circleAdminId()).catch(() => {});
@@ -604,7 +606,7 @@ export async function sendRoomProfile(roomId) {
 // ---------- preferências deste aparelho ----------
 // Modo máximo (padrão): foto e vídeo só pela câmera do app, nunca da galeria
 // (o original da galeria tem GPS/modelo e o sistema faz cópia temporária).
-export const DEFAULT_PREFS = Object.freeze({ maxMode: true, lockAfter: 0, showPreview: true });
+export const DEFAULT_PREFS = Object.freeze({ maxMode: true, lockAfter: 0 });
 export async function setPrefs(patch) {
   S.prefs = { ...S.prefs, ...patch };
   await S.store.put('prefs', S.prefs);
@@ -654,7 +656,6 @@ export const markUnread = (roomId) => setRoomFlag(roomId, { markedUnread: true }
 // uma vez aparece só como rótulo. Com a opção desligada: "Nova mensagem".
 export function previewOf(view, last) {
   if (!last) return view.closed ? 'Encerrada' : 'Sem mensagens';
-  if (S.prefs.showPreview === false) return last.sender === S.client.userId ? 'Mensagem enviada' : 'Nova mensagem';
   const who = last.sender === S.client.userId ? 'Você: ' : view.kind === 'group' ? `${nameOf(last.sender)}: ` : '';
   let what;
   if (last.kind === 'media') {

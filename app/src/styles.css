@@ -179,3 +179,19 @@ button.link { background: none; border: 0; color: var(--accent, #6CB4FF); text-d
 .poll-option { display: flex; gap: 8px; text-align: left; background: rgba(127,127,127,.15); color: inherit; font-weight: 400; }
 .poll-option.on { outline: 2px solid #25D366; }
 .poll-opts { display: grid; gap: 6px; }
+/* Folha de anexar com ícones (D12) e folhas subindo da base. */
+.grip { justify-self: center; width: 40px; height: 4px; border-radius: 2px; background: #3A4558; }
+.icon-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 8px 0 4px; }
+.icon-choice { background: none; color: var(--text); display: grid; justify-items: center; gap: 8px; font-weight: 500; font-size: 14px; padding: 6px 0; }
+.icon-tile { width: 64px; height: 64px; border-radius: 22px; display: grid; place-items: center; }
+.icon-choice.tone-camera .icon-tile { background: #3B2A2E; color: #F28B82; }
+.icon-choice.tone-gallery .icon-tile { background: #2B2C40; color: #A8B4FF; }
+.icon-choice.tone-document .icon-tile { background: #23382F; color: #7BE8B8; }
+.icon-choice:active .icon-tile { transform: scale(.94); }
+@keyframes sheet-up { from { transform: translateY(40px); opacity: 0; } }
+.sheet-box { animation: sheet-up .2s ease-out; }
+@media (prefers-reduced-motion: reduce) { .sheet-box { animation: none; } }
+.caption-row { display: flex; align-items: center; gap: 6px; }
+.caption-row input { flex: 1; min-width: 0; }
+.caption-row .once-toggle { width: 44px; height: 44px; flex: none; color: #7BE8B8; font-size: 16px; }
+.editor .tool { display: inline-grid; place-items: center; min-width: 44px; }

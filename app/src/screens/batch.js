@@ -38,9 +38,9 @@ export function prepareBatch(items, { allowGallery = false, initialCaption = '' 
         h('button', { class: 'secondary small', text: 'Desfazer edição', onclick: undo }),
         h('button', { class: 'secondary small', 'aria-label': 'Mover para a esquerda', text: '◀', onclick: () => move(-1) }),
         h('button', { class: 'secondary small', 'aria-label': 'Mover para a direita', text: '▶', onclick: () => move(1) }),
-        h('button', { class: 'danger small', text: 'Remover', onclick: remove }),
-        onceBtn, hdBtn),
-      h('div', { class: 'row' }, caption),
+        h('button', { class: 'danger small', text: 'Remover', onclick: remove })),
+      // Como no WhatsApp: HD e ① ficam colados na legenda.
+      h('div', { class: 'row caption-row' }, caption, hdBtn, onceBtn),
       h('div', { class: 'row wrap' },
         h('button', { class: 'secondary small', text: '+ Câmera', onclick: addCamera }),
         allowGallery ? h('button', { class: 'secondary small', text: '+ Galeria', onclick: () => fileIn.click() }) : null,

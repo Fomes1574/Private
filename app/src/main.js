@@ -9,6 +9,7 @@ import { h, mount, toast, clearOverlays } from './ui.js';
 import { CONFIG } from './config.js';
 import { scriptURL } from './tt.js';
 import { cancelSensitiveOperations } from './sensitive-scope.js';
+import * as trip from './picker-trip.js';
 import * as session from './session.js';
 import { welcome, pairWaitScreen } from './screens/welcome.js';
 import { unlockScreen } from './screens/unlock.js';
@@ -46,7 +47,7 @@ export async function go(name, params = {}) {
 }
 
 // Capa imediata ao perder o foco: o seletor de apps não mostra conteúdo.
-let hiddenAt = 0;
+let hiddenAt = 0, tripTimer = null;
 function cover(on) { document.documentElement.classList.toggle('covered', on || session.S.locking); }
 function setupPrivacy() {
   const hide = () => { cover(true); hiddenAt ||= Date.now(); };
@@ -55,13 +56,24 @@ function setupPrivacy() {
   document.addEventListener('visibilitychange', async () => {
     if (document.hidden) {
       hide();
+      // D13: foi ao seletor que o próprio app abriu. Não tranca agora, mas
+      // tranca sozinho quando a janela de 2 minutos acabar.
+      if (session.S.unlocked && trip.pickerTripActive()) {
+        clearTimeout(tripTimer);
+        // Quem escolheu trancar depois de 5 min não tranca antes por causa disso.
+        tripTimer = setTimeout(() => { if (document.hidden && session.S.unlocked) session.lock('timeout'); }, Math.max(trip.pickerTripLeft(), lockAfter()));
+        return;
+      }
       // A tela de desbloqueio vem do aviso de "trancado" (uma vez só).
       if (session.S.unlocked && lockAfter() === 0) await session.lock('hidden');
       return;
     }
     const away = hiddenAt ? Date.now() - hiddenAt : 0;
     hiddenAt = 0;
-    if (session.S.unlocked && away > lockAfter()) { await session.lock('timeout'); await go('unlock'); }
+    clearTimeout(tripTimer);
+    const quickTrip = trip.pickerTripActive();
+    trip.endPickerTrip();
+    if (session.S.unlocked && !quickTrip && away > lockAfter()) { await session.lock('timeout'); await go('unlock'); }
     cover(false);
     if (session.S.unlocked) session.syncNow().catch(() => {});
   });
@@ -80,7 +92,7 @@ async function registerSW() {
 
 async function start() {
   // Só em build de teste (MP_TEST_HOOKS=1, modo plain): expõe a sessão.
-  if (CONFIG.testHooks) globalThis.__mpTest = session;
+  if (CONFIG.testHooks) { globalThis.__mpTest = session; globalThis.__mpTrip = trip; }
   setupPrivacy();
   await registerSW();
   try { await navigator.storage?.persist?.(); } catch {}
