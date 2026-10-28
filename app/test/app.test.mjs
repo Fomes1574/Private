@@ -778,12 +778,12 @@ test('câmera do app (modo máximo, padrão): foto e vídeo sem galeria nem arqu
   bia.page.on('filechooser', () => { picked++; });
   const attachSheet = async () => { await bia.page.click('[aria-label="Anexar foto ou vídeo"]'); return bia.page.$$eval('.sheet button', (b) => b.map((x) => x.textContent)); };
   const opts = await attachSheet();
-  assert.ok(opts.includes('📷 Câmera'));
+  assert.ok(opts.includes('Câmera'));
   assert.ok(!opts.some((o) => /Galeria/.test(o)), 'modo máximo: sem galeria');
   const before = await ana.page.$$eval('.msg:not(.mine) .open', (l) => l.length);
 
   // Foto: abre a câmera do app, tira, edita, envia.
-  await bia.page.click('.sheet button:text-is("📷 Câmera")');
+  await bia.page.click('.sheet button:has-text("Câmera")');
   await bia.page.waitForFunction(() => document.querySelector('.camera video')?.videoWidth > 0, null, { timeout: 15000 });
   await bia.page.click('[aria-label="Tirar foto"]');
   await bia.page.waitForSelector('.batch');
@@ -793,7 +793,7 @@ test('câmera do app (modo máximo, padrão): foto e vídeo sem galeria nem arqu
 
   // Vídeo: grava ~2 s, recodifica e envia.
   await attachSheet();
-  await bia.page.click('.sheet button:text-is("📷 Câmera")');
+  await bia.page.click('.sheet button:has-text("Câmera")');
   await bia.page.click('.camera button:text-is("Vídeo")');
   await bia.page.waitForFunction(() => document.querySelector('.camera video')?.videoWidth > 0, null, { timeout: 15000 });
   await bia.page.click('[aria-label="Gravar"]');
@@ -806,7 +806,7 @@ test('câmera do app (modo máximo, padrão): foto e vídeo sem galeria nem arqu
 
   // A câmera desliga na hora quando o app sai da tela.
   await attachSheet();
-  await bia.page.click('.sheet button:text-is("📷 Câmera")');
+  await bia.page.click('.sheet button:has-text("Câmera")');
   await bia.page.waitForSelector('.camera');
   await bia.page.evaluate(() => { Object.defineProperty(document, 'hidden', { value: true, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
   await bia.page.waitForSelector('.camera', { state: 'detached' });
