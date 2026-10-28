@@ -23,11 +23,23 @@ export const S = { client: null, store: null, clock: null, kek: null, nicknames:
 export function onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 const emit = (what) => { for (const fn of listeners) { try { fn(what); } catch (e) { console.error(e); } } };
 
+// Marcas de tempo do desbloqueio (E3): só nomes de etapa, nenhum dado.
+const mark = (name) => { try { performance.mark(`mp:${name}`); } catch {} };
 let cryptoReady;
 export const ensureCrypto = () => (cryptoReady ??= loadCrypto());
 
 export const vaultStore = { load: () => idbGet('vault'), save: (r) => idbPut('vault', r) };
 export const hasVault = async () => !!(await idbGet('vault'));
+// Enquanto a pessoa digita o PIN: carrega a cripto e abre o arquivo do banco
+// (ainda cifrado; a chave só vem depois do PIN). Nada legível é aberto aqui.
+export async function prewarm() {
+  try {
+    await ensureCrypto();
+    if (S.unlocked || S.locking) return;
+    S.store ??= new EncryptedStore();
+    await S.store.open((await idbGet('activePool')) ?? 'a');
+  } catch {}
+}
 
 function makeClient(pickleKey) {
   S.clock = new TrustedClock();
@@ -108,6 +120,7 @@ async function registerVault(lock) {
 
 // Pedido sem sessão (o app ainda está trancado). Erro de rede propaga.
 async function vaultRelease(vaultId, verifier) {
+  mark('release:start');
   const res = await fetch(`${CONFIG.api}/v1/vault/release`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ vaultId, verifier }) });
   const body = await res.json().catch(() => ({}));
   if (res.ok && body.share) return { share: body.share, needsMigration: body.needsMigration === true };
@@ -232,7 +245,9 @@ export function waitReplaced({ onReplaced, until = Date.now() + 60 * 60_000 } = 
 
 // ---------- desbloquear ----------
 export async function unlock(secret) {
+  mark('unlock:start');
   await ensureCrypto();
+  mark('unlock:crypto');
   const rec = await vaultStore.load();
   let prf = null;
   if (rec?.mode === 'passkey') prf = rec.credentialId === native.NATIVE_ID ? await native.nativeSecret() : await passkey.evaluate(rec.credentialId, vault.unb64(rec.prfSalt));
@@ -244,13 +259,16 @@ export async function unlock(secret) {
     if (e instanceof vault.VaultWipedError) await wipeEverything();
     throw e;
   } finally { prf?.fill(0); }
+  mark('unlock:vault');
   const { dek, kek } = opened;
   try {
   await openStore(dek);
+  mark('unlock:store');
   S.kek = kek;
   const pickleKey = vault.unb64(await S.store.get('pickleKey'));
   S.client = makeClient(pickleKey);
   await S.client.open();
+  mark('unlock:client');
   // Troca de aparelho em andamento (app fechado no meio): continua.
   if (await idbGet('pairPending')) {
     const info = await S.store.get('pairing');
@@ -264,6 +282,7 @@ export async function unlock(secret) {
     throw new PairingExpiredError();
   }
   await S.client.login();
+  mark('unlock:login');
   if (opened.upgrade) await upgradeVault(opened);
   if (opened.migrate) await migrateServerShare(opened);
   await completeVaultMigration().catch(() => {});
@@ -322,8 +341,13 @@ async function afterUnlock({ loggedIn = false } = {}) {
   S.nicknames = (await S.store.get('nicknames')) ?? {};
   S.rooms = (await S.store.get('rooms')) ?? {};
   S.prefs = { ...DEFAULT_PREFS, ...((await S.store.get('prefs')) ?? {}) };
-  await S.client.refreshDirectory();
-  await syncNow();
+  // E3: a lista aparece já com o que está no aparelho; diretório e
+  // sincronização seguem por trás (nessa ordem: o cliente serializa) e a tela
+  // se atualiza com o aviso "synced". Enviar sempre confere as chaves antes.
+  const client = S.client;
+  client.refreshDirectory().then(() => mark('unlock:directory'), (e) => console.error('diretório', e?.message))
+    .then(() => (S.client === client ? syncNow() : null))
+    .then(() => mark('unlock:sync'), (e) => console.error('sincronização falhou', e?.message));
   connectLive();
   // Token novo ou permissão retirada nas configurações: acerta no servidor.
   // D15: o app não usa notificações. Quem tinha ligado é desligado aqui
@@ -360,6 +384,7 @@ export function lock(reason = 'manual') {
   S.rooms = {};
   S.prefs = {};
   viewCache.clear();
+  lastRoomSnap = null;
   directPending.clear();
   clearVisuals();
   disconnectLive();
@@ -559,7 +584,19 @@ export async function listRooms() {
   const ids = res.rooms.filter((r) => r !== CIRCLE_ROOM_ID);
   for (const [id, r] of Object.entries(S.rooms)) if (r?.left && !r.deleted && !ids.includes(id)) ids.push(id);
   for (const id of ids) if (!S.rooms[id]) S.rooms[id] = {};
-  return Promise.all(ids.map((id) => roomView(id)));
+  const views = await Promise.all(ids.map((id) => roomView(id)));
+  // E3: guarda a lista (cifrada, no banco do aparelho) para a próxima abertura
+  // desenhar sem esperar a rede. Só grava quando mudou.
+  const snap = Object.fromEntries(views.filter(Boolean).map((v) => [v.roomId, v]));
+  const json = JSON.stringify(snap);
+  if (json !== lastRoomSnap && S.unlocked) { lastRoomSnap = json; await S.store.put('roomViews', snap).catch(() => {}); }
+  return views;
+}
+let lastRoomSnap = null;
+// Lista da última abertura, para desenhar na hora; a tela pede a atual logo depois.
+export async function cachedRooms() {
+  const saved = await S.store.get('roomViews').catch(() => null);
+  return saved ? Object.values(saved) : null;
 }
 
 const directPending = new Map();
@@ -684,6 +721,8 @@ export async function deleteRoomForMe(roomId) {
   S.rooms[roomId] = { deleted: true, deletedAt: now(), ...(prev.left ? { left: true } : {}) };
   await S.store.put('rooms', S.rooms);
   viewCache.delete(roomId);
+  const snap = (await S.store.get('roomViews')) ?? {};
+  if (snap[roomId]) { delete snap[roomId]; await S.store.put('roomViews', snap); lastRoomSnap = null; }
   scheduleRotate(); // nome e foto antigos saem do arquivo do banco
 }
 export const isDeleted = (roomId, lastAt = 0) => !!S.rooms[roomId]?.deleted && lastAt <= (S.rooms[roomId].deletedAt ?? 0);

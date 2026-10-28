@@ -107,22 +107,31 @@ export async function chatsScreen(go) {
     list.replaceChildren(...(shown.length ? shown.map(row) : [h('li', { class: 'empty', text: showArchived ? 'Nenhuma conversa arquivada.' : 'Nenhuma conversa ainda. Busque alguém pelo apelido.' })]));
   }
 
-  const render = async () => {
+  // E3: a primeira pintura usa a lista guardada da última abertura; a lista
+  // atual chega logo depois. Um desenho mais antigo nunca cobre um mais novo.
+  let started = 0, drawn = 0;
+  const render = async ({ cached = false } = {}) => {
+    const mine = ++started;
     await drawApproval();
-    const views = (await session.listRooms()).filter(Boolean);
-    const next = [];
-    for (const v of views) {
+    const saved = cached ? await session.cachedRooms() : null;
+    const views = (saved ?? await session.listRooms()).filter(Boolean);
+    // E3: as conversas são abertas juntas, não uma depois da outra.
+    const next = await Promise.all(views.map(async (v) => {
       const r = await S.client.view(v.roomId);
       const last = r.render.at(-1);
       const at = last?.acceptedAt ?? 0;
       // D3: excluída só aparece de novo com mensagem nova.
-      next.push({ v, last, at, render: r.render, unread: session.unreadCount(v.roomId, r.render), hidden: session.isDeleted(v.roomId, at) });
-    }
+      return { v, last, at, render: r.render, unread: session.unreadCount(v.roomId, r.render), hidden: session.isDeleted(v.roomId, at) };
+    }));
     // Fixadas primeiro; depois a conversa com a mensagem mais recente.
     next.sort((a, b) => flag(b.v, 'pinned') - flag(a.v, 'pinned') || b.at - a.at);
+    if (mine < drawn) return !!saved;
+    drawn = mine;
     rows = next;
     draw();
+    try { performance.mark(cached ? 'mp:list' : 'mp:list:fresh'); } catch {}
+    return !!saved;
   };
-  await render().catch((e) => toast(`Não deu para carregar: ${e.message}`));
+  if (await render({ cached: true }).catch((e) => toast(`Não deu para carregar: ${e.message}`))) render().catch(() => {});
   return session.onChange((w) => { if (w === 'synced') render().catch(() => {}); });
 }

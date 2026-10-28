@@ -152,6 +152,10 @@ async function migrateV1(db) {
 }
 
 let staged = null; // { name, db, key, idx } esperando a troca
+// E3: prazo das mensagens já abertas, só na memória do worker e só com o
+// banco destrancado (sai ao trancar ou trocar de chave). Assim a limpeza das
+// vencidas decifra só o que é novo; no arquivo o prazo continua cifrado.
+const expiry = new Map(); // hex(id cego) -> expiresAt
 
 const ops = {
   async open({ name }) {
@@ -160,11 +164,12 @@ const ops = {
     return true;
   },
   async setKey(k) {
+    expiry.clear();
     dek = k;
     idx = await loadIdx(needDb(), k);
     return { migrated: await migrateV1(needDb()) };
   },
-  lock() { dek = null; idx = null; return true; },
+  lock() { dek = null; idx = null; expiry.clear(); return true; },
 
   async kvGet(k) {
     const kb = await blind(`kv/${k}`);
@@ -183,6 +188,7 @@ const ops = {
     const idb = await blind(`m/${m.msgId}`), roomb = await blind(`r/${m.room}`);
     const { iv, ct } = await seal(msgAad(idb, roomb), m);
     needDb().exec({ sql: 'INSERT OR REPLACE INTO messages(id, room, iv, ct) VALUES (?, ?, ?, ?)', bind: [idb, roomb, iv, ct] });
+    expiry.set(hex(idb), m.expiresAt ?? 0);
     return true;
   },
   async getMessage(id) {
@@ -194,27 +200,28 @@ const ops = {
     const blinded = [];
     for (const id of ids) blinded.push(await blind(`m/${id}`));
     needDb().transaction((tx) => { for (const b of blinded) tx.exec({ sql: 'DELETE FROM messages WHERE id = ?', bind: [b] }); });
+    for (const b of blinded) expiry.delete(hex(b));
     return true;
   },
   async roomMessages(room) {
     const roomb = await blind(`r/${room}`);
     const rows = needDb().selectObjects('SELECT id, room, iv, ct FROM messages WHERE room = ?', [roomb]);
-    const out = [];
-    for (const r of rows) {
-      try { out.push(await unseal(msgAad(r.id, r.room), r.iv, r.ct)); } catch { /* ilegível: não mostra */ }
-    }
+    // E3: decifra em paralelo (a WebCrypto usa vários núcleos).
+    const out = (await Promise.all(rows.map((r) => unseal(msgAad(r.id, r.room), r.iv, r.ct).catch(() => null)))).filter(Boolean); // ilegível: não mostra
     // A ordem vem de dentro da cifra (não há data em claro no arquivo).
     return out.sort((a, b) => (a.acceptedAt ?? 0) - (b.acceptedAt ?? 0) || (a.msgId < b.msgId ? -1 : 1));
   },
   // Vencidas: o prazo está dentro da cifra; abre, confere e apaga.
   async purgeExpired(now) {
     const db = needDb();
-    const dead = [];
-    for (const r of db.selectObjects('SELECT id, room, iv, ct FROM messages')) {
-      let m;
-      try { m = await unseal(msgAad(r.id, r.room), r.iv, r.ct); } catch { dead.push(r.id); continue; } // ilegível também sai
-      if (m.expiresAt > 0 && m.expiresAt <= now) dead.push(r.id);
-    }
+    const rows = db.selectObjects('SELECT id FROM messages').map((r) => ({ id: r.id, h: hex(r.id) }));
+    const fresh = rows.filter((r) => !expiry.has(r.h)).map((r) => ({ ...r, ...db.selectObject('SELECT room, iv, ct FROM messages WHERE id = ?', [r.id]) }));
+    const opened = await Promise.all(fresh.map((r) => unseal(msgAad(r.id, r.room), r.iv, r.ct).catch(() => null)));
+    // Ilegível também sai (fica marcado como vencido).
+    fresh.forEach((r, i) => expiry.set(r.h, opened[i] ? opened[i].expiresAt ?? 0 : -1));
+    const gone = (e) => e === -1 || (e > 0 && e <= now);
+    const dead = rows.filter((r) => gone(expiry.get(r.h))).map((r) => r.id);
+    for (const r of rows) if (gone(expiry.get(r.h))) expiry.delete(r.h);
     if (dead.length) db.transaction((tx) => { for (const b of dead) tx.exec({ sql: 'DELETE FROM messages WHERE id = ?', bind: [b] }); });
     return dead.length;
   },
@@ -256,6 +263,7 @@ const ops = {
     dek = staged.key;
     idx = staged.idx;
     staged = null;
+    expiry.clear(); // ids cegos mudam com a chave nova
     if (old) {
       try { old.db.close(); } catch {}
       // A troca já foi confirmada no cofre. Falha na limpeza antiga não
@@ -292,7 +300,7 @@ const ops = {
   },
 
   async wipe() {
-    dek = null; idx = null;
+    dek = null; idx = null; expiry.clear();
     if (active) { try { active.db.close(); } catch {} }
     if (staged) { try { staged.db.close(); } catch {} }
     for (const p of pools.values()) { try { await p.removeVfs(); } catch {} }

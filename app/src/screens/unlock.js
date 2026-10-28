@@ -14,6 +14,7 @@ export async function unlockScreen(go, { again = false } = {}) {
   const pk = rec.mode === 'passkey';
   const input = h('input', { id: 'secret', type: 'password', inputmode: pk ? 'numeric' : 'text', autocomplete: 'current-password' });
   const btn = h('button', { class: 'block', text: 'Desbloquear' });
+  session.prewarm();
   const left = h('p', { class: 'muted', text: 'Quem conta os erros é o servidor: na 5ª tentativa errada seguida, os dados deste aparelho viram ilegíveis para sempre.' });
   mount(h('main', { class: 'center' },
     h('div', { class: 'logo', 'aria-hidden': 'true' }),
@@ -23,6 +24,7 @@ export async function unlockScreen(go, { again = false } = {}) {
       const problem = pk ? (/^\d{6,12}$/.test(input.value) ? null : 'O PIN tem de 6 a 12 números.') : (input.value.trim() ? null : 'Digite a frase-senha.');
       if (problem) return toast(problem);
       btn.disabled = true;
+      btn.textContent = 'Abrindo…';
       const secret = input.value;
       input.value = '';
       try {
@@ -36,6 +38,7 @@ export async function unlockScreen(go, { again = false } = {}) {
         go('chats');
       } catch (err) {
         btn.disabled = false;
+        btn.textContent = 'Desbloquear';
         // Destruído (erros, coação, emergência ou prazo): já foi apagado em
         // silêncio; aparece só o app novo, sem aviso.
         if (err instanceof VaultWipedError) return go('welcome');
