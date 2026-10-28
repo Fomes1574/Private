@@ -459,6 +459,7 @@ let syncing = null, again = false;
 export function syncNow() {
   if (!S.unlocked || S.locking) return Promise.resolve();
   if (syncing) { again = true; return syncing; }
+  const client = S.client;
   return (syncing = (async () => {
     try {
       do {
@@ -480,6 +481,9 @@ export function syncNow() {
         await maybeAnnounce();
         emit('synced');
       } while (again && S.unlocked);
+    } catch (e) {
+      // Trancou no meio: não é falha (a próxima abertura sincroniza de novo).
+      if (S.unlocked && !S.locking && S.client === client) throw e;
     } finally { syncing = null; again = false; }
   })());
 }

@@ -63,6 +63,10 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
     if (!text) return;
     if (privateQuote) { text = `> ${privateQuote.name}: ${privateQuote.text}\n${text}`.slice(0, 4000); privateQuote = null; replyBar.hidden = true; replyBar.replaceChildren(); }
     input.value = '';
+    // O rascunho sai já no envio (a mensagem fica na fila durável); se falhar,
+    // volta para a caixa e para o rascunho.
+    clearTimeout(draftTimer);
+    session.setDraft(roomId, '').catch(() => {});
     // Aparece na hora como "enviando…" (em rede lenta, como Tor, a ida e volta
     // demora); some ao confirmar ou volta para a caixa se falhar.
     const pending = h('li', { class: 'msg mine pending' }, h('span', { class: 'text', text }), h('span', { class: 'meta' }, h('span', { 'aria-label': 'enviando', text: '🕓' })));
@@ -81,7 +85,7 @@ export async function chatScreen(go, { roomId, attachment = null, replyFrom = nu
       // F10: sem rede, a mensagem já está na fila e vai sozinha; voltar o
       // texto para a caixa faria a pessoa mandar de novo (duplicada).
       if (e.code === 'pending' || e.code === 'send_failed') { clearTimeout(draftTimer); await session.setDraft(roomId, ''); setReply(null); toast('Sem conexão: a mensagem ficou na fila (🕓) e vai sozinha quando a rede voltar.'); await render(); return; }
-      input.value = text; toast(e.code === 'gone' ? 'Conversa encerrada.' : `Não enviou: ${errText(e)}`);
+      input.value = text; session.setDraft(roomId, text).catch(() => {}); toast(e.code === 'gone' ? 'Conversa encerrada.' : `Não enviou: ${errText(e)}`);
     }
   };
   const setReply = (m) => {
