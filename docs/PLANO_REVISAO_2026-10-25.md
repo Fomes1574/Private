@@ -3,7 +3,7 @@
 Data: 25/10/2026  
 Repositório: [Fomes1574/Private](https://github.com/Fomes1574/Private), branch `ccr-de59a90b-gr4vug`  
 Código analisado: commit `03fa5d0` (o código é idêntico em `9965770`; só a documentação mudou)  
-Estado: **A1 (GPT, revisada), A2, B, C e D implementadas** em 25/10/2026 no branch `ccr-de59a90b-gr4vug`, com testes automáticos. Ver `ENTREGA_A1_2026-10-25.md`, `ENTREGA_A2_B_C_D_2026-10-25.md` e ADR 0016. Liberação depende de CI, deploy da API (migração 0003), APK novo e testes em celular (seção 9). D5 (aliases) segue adiada.
+Estado: **A1 (GPT, revisada), A2, B, C e D implementadas** em 25/10/2026 no branch `ccr-de59a90b-gr4vug`, com testes automáticos. Ver `ENTREGA_A1_2026-10-25.md`, `ENTREGA_A2_B_C_D_2026-10-25.md` e ADR 0016. Publicadas em 27/10/2026 (API, PWA v2, APK 1.0.105; ver `ACOMPANHAMENTO_2026-10-27.md`). Em 28/10/2026 o proprietário aprovou as entregas E1 (galeria) e E2 (disfarce, D5), seção 1.3.
 
 | Versão | Autor | O que trouxe |
 |---|---|---|
@@ -50,7 +50,7 @@ Legenda de evidência: **verificado no código** (lido, sem rodar no celular), *
 | D2 | **Contador de não lidas** (só no aparelho, sem recibo para ninguém) e **prévia da última mensagem** na lista, com opção "Mostrar prévia na lista" em Ajustes. Mídia de ver uma vez nunca aparece em prévia |
 | D3 | Separar **"Limpar conversa"** de **"Excluir conversa"**. As duas valem **só no aparelho de quem faz**: a outra pessoa continua com tudo até vencer (regra do proprietário, igual ao WhatsApp) |
 | D4 | Envio de **1 a 5 fotos** de uma vez, com ver uma vez por foto. Vem **depois** das correções A1/A2 |
-| D5 | Nome e ícone disfarçados (aliases): **adiado** |
+| D5 | Nome e ícone disfarçados (aliases): adiado em 25/10; **aprovado em 28/10** como disfarce "Cobrinha" (seção 1.3) |
 
 ### 1.2 Decididas pela regra "funcionalidade do WhatsApp, segurança nossa" (25/10/2026)
 
@@ -64,6 +64,16 @@ D6, D7, D9 e D10 seguem o WhatsApp porque são funcionalidades. D8 e D11 são pr
 | D9 | Fixar conversas: sem limite (hoje) ou até 3, como no WhatsApp? | **Até 3, como no WhatsApp** |
 | D10 | "Marcar como não lida" na lista, como no WhatsApp? | **Sim**, só local |
 | D11 | Teclado anônimo no Android (o teclado não aprende nem guarda o que é digitado no app)? | **Sim**, ligado por padrão (S5) |
+
+### 1.3 Decididas no primeiro uso real (28/10/2026)
+
+Relato do proprietário com o APK 1.0.105: Galeria abriu os arquivos do aparelho, pediu o PIN na volta, a foto não carregou e pareceu ir como anexo. Causas no código: o seletor é o de documentos (`ACTION_OPEN_DOCUMENT`); o app tranca antes de abrir o seletor (F17, `lockAfter` 0); depois do PIN o app vai para a lista e a foto fica esperando no cartão "Continuar com o anexo", que vence em 5 min.
+
+| ID | Decisão |
+|---|---|
+| D12 | **Galeria como no WhatsApp.** Seletor de fotos do Android (Photo Picker, `ACTION_PICK_IMAGES`): grade só com fotos e vídeos, até 5, sem permissão de arquivos e sem biblioteca do Google; o seletor atual fica só para Android sem Photo Picker. Ao voltar, abre **direto na conversa**, na tela de preparar (editar, "1", HD, legenda; vídeo com normal ou ver uma vez). Foto e vídeo nunca vão como documento. Erros claros (formato não aceito, foto só na nuvem). iPhone: conferir que a Galeria abre só fotos e vídeos |
+| D13 | **Opção A: sem PIN na volta do seletor aberto pelo próprio app, em até 2 minutos.** Cobertura de privacidade e bloqueio de print continuam; passou de 2 min, ou saiu do app por outro motivo, tranca como hoje. Risco aceito: quem pegar o celular nesses 2 min entra sem PIN |
+| D5 | **Aprovada (antes adiada): disfarce "Cobrinha", ligado nos Ajustes por cada pessoa.** Ao abrir, um jogo da cobrinha que funciona de verdade, feito no próprio app, sem biblioteca. Entrada: **pausar o jogo e segurar 3 s no "Recorde"**, depois a senha; senha errada volta ao jogo sem mensagem e conta para o bloqueio. Ao trancar, volta ao jogo. Android: ícone e nome trocam pelo app (activity-alias), sem reinstalar; avisar que o atalho da tela inicial pode sumir. O **nome fixo do app no sistema** (Configurações → Apps, topo das notificações) passa a ser **"Cobrinha" para todos**. Notificações disfarçadas. iPhone: ícone e nome só mudam removendo e adicionando de novo à Tela de Início (a confirmar em iPhone). O pacote interno (`com.mensageiro.privado`) e as permissões continuam visíveis em Configurações: o disfarce engana uma olhada, não uma perícia |
 
 ---
 
@@ -446,7 +456,9 @@ Pessoas removidas não aparecem (N2). Exige trocar a regra V7-006 para "busca lo
 | **A2 — privacidade** | S1 + S8 (aviso de chave na conversa, verificado, QR), S3 (círculo assinado), F04, F05, F16, F07, F09, S2 (correção, se confirmado), S5 (teclado anônimo), **S12 (destruição por chave da parte do servidor)**, S13 (teste do alarme da mídia), F13, F18, N2, N3 | Teste de servidor malicioso trocando chave e incluindo membro (V7-022) |
 | **B — conversas** | D3 (limpar/excluir/sair/excluir grupo), F03, D1 (busca), D2 + D10 (prévia, contador, não lida), D7 (editar 15 min), D9 (fixar 3), D8 (aviso iPhone), funções da conversa 2.2 b.1–b.10 (segurar a mensagem, deslizar para responder, selecionar várias, separadores de data, gestos do áudio, ✓ de enviada, formatação, @menção) | Nada ressurge depois de sincronizar ou reiniciar; liderança mantida |
 | **C — anexos e extras** | D4 (lote de 5), F10, F11, F15, S7 (tamanho arredondado), funções 2.2 b.7 e b.11–b.17 (áudio de ver uma vez, fixar mensagem, favoritas, mídia da conversa, busca global, responder em particular, descrição do grupo, papel de parede) | 62 combinações de modo e falhas parciais testadas |
-| **D** | Funções 2.2 b.18–b.21 (enquete, vídeo redondo, conversa comigo, foto HD); D5 (aliases), se for aprovado um dia | — |
+| **D** | Funções 2.2 b.18–b.21 (enquete, vídeo redondo, conversa comigo, foto HD) | — |
+| **E1 — galeria** | D12 + D13 (seção 1.3). Atualizar os cenários 11 e 21 de `TESTE_EM_CELULAR.md` | Teste no celular: escolher 1 e 5 fotos e um vídeo; voltar em menos e em mais de 2 min |
+| **E2 — disfarce** | D5 (seção 1.3) | Teste no celular: ligar/desligar, ícone, notificação, gesto, senha errada, trancar |
 
 Cada entrega deve trazer o teste automático do caminho corrigido e a documentação atualizada. Nada vira "testado no celular" sem ter sido rodado num celular de verdade, com versão do APK, commit e aparelho anotados.
 
