@@ -74,6 +74,23 @@ Relato do proprietário com o APK 1.0.105: Galeria abriu os arquivos do aparelho
 | D12 | **Galeria como no WhatsApp.** Seletor de fotos do Android (Photo Picker, `ACTION_PICK_IMAGES`): grade só com fotos e vídeos, até 5, sem permissão de arquivos e sem biblioteca do Google; o seletor atual fica só para Android sem Photo Picker. Ao voltar, abre **direto na conversa**, na tela de preparar (editar, "1", HD, legenda; vídeo com normal ou ver uma vez). Foto e vídeo nunca vão como documento. Erros claros (formato não aceito, foto só na nuvem). iPhone: conferir que a Galeria abre só fotos e vídeos |
 | D13 | **Opção A: sem PIN na volta do seletor aberto pelo próprio app, em até 2 minutos.** Cobertura de privacidade e bloqueio de print continuam; passou de 2 min, ou saiu do app por outro motivo, tranca como hoje. Risco aceito: quem pegar o celular nesses 2 min entra sem PIN |
 | D5 | **Aprovada (antes adiada): disfarce "Cobrinha", ligado nos Ajustes por cada pessoa.** Ao abrir, um jogo da cobrinha que funciona de verdade, feito no próprio app, sem biblioteca. Entrada: **pausar o jogo e segurar 3 s no "Recorde"**, depois a senha; senha errada volta ao jogo sem mensagem e conta para o bloqueio. Ao trancar, volta ao jogo. Android: ícone e nome trocam pelo app (activity-alias), sem reinstalar; avisar que o atalho da tela inicial pode sumir. O **nome fixo do app no sistema** (Configurações → Apps, topo das notificações) passa a ser **"Cobrinha" para todos**. Notificações disfarçadas. iPhone: ícone e nome só mudam removendo e adicionando de novo à Tela de Início (a confirmar em iPhone). O pacote interno (`com.mensageiro.privado`) e as permissões continuam visíveis em Configurações: o disfarce engana uma olhada, não uma perícia |
+| D14 | **Prévia na lista obrigatória para todos.** Sai a opção "Mostrar prévia na lista". Ver uma vez continua sem prévia |
+| D15 | **Sem notificações**, no Android e no iPhone. Sai a seção "Notificações" dos Ajustes e o registro de Web Push; o código de push do servidor deixa de ser usado |
+| D16 | **Sai o guardião.** Perdeu o celular: no celular novo, "Perdi meu celular" → a pessoa digita o PIN → a administradora aprova lendo o código do celular novo (pessoalmente ou por chamada de vídeo) → todos veem o aviso de troca de chave. O celular antigo é desligado da conta na hora. As conversas antigas não voltam (as chaves ficaram no celular perdido). A confirmar com o proprietário: manter ou não a espera de 24 h. Ressalva técnica: o PIN conferido pelo servidor precisa de um verificador próprio, com limite de tentativas, separado do cofre do aparelho |
+| — | **Pessoas do círculo:** como hoje, só a administradora vê o painel de pessoas, confirma, congela e remove. Os outros membros veem só os contatos para conversar |
+
+Achado ao revisar (28/10): o guardião que não é a administradora **não tem botão** para autorizar a recuperação (a opção só existe no painel da administradora). Recuperação só funcionava quando a própria administradora era o guardião. D16 elimina o problema.
+
+### 1.4 Pedidos do proprietário em 28/10/2026 (fase de projeto)
+
+| ID | Pedido | Situação no código |
+|---|---|---|
+| P1 | Desbloqueio demora para carregar | Depois do PIN, tudo roda em fila: Argon2id (64 MiB, na linha principal), parte do servidor, banco, login, diretório e sincronização, e só então a lista aparece. Pesquisar e medir (entrega E3) |
+| P2 | Borracha no editor de foto | Não existe: hoje só desenhar, girar e cortar |
+| P3 | Câmera sem opção de ver uma vez | A opção existe, mas é um botão "1" pequeno no meio de outros botões de texto. Colocar o ① ao lado da legenda, como no WhatsApp |
+| P4 | Ícones de Galeria e Documento são riscos estranhos | São os caracteres ▧ e ▤. Trocar por ícones desenhados (SVG próprio, sem biblioteca) |
+| P5 | Menos texto, mais minimalista | Ajustes tem parágrafos em quase todas as seções. Sai "Fotos íntimas"; explicações viram uma linha ou um "?" |
+| P6 | Nova interface com animações | Proposta visual de 28/10 (lista, conversa com anexar, preparar foto com borracha e ①, ajustes) |
 
 ---
 
@@ -458,7 +475,10 @@ Pessoas removidas não aparecem (N2). Exige trocar a regra V7-006 para "busca lo
 | **C — anexos e extras** | D4 (lote de 5), F10, F11, F15, S7 (tamanho arredondado), funções 2.2 b.7 e b.11–b.17 (áudio de ver uma vez, fixar mensagem, favoritas, mídia da conversa, busca global, responder em particular, descrição do grupo, papel de parede) | 62 combinações de modo e falhas parciais testadas |
 | **D** | Funções 2.2 b.18–b.21 (enquete, vídeo redondo, conversa comigo, foto HD) | — |
 | **E1 — galeria** | D12 + D13 (seção 1.3). Atualizar os cenários 11 e 21 de `TESTE_EM_CELULAR.md` | Teste no celular: escolher 1 e 5 fotos e um vídeo; voltar em menos e em mais de 2 min |
+| **E1+ — ajustes rápidos** | D14, D15, P2 (borracha), P3 (① na câmera), P4 (ícones), P5 (textos), D16 (sem guardião) | Entram no mesmo APK da E1 |
+| **E3 — desempenho** | P1. Medir cada etapa do desbloqueio no celular. Hipóteses: mostrar a lista do banco local logo após abrir o cofre e sincronizar em segundo plano; diretório e sincronização em paralelo; Argon2id em Worker (a tela não trava; o custo não muda); carregar editor, PDF e câmera só quando usados. **Proibido** baixar os parâmetros do Argon2id ou tirar verificações | Tempo antes e depois, no mesmo celular; todas as suítes passando |
 | **E2 — disfarce** | D5 (seção 1.3) | Teste no celular: ligar/desligar, ícone, notificação, gesto, senha errada, trancar |
+| **E4 — nova interface** | P6: tema, ícones, telas e animações curtas (abrir conversa deslizando, folha de anexar subindo, mensagem enviada entrando), respeitando "reduzir movimento" | Testes de interface atualizados; nenhuma função perdida |
 
 Cada entrega deve trazer o teste automático do caminho corrigido e a documentação atualizada. Nada vira "testado no celular" sem ter sido rodado num celular de verdade, com versão do APK, commit e aparelho anotados.
 
