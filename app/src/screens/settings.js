@@ -106,7 +106,7 @@ function disguiseSection() {
   const input = h('input', { id: 'disguise', type: 'checkbox', onchange: async (e) => {
     const on = e.target.checked;
     const how = 'Para entrar: pause a partida, segure 3 segundos no Recorde e digite seu PIN.';
-    const icon = native ? 'O nome e o ícone mudam na tela inicial. Se o ícone sumir, pegue de novo na lista de apps.' : 'No iPhone, apague o ícone da tela de início e adicione de novo pelo Safari para trocar nome e ícone.';
+    const icon = native ? 'O nome e o ícone mudam na tela inicial. Depois, feche o app nos recentes e abra pelo ícone novo. Se o ícone sumir, pegue de novo na lista de apps.' : 'No iPhone, apague o ícone da tela de início e adicione de novo pelo Safari para trocar nome e ícone.';
     if (on && !await confirmSheet(`O app vai abrir no jogo Hungry Snake. ${how} ${icon}`, 'Ligar')) { e.target.checked = false; return; }
     try { await disguise.setOn(on); } catch (err) { e.target.checked = !on; return toast(`Não deu: ${errText(err)}`); }
     toast(on ? 'Disfarce ligado. Vale no próximo bloqueio.' : 'Disfarce desligado.');

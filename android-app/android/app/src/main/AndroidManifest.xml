@@ -22,9 +22,9 @@
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:usesCleartextTraffic="false"
-        android:icon="@drawable/pacto_talk_logo"
+        android:icon="@drawable/snake_icon"
         android:label="@string/system_name"
-        android:roundIcon="@drawable/pacto_talk_logo"
+        android:roundIcon="@drawable/snake_icon"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
@@ -32,6 +32,7 @@
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
             android:label="@string/system_name"
+            android:icon="@drawable/snake_icon"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
             android:exported="true">
@@ -39,8 +40,9 @@
 
         <!-- E2: duas entradas na tela inicial para a mesma tela; o disfarce
              (Ajustes) liga uma e desliga a outra (DisguisePlugin). O nome
-             do app no sistema (Configurações, desinstalar) é sempre o do
-             disfarce, para não entregar o app quando ele está ligado. -->
+             e o ícone do app no sistema (Configurações, desinstalar, janela
+             da digital) são sempre os do disfarce, para não entregar o app
+             quando ele está ligado. Só a entrada .PactoTalk mostra o Pacto. -->
         <activity-alias
             android:name=".PactoTalk"
             android:targetActivity=".MainActivity"

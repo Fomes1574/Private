@@ -20,6 +20,8 @@ BADGE=$("$BT/aapt2" dump badging "$APK")
 echo "$BADGE" | grep -q "^package: name='$PKG' " || fail "pacote diferente de $PKG"
 [ -z "$WANT_VC" ] || echo "$BADGE" | grep -q "versionCode='$WANT_VC'" || fail "versionCode diferente de $WANT_VC"
 echo "$BADGE" | grep -q 'application-debuggable' && fail "APK depurável"
+# E2: nome do app no sistema é sempre o do disfarce (Configurações, janela da digital).
+echo "$BADGE" | grep -q "^application-label:'Hungry Snake'" || fail "nome do app no sistema não é Hungry Snake"
 XML=$("$BT/aapt2" dump xmltree --file AndroidManifest.xml "$APK")
 echo "$XML" | grep -Eq 'android:allowBackup.*=false' || fail "backup não está desligado"
 echo "$XML" | grep -Eq 'android:usesCleartextTraffic.*=false' || fail "tráfego em claro não está desligado"

@@ -84,7 +84,7 @@ public class BiometricSecretPlugin extends Plugin {
     private void prompt(PluginCall call, Cipher cipher, boolean first, String stored) {
         getActivity().runOnUiThread(() -> {
             BiometricPrompt.PromptInfo info = new BiometricPrompt.PromptInfo.Builder()
-                    .setTitle("Desbloquear")
+                    .setTitle("Confirmar")
                     .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
                     .setNegativeButtonText("Cancelar")
                     .build();

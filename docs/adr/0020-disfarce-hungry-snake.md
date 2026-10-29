@@ -40,7 +40,7 @@ O banco só abre depois do PIN, então o disfarce usa o IndexedDB simples (`mp-a
 ## Limites (o disfarce engana uma olhada, não uma perícia)
 
 - O pacote `com.pactotalk.app`, as permissões (câmera, microfone, biometria) e o tamanho do app aparecem em Configurações → Apps. Trocar o pacote exigiria reinstalar e parear de novo; fica fora.
-- A biometria (Face ID/digital) aparece depois do código, com o título "Desbloquear".
+- A digital aparece para **qualquer** código com 6 números ou mais, certo ou errado. Ela é uma das três partes da chave do cofre (digital + PIN + parte do servidor) e precisa ser lida antes de saber se o código está certo; tirar isso enfraqueceria a proteção. O que a janela mostra foi ajustado (29/10, 1.0.108): título "Confirmar", e o nome e o ícone do app no sistema são sempre os do Hungry Snake (aplicação, `MainActivity` e a descrição da tarefa aberta). Só a entrada `.PactoTalk` da tela inicial mostra o Pacto. Quem liga o disfarce deve fechar o app nos recentes e abrir pelo ícone novo. No HyperOS (Redmi 15C) a janela da digital mostrava o nome e o ícone do Pacto Talk; conferir de novo no aparelho.
 - Quem descobrir o gesto vê a tela do código; sem o PIN, 4 erros pausam e o 5º apaga.
 
 ## Testes

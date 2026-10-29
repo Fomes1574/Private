@@ -24,6 +24,7 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         if (Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(false);
+        DisguisePlugin.describeTask(this);
 
         WebView web = getBridge().getWebView();
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {

@@ -1,5 +1,7 @@
 package com.mensageiro.privado;
 
+import android.app.Activity;
+import android.app.ActivityManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.pm.PackageManager;
@@ -17,6 +19,21 @@ public class DisguisePlugin extends Plugin {
     static final String PLAIN = "com.mensageiro.privado.PactoTalk";
     static final String SNAKE = "com.mensageiro.privado.HungrySnake";
 
+    static boolean isOn(Context ctx) {
+        return ctx.getPackageManager().getComponentEnabledSetting(new ComponentName(ctx, SNAKE)) == PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
+    }
+
+    // Nome da tarefa aberta (recentes e janelas do sistema que perguntam
+    // "qual app é este"): segue o disfarce, mesmo que o app tenha sido aberto
+    // pelo ícone antigo antes da troca.
+    static void describeTask(Activity a) {
+        if (a == null) return;
+        try {
+            String label = a.getString(isOn(a) ? R.string.system_name : R.string.title_activity_main);
+            a.setTaskDescription(new ActivityManager.TaskDescription(label));
+        } catch (Exception ignored) {}
+    }
+
     private void enable(String name, boolean on) {
         Context ctx = getContext();
         ctx.getPackageManager().setComponentEnabledSetting(new ComponentName(ctx, name),
@@ -31,6 +48,8 @@ public class DisguisePlugin extends Plugin {
             // Liga a nova antes de desligar a antiga: nunca fica sem ícone.
             enable(on ? SNAKE : PLAIN, true);
             enable(on ? PLAIN : SNAKE, false);
+            Activity activity = getActivity();
+            if (activity != null) activity.runOnUiThread(() -> describeTask(activity));
             JSObject r = new JSObject();
             r.put("on", on);
             call.resolve(r);
@@ -41,10 +60,8 @@ public class DisguisePlugin extends Plugin {
 
     @PluginMethod
     public void get(PluginCall call) {
-        Context ctx = getContext();
-        int state = ctx.getPackageManager().getComponentEnabledSetting(new ComponentName(ctx, SNAKE));
         JSObject r = new JSObject();
-        r.put("on", state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED);
+        r.put("on", isOn(getContext()));
         call.resolve(r);
     }
 }
