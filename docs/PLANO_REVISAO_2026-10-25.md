@@ -92,6 +92,21 @@ Achado ao revisar (28/10): o guardião que não é a administradora **não tem b
 | P5 | Menos texto, mais minimalista | Ajustes tem parágrafos em quase todas as seções. Sai "Fotos íntimas"; explicações viram uma linha ou um "?" |
 | P6 | Nova interface com animações | Proposta visual de 28/10 (lista, conversa com anexar, preparar foto com borracha e ①, ajustes) |
 
+### 1.5 Decidida em 29/10/2026 (fase de projeto, nada implementado)
+
+| ID | Decisão |
+|---|---|
+| D17 | **Tor dentro do APK (Android), opção "Rede protegida" nos Ajustes, ligada por padrão.** Esconde o IP da Cloudflare e do nosso servidor sem instalar o Orbot. Custo medido em `REDE_TOR_VPN.md`: texto ~1,6 s, foto 400 KB ~4 s, vídeo longo em minutos; APK maior e mais bateria. iPhone (PWA) não consegue pelo código: lá continua VPN sem registros ou Orbot, por conta de cada pessoa |
+
+A resolver no projeto do D17, antes de qualquer código:
+- Biblioteca: Tor em C empacotado (Guardian Project `tor-android`) ou Arti (Rust). Licença, tamanho no APK, versão fixada com pelo menos 2 semanas, sem serviços do Google.
+- Como o WebView passa a usar o Tor: proxy SOCKS local para todo pedido do app (API, WebSocket, mídia), com o nome do servidor resolvido dentro do Tor (sem consulta de DNS fora dele). Provar com teste que nada sai direto.
+- Falha fechada: com a opção ligada e o Tor ainda conectando ou caído, o app espera ("Conectando com proteção…") e **não** cai para a conexão direta.
+- Pontes (obfs4 ou Snowflake) para a operadora não ver que é Tor: entram juntas ou depois?
+- Conferir se a Cloudflare aceita pedidos vindos de saídas do Tor para o `workers.dev` (desafios ou bloqueios).
+- Desligar a opção: aviso curto de que o IP passa a aparecer; religar a qualquer momento.
+- Teste no emulador do CI: com a opção ligada, nenhum pedido sai fora do Tor.
+
 ---
 
 ## 2. Regra: funcionalidades do WhatsApp, segurança nossa
