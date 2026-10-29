@@ -402,7 +402,7 @@ input[type=file]::file-selector-button { background: #262B33; color: var(--text)
 .sn-sheet .sn-tile { background: #EEF6E4; }
 .sn-sheet .sn-tile span { color: #5C7A45; font-size: 13px; }
 .sn-sheet .sn-tile strong { font-size: 30px; }
-.sn-record { touch-action: none; cursor: default; }
+.sn-hold { touch-action: none; cursor: default; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .sn-field { display: grid; gap: 6px; }
 .sn-field > span { font-size: 13px; color: #5C7A45; font-weight: 600; padding-left: 4px; }
 .sn-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }

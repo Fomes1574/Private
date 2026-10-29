@@ -12,7 +12,7 @@ Cada pessoa pode ligar em **Ajustes → Disfarce**. Com ele ligado, o app abre n
 
 ## A porta
 
-Pausar a partida e **segurar 3 segundos no quadro "Recorde"** abre "Código de contribuidor" ("Apoiou a Little Fern Games no Patreon ou em outra plataforma? Digite o código que você recebeu."). O código é o PIN (ou a frase-senha, se o cofre usa frase). A seta no topo volta ao jogo, pausado. O toque curto não faz nada, e nada indica que o quadro faz algo.
+**Segurar 3 segundos em qualquer "Recorde"** (na tela inicial, no placar durante a partida, na pausa ou no fim de jogo) abre "Código de contribuidor" ("Apoiou a Little Fern Games no Patreon ou em outra plataforma? Digite o código que você recebeu."). O código é o PIN (ou a frase-senha, se o cofre usa frase). A seta no topo volta para onde a pessoa estava (início, partida pausada ou fim de jogo); segurar durante a partida para a cobra. O dedo pode tremer um pouco (até 24 px) sem cancelar. O toque curto não faz nada, e nada indica que o quadro faz algo.
 
 - PIN certo: entra no Pacto Talk como pelo desbloqueio normal (troca de celular pendente, anexo escolhido antes de trancar, lista).
 - Formato errado (menos de 6 números): "Código incompleto". **Não conta** como tentativa.

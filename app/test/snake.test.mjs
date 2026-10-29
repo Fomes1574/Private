@@ -445,6 +445,67 @@ test('conferência visual: em pé, deitado e celular pequeno, todo botão alcan�
   assert.deepEqual(problems, []);
 });
 
+// Dedo de verdade (toque, não mouse), com um tremido no meio, como num celular.
+async function touchHold(p, selector, ms) {
+  const box = await p.locator(selector).boundingBox();
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  const cdp = await p.context().newCDPSession(p);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  await p.waitForTimeout(Math.min(1200, ms / 2));
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + 6, y: y + 5 }] });
+  await p.waitForTimeout(ms - Math.min(1200, ms / 2));
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await cdp.detach();
+}
+
+test('todo "Recorde" é porta, com o dedo: início, placar da partida, pausa e fim; a seta volta para o mesmo lugar', async () => {
+  for (const [w, h] of [[390, 844], [844, 390]]) {
+    const c = await plain.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+    const p = await c.newPage();
+    const errs = watchErrors(p);
+    await p.goto(`${APP}/`);
+    await kv(p, 'put', 'disguise', true);
+    await kv(p, 'put', 'vault', { wrapped: 'teste', mode: 'passkey' });
+    await p.reload();
+    await p.waitForSelector('.sn-home');
+    const opens = async (selector) => { await touchHold(p, selector, 3300); await p.waitForSelector('.sn-code', { timeout: 3000 }); };
+
+    // Início: toque curto não abre; 3 s abre; a seta volta ao início.
+    await touchHold(p, '.sn-pill', 1000);
+    await p.waitForTimeout(300);
+    assert.equal(await p.$('.sn-code'), null, 'toque curto');
+    await opens('.sn-pill');
+    await p.click('.sn-code [aria-label="Voltar"]');
+    await p.waitForSelector('.sn-home');
+
+    // Placar durante a partida: a cobra para; a seta volta à partida pausada.
+    await p.click('.sn-home .sn-primary');
+    await p.click('.sn-ready button');
+    assert.equal(await p.evaluate(() => globalThis.__mpSnake.game.state), 'running');
+    await p.evaluate(() => { const g = globalThis.__mpSnake.game; g.mode = 'wrap'; });
+    await opens('.sn-chip[aria-label="Recorde"]');
+    assert.equal(await p.evaluate(() => globalThis.__mpSnake.game.state), 'paused');
+    await p.click('.sn-code [aria-label="Voltar"]');
+    await p.waitForSelector('.sn-record');
+
+    // Pausa.
+    await p.waitForTimeout(300);
+    await opens('.sn-record');
+    await p.click('.sn-code [aria-label="Voltar"]');
+    await p.waitForSelector('.sn-record');
+
+    // Fim de jogo: a seta volta ao fim de jogo.
+    await p.click('.sn-sheet button:has-text("Continuar")');
+    await p.evaluate(() => { const g = globalThis.__mpSnake.game; g.mode = 'classic'; g.queue = []; g.dir = [0, -1]; g.snake = [[7, 0], [7, 1], [7, 2]]; g.prev = g.snake.map((q) => q.slice()); });
+    await p.waitForSelector('.sn-over', { timeout: 5000 });
+    await opens('.sn-over .sn-hold');
+    await p.click('.sn-code [aria-label="Voltar"]');
+    await p.waitForSelector('.sn-over');
+    assert.deepEqual(errs, [], `${w}x${h}`);
+    await c.close();
+  }
+});
+
 test('a cobra tem a mesma grossura na horizontal e na vertical (1x, 2x, 3x; em pé e deitado)', async () => {
   for (const [w, h, dpr] of [[390, 844, 1], [390, 844, 2], [393, 852, 3], [844, 390, 3], [412, 915, 2.625]]) {
     const { c, p } = await gamePage(w, h, dpr);

@@ -91,17 +91,19 @@ function bite() {
 }
 const buzz = (ms) => { try { navigator.vibrate?.(ms); } catch {} };
 
-// Segurar parado por `ms` (sem arrastar). Não mostra nada enquanto segura.
+// Segurar parado por `ms` (o dedo pode tremer um pouco). Não mostra nada
+// enquanto segura.
 function holdFor(el, ms, fn) {
   let timer = null, x = 0, y = 0;
   const stop = () => { clearTimeout(timer); timer = null; };
+  el.classList.add('sn-hold');
   el.addEventListener('pointerdown', (e) => {
     x = e.clientX; y = e.clientY; stop();
     // Capturado: o quadro pode se mexer (folha subindo) sem soltar o dedo.
     try { el.setPointerCapture(e.pointerId); } catch {}
-    timer = setTimeout(() => { timer = null; fn(); }, ms);
+    timer = setTimeout(() => { timer = null; if (el.isConnected) fn(); }, ms);
   });
-  el.addEventListener('pointermove', (e) => { if (timer && Math.hypot(e.clientX - x, e.clientY - y) > 12) stop(); });
+  el.addEventListener('pointermove', (e) => { if (timer && Math.hypot(e.clientX - x, e.clientY - y) > 24) stop(); });
   for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(ev, stop);
   el.addEventListener('contextmenu', (e) => e.preventDefault());
 }
@@ -165,7 +167,7 @@ export async function snakeScreen(go) {
     show(h('div', { class: 'sn-home' },
       h('div', { class: 'sn-top' }, sound, h('button', { type: 'button', class: 'sn-icon', 'aria-label': 'Opções', onclick: options }, I.menu())),
       h('div', { class: 'sn-brand' }, h('span', { class: 'sn-appicon' }, appIcon(112)), h('h1', { text: 'Hungry Snake' })),
-      h('div', { class: 'sn-pill' }, I.trophy(22), h('span', { text: `Recorde ${best}` })),
+      record(h('div', { class: 'sn-pill' }, I.trophy(22), h('span', { text: `Recorde ${best}` }))),
       h('div', { class: 'sn-actions' },
         h('button', { type: 'button', class: 'sn-primary big', text: 'Jogar', onclick: () => { wakeAudio(); play(true); } }),
         segmented('Modo', [['classic', 'Clássico'], ['wrap', 'Sem paredes']], prefs.mode, (v) => { prefs.mode = v; save(); }),
@@ -203,7 +205,7 @@ export async function snakeScreen(go) {
       h('div', { class: 'sn-hud' },
         h('span', { class: 'sn-title', text: 'Hungry Snake' }),
         h('div', { class: 'sn-chip', 'aria-label': 'Maçãs' }, I.apple(22), scoreEl),
-        h('div', { class: 'sn-chip', 'aria-label': 'Recorde' }, I.trophy(20), bestEl),
+        record(h('div', { class: 'sn-chip', 'aria-label': 'Recorde' }, I.trophy(20), bestEl)),
         h('button', { type: 'button', class: 'sn-icon', 'aria-label': 'Pausar', onclick: pause }, I.pause())),
       stage, ctrl), 'play');
     ro = new ResizeObserver(fit);
@@ -305,11 +307,10 @@ export async function snakeScreen(go) {
     if (game.state === 'running') game.state = 'paused';
     stopLoop();
     paintBoard(performance.now());
-    const record = h('div', { class: 'sn-tile sn-record' }, h('span', { text: 'Recorde' }), h('strong', { text: String(best) }));
-    holdFor(record, SECRET_HOLD_MS, door);
+    const tile = record(h('div', { class: 'sn-tile sn-record' }, h('span', { text: 'Recorde' }), h('strong', { text: String(best) })));
     openSheet('Pausado',
       h('h2', { text: 'Pausado' }),
-      h('div', { class: 'sn-tiles' }, h('div', { class: 'sn-tile' }, h('span', { text: 'Maçãs' }), h('strong', { text: String(game.score) })), record),
+      h('div', { class: 'sn-tiles' }, h('div', { class: 'sn-tile' }, h('span', { text: 'Maçãs' }), h('strong', { text: String(game.score) })), tile),
       h('button', { type: 'button', class: 'sn-primary', text: 'Continuar', onclick: resume }),
       h('button', { type: 'button', class: 'sn-soft', text: 'Recomeçar', onclick: () => play(true) }),
       h('div', { class: 'sn-field' }, h('span', { text: 'Controle' }), segmented('Controle', [['swipe', 'Deslizar na tela'], ['arrows', 'Setas']], prefs.control, (v) => { prefs.control = v; save(); renderCtrl(); })),
@@ -337,15 +338,22 @@ export async function snakeScreen(go) {
       h('div', { class: 'sn-over-body' },
         h('div', { class: 'sn-tiles' },
           h('div', { class: 'sn-tile' }, h('span', { text: 'Maçãs' }), h('strong', { text: String(s) })),
-          h('div', { class: 'sn-tile' }, h('span', { text: 'Recorde' }), h('strong', { text: String(best) }))),
+          record(h('div', { class: 'sn-tile' }, h('span', { text: 'Recorde' }), h('strong', { text: String(best) })))),
         note ? h('p', { class: 'sn-note', text: note }) : null,
         h('button', { type: 'button', class: 'sn-primary big', text: 'Jogar de novo', onclick: () => play(true) }),
         h('button', { type: 'button', class: 'sn-ghost', text: 'Início', onclick: home }))), 'over');
   }
 
   // ---------- código de contribuidor (a porta) ----------
+  // Todo "Recorde" é porta: no início, no placar da partida, na pausa e no fim.
+  const record = (el) => { holdFor(el, SECRET_HOLD_MS, door); return el; };
+  let from = 'home';
   async function door() {
-    if (!alive || await store.holdActive()) return;
+    if (!alive || view === 'code') return;
+    // Segurar durante a partida: a cobra para enquanto o código está aberto.
+    if (view === 'play' && game.state === 'running') { game.state = 'paused'; stopLoop(); }
+    if (await store.holdActive()) return;
+    from = view;
     const rec = await session.vaultStore.load();
     // Sem cofre: não há o que abrir; vai para o começo do Pacto Talk.
     if (!rec?.wrapped) { if (rec) await session.wipeEverything().catch(() => {}); return go('welcome', { door: true }); }
@@ -374,7 +382,8 @@ export async function snakeScreen(go) {
       paintDots();
     };
     const setBusy = (v) => { busy = v; for (const b of keys) b.disabled = v; text.disabled = v; };
-    const back = () => { if (busy) return; play(false); pause(); };
+    // A seta volta para onde a pessoa estava (início, partida pausada ou fim).
+    const back = () => { if (busy) return; if (from === 'home') home(); else if (from === 'over') over(); else { play(false); pause(); } };
 
     async function submit(secret) {
       if (busy) return;
