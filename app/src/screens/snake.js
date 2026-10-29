@@ -164,7 +164,7 @@ export async function snakeScreen(go) {
     paintSound();
     show(h('div', { class: 'sn-home' },
       h('div', { class: 'sn-top' }, sound, h('button', { type: 'button', class: 'sn-icon', 'aria-label': 'Opções', onclick: options }, I.menu())),
-      h('div', { class: 'sn-brand' }, h('span', { class: 'sn-appicon' }, appIcon(112)), h('h1', { text: 'Hungry Snake' }), h('p', { text: 'come, cresce, não bate' })),
+      h('div', { class: 'sn-brand' }, h('span', { class: 'sn-appicon' }, appIcon(112)), h('h1', { text: 'Hungry Snake' })),
       h('div', { class: 'sn-pill' }, I.trophy(22), h('span', { text: `Recorde ${best}` })),
       h('div', { class: 'sn-actions' },
         h('button', { type: 'button', class: 'sn-primary big', text: 'Jogar', onclick: () => { wakeAudio(); play(true); } }),
@@ -328,7 +328,7 @@ export async function snakeScreen(go) {
   function over() {
     const s = game.score, won = game.died === 'full';
     const gap = bestBefore - s;
-    const note = gap < 0 ? 'Novo recorde!' : gap === 0 ? (s ? 'Igualou o recorde' : 'Pegue a maçã vermelha') : gap === 1 ? 'Faltou 1 para o recorde' : `Faltaram ${gap} para o recorde`;
+    const note = gap < 0 ? 'Novo recorde!' : gap === 0 ? (s ? 'Igualou o recorde' : null) : gap === 1 ? 'Faltou 1 para o recorde' : `Faltaram ${gap} para o recorde`;
     show(h('div', { class: 'sn-over' },
       h('div', { class: 'sn-over-head' },
         dizzy(),
@@ -338,7 +338,7 @@ export async function snakeScreen(go) {
         h('div', { class: 'sn-tiles' },
           h('div', { class: 'sn-tile' }, h('span', { text: 'Maçãs' }), h('strong', { text: String(s) })),
           h('div', { class: 'sn-tile' }, h('span', { text: 'Recorde' }), h('strong', { text: String(best) }))),
-        h('p', { class: 'sn-note', text: note }),
+        note ? h('p', { class: 'sn-note', text: note }) : null,
         h('button', { type: 'button', class: 'sn-primary big', text: 'Jogar de novo', onclick: () => play(true) }),
         h('button', { type: 'button', class: 'sn-ghost', text: 'Início', onclick: home }))), 'over');
   }

@@ -25,6 +25,8 @@ Pausar a partida e **segurar 3 segundos no quadro "Recorde"** abre "Código de c
 
 Trancar (sair do app, tempo, "Bloquear agora") volta ao jogo. Apagar tudo também.
 
+Sair do app segue **Ajustes → Trancar ao sair do app**. No padrão ("Na hora"), qualquer saída tranca: quem foi ao WhatsApp e voltou em 5 segundos cai no jogo e precisa da porta de novo. Quem escolheu "Depois de 1 minuto" ou "Depois de 5 minutos" volta direto às conversas dentro do prazo e cai no jogo depois dele. A única outra exceção é a galeria aberta pelo próprio app (2 minutos, ADR 0019). O disfarce vale a partir da primeira saída depois de ligado.
+
 ## Nome e ícone
 
 - **Android:** duas entradas na tela inicial (`activity-alias` `.PactoTalk` e `.HungrySnake`) para a mesma `MainActivity`; o plugin `Disguise` liga uma e desliga a outra (`setComponentEnabledSetting`, `DONT_KILL_APP`), primeiro ligando a nova para nunca ficar sem ícone. Alguns lançadores tiram o atalho da tela inicial na troca; aí é pegar de novo na lista de apps. O nome do app no sistema (Configurações → Apps, desinstalar) passa a ser **"Hungry Snake" para todos**, porque não muda em tempo de execução. O botão voltar do Android fecha a pausa e sai da tela do código.

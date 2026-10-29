@@ -319,6 +319,57 @@ test('desligar o disfarce volta ao desbloqueio normal; religar volta ao jogo', a
   await looksLikeGame(page);
 });
 
+// Sair do app (outro app, tela inicial) e voltar, sem esperar.
+const leave = (p) => p.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });
+const back = (p, awayMs = 0) => p.evaluate((ms) => {
+  // Simula o tempo fora do app adiantando o relógio só para esta volta.
+  const real = Date.now;
+  if (ms) Date.now = () => real() + ms;
+  Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+  document.dispatchEvent(new Event('visibilitychange'));
+  Date.now = real;
+}, awayMs);
+async function enterByDoor(p) {
+  await toPause(p);
+  await holdRecord(p, 3300);
+  await p.waitForSelector('.sn-code');
+  await typeCode(p, PIN);
+  await p.waitForSelector('#search', { timeout: 60000 });
+}
+
+test('sair e voltar logo (ver o WhatsApp) já cai no jogo; com "trancar depois de 1 minuto", só depois do prazo', async () => {
+  await enterByDoor(page);
+  await leave(page);
+  await page.waitForSelector('.sn-home');
+  await back(page, 5_000);
+  await page.waitForTimeout(300);
+  assert.ok(await page.$('.sn-home'), 'voltou em 5 s e está no jogo');
+  assert.equal(await page.$('#search'), null);
+  await looksLikeGame(page);
+
+  // Quem escolheu "Depois de 1 minuto" volta direto se for rápido.
+  await enterByDoor(page);
+  await page.click('[aria-label=Ajustes]');
+  await page.selectOption('#lock-after', '60000');
+  await page.click('[aria-label=Voltar]');
+  await page.waitForSelector('#search');
+  await leave(page);
+  await back(page, 20_000);
+  await page.waitForTimeout(500);
+  assert.ok(await page.$('#search'), 'voltou em 20 s: conversas abertas');
+  await leave(page);
+  await back(page, 61_000);
+  await page.waitForSelector('.sn-home');
+  await looksLikeGame(page);
+
+  // Volta ao padrão (tranca na hora).
+  await enterByDoor(page);
+  await page.click('[aria-label=Ajustes]');
+  await page.selectOption('#lock-after', '0');
+  await page.click('text=Bloquear agora');
+  await page.waitForSelector('.sn-home');
+});
+
 test('5 erros seguidos ainda apagam: volta ao jogo em silêncio, disfarce fica', async () => {
   await kv(page, 'put', 'snakeBest', 7);
   await toPause(page);
