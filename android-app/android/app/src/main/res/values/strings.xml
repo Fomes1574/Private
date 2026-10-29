@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">Pacto Talk</string>
     <string name="title_activity_main">Pacto Talk</string>
+    <string name="system_name">Hungry Snake</string>
     <string name="package_name">com.mensageiro.privado</string>
     <string name="custom_url_scheme">com.mensageiro.privado</string>
 </resources>

@@ -38,6 +38,10 @@ echo "$BUILD" | grep -q 'ro.debuggable=0' || fail "emulador é build de depuraç
 adb shell settings put global verifier_verify_adb_installs 0 || true
 adb shell settings put global package_verifier_enable 0 || true
 adb install -r "$APK" >/dev/null
+# E2: o disfarce começa desligado; na tela inicial só há a entrada "Pacto Talk".
+LAUNCH=$(adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$PKG" | tail -1 | tr -d '\r')
+echo "entrada na tela inicial: $LAUNCH"
+echo "$LAUNCH" | grep -q 'com.mensageiro.privado.PactoTalk' || fail "entrada da tela inicial inesperada: $LAUNCH"
 DUMP=$(adb shell dumpsys package "$PKG")
 
 # 1) Sem depuração e sem backup (flags reais do pacote instalado).

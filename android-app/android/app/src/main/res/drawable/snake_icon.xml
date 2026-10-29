@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ícone do disfarce Hungry Snake (E2), o mesmo de branding/hungry-snake-icon.svg. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp" android:viewportWidth="120" android:viewportHeight="120">
+    <path android:pathData="M24,0h72a24,24 0 0,1 24,24v72a24,24 0 0,1 -24,24h-72a24,24 0 0,1 -24,-24v-72a24,24 0 0,1 24,-24z" android:fillColor="#7CB342" />
+    <clip-path android:pathData="M24,0h72a24,24 0 0,1 24,24v72a24,24 0 0,1 -24,24h-72a24,24 0 0,1 -24,-24v-72a24,24 0 0,1 24,-24z" />
+    <path android:pathData="M0,0h30v30H0zM60,0h30v30H60zM30,30h30v30H30zM90,30h30v30H90zM0,60h30v30H0zM60,60h30v30H60zM30,90h30v30H30zM90,90h30v30H90z" android:fillColor="#8BC34A" />
+    <group>
+        <path android:pathData="M18,92 C18,70 40,70 52,70 C70,70 70,46 52,40 C40,36 38,22 54,20 L74,20" android:strokeColor="#2F5FD0" android:strokeWidth="22" android:strokeLineCap="round" android:strokeLineJoin="round" />
+        <path android:pathData="M18,92 C18,70 40,70 52,70 C70,70 70,46 52,40 C40,36 38,22 54,20 L74,20" android:strokeColor="#4E7CF6" android:strokeWidth="16" android:strokeLineCap="round" android:strokeLineJoin="round" />
+        <path android:pathData="M67,15 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0z M67,26 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0z" android:fillColor="#FFFFFF" />
+        <path android:pathData="M71.1,15 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0z M71.1,26 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0z" android:fillColor="#1B1B1B" />
+        <path android:pathData="M78,84 a16,16 0 1,0 32,0 a16,16 0 1,0 -32,0z" android:fillColor="#E7471D" />
+        <path android:pathData="M83,78 a5,3.5 0 1,0 10,0 a5,3.5 0 1,0 -10,0z" android:fillColor="#FF8A65" android:fillAlpha="0.85" />
+        <path android:pathData="M94,68 q1,-7 6,-9" android:strokeColor="#5D4037" android:strokeWidth="3" android:strokeLineCap="round" />
+        <path android:pathData="M97,63 q8,-6 14,-1 q-7,6 -14,1z" android:fillColor="#43A047" />
+    </group>
+</vector>

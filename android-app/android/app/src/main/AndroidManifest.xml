@@ -23,7 +23,7 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:usesCleartextTraffic="false"
         android:icon="@drawable/pacto_talk_logo"
-        android:label="@string/app_name"
+        android:label="@string/system_name"
         android:roundIcon="@drawable/pacto_talk_logo"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
@@ -31,17 +31,43 @@
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
-            android:label="@string/title_activity_main"
+            android:label="@string/system_name"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
             android:exported="true">
+        </activity>
 
+        <!-- E2: duas entradas na tela inicial para a mesma tela; o disfarce
+             (Ajustes) liga uma e desliga a outra (DisguisePlugin). O nome
+             do app no sistema (Configurações, desinstalar) é sempre o do
+             disfarce, para não entregar o app quando ele está ligado. -->
+        <activity-alias
+            android:name=".PactoTalk"
+            android:targetActivity=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:icon="@drawable/pacto_talk_logo"
+            android:roundIcon="@drawable/pacto_talk_logo"
+            android:enabled="true"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity-alias>
 
-        </activity>
+        <activity-alias
+            android:name=".HungrySnake"
+            android:targetActivity=".MainActivity"
+            android:label="@string/system_name"
+            android:icon="@drawable/snake_icon"
+            android:roundIcon="@drawable/snake_icon"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
     </application>
 

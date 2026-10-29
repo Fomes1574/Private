@@ -9,6 +9,7 @@ import { MessengerClient } from './packages/client/src/client.js';
 import { Api } from './packages/client/src/api.js';
 import { EncryptedStore } from './db/store.js';
 import { idbGet, idbPut, idbPutMany, idbDestroy } from './idb.js';
+import { KEEP_ON_WIPE } from './snake/store.js';
 import * as vault from './vault/vault.js';
 import * as passkey from './vault/passkey.js';
 import * as native from './vault/native.js';
@@ -413,7 +414,12 @@ export async function wipeEverything() {
   // Arquivos do banco que não chegaram a ser abertos nesta sessão também saem.
   try { const root = await navigator.storage.getDirectory(); for await (const [name] of root.entries()) await root.removeEntry(name, { recursive: true }).catch(() => {}); } catch {}
   await native.nativeDestroy();
+  // O disfarce (e o recorde do jogo) continua: depois de apagar, o celular
+  // mostra o mesmo jogo de antes, sem sinal de que algo aconteceu.
+  const keep = {};
+  for (const k of KEEP_ON_WIPE) { try { const v = await idbGet(k); if (v !== undefined) keep[k] = v; } catch {} }
   await idbDestroy();
+  if (Object.keys(keep).length) await idbPutMany(keep).catch(() => {});
 }
 
 // ---------- proteções de emergência (ADR 0014) ----------

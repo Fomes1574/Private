@@ -4,6 +4,17 @@ import * as session from '../session.js';
 import { WrongSecretError, VaultWipedError, OfflineError } from '../vault/vault.js';
 import { takeAttachment } from '../attachment-picker.js';
 
+// Depois do PIN certo (aqui ou no código do jogo): para onde ir.
+export function enterApp(go, r) {
+  // Troca de celular que ficou no meio: volta para a espera.
+  if (r?.pairing) return go('pairWait', r.pairing);
+  // Escolheu foto/arquivo e o app trancou no caminho: volta direto
+  // para onde estava, com a seleção (sem passar pela lista).
+  const attachment = takeAttachment();
+  if (attachment) return go(attachment.pick.target === 'settings' ? 'settings' : attachment.pick.target === 'stories' ? 'stories' : attachment.roomId ? 'chat' : 'chats', { roomId: attachment.roomId, attachment });
+  return go('chats');
+}
+
 export async function unlockScreen(go, { again = false } = {}) {
   // Já aberta: não redesenha (apagaria o que a pessoa está digitando).
   if (!again && document.querySelector('#secret')) return;
@@ -28,14 +39,7 @@ export async function unlockScreen(go, { again = false } = {}) {
       const secret = input.value;
       input.value = '';
       try {
-        const r = await session.unlock(secret);
-        // Troca de celular que ficou no meio: volta para a espera.
-        if (r?.pairing) return go('pairWait', r.pairing);
-        // Escolheu foto/arquivo e o app trancou no caminho: volta direto
-        // para onde estava, com a seleção (sem passar pela lista).
-        const attachment = takeAttachment();
-        if (attachment) return go(attachment.pick.target === 'settings' ? 'settings' : attachment.pick.target === 'stories' ? 'stories' : attachment.roomId ? 'chat' : 'chats', { roomId: attachment.roomId, attachment });
-        go('chats');
+        enterApp(go, await session.unlock(secret));
       } catch (err) {
         btn.disabled = false;
         btn.textContent = 'Desbloquear';

@@ -20,12 +20,14 @@ import { nicknameScreen } from './screens/nickname.js';
 import { settingsScreen } from './screens/settings.js';
 import { storiesScreen } from './screens/stories.js';
 import { notesScreen } from './screens/notes.js';
+import { snakeScreen } from './screens/snake.js';
+import * as disguise from './snake/store.js';
 
 // Tranca de verdade (chaves saem da memória) ao sair do app: na hora por
 // padrão; em Ajustes dá para escolher 1 ou 5 minutos.
 const lockAfter = () => session.S.prefs?.lockAfter ?? 0;
-const routes = { welcome, pairWait: pairWaitScreen, unlock: unlockScreen, chats: chatsScreen, chat: chatScreen, newGroup: newGroupScreen, nickname: nicknameScreen, settings: settingsScreen, stories: storiesScreen, notes: notesScreen };
-const open = new Set(['welcome', 'unlock', 'pairWait']);
+const routes = { welcome, pairWait: pairWaitScreen, unlock: unlockScreen, chats: chatsScreen, chat: chatScreen, newGroup: newGroupScreen, nickname: nicknameScreen, settings: settingsScreen, stories: storiesScreen, notes: notesScreen, snake: snakeScreen };
+const open = new Set(['welcome', 'unlock', 'pairWait', 'snake']);
 let cleanup = null, routeVersion = 0;
 
 export async function go(name, params = {}) {
@@ -34,6 +36,9 @@ export async function go(name, params = {}) {
   try { cleanup?.(); } catch {}
   cleanup = null;
   if (!open.has(name) && !session.S.unlocked) name = (await session.hasVault()) ? 'unlock' : 'welcome';
+  // E2: com o disfarce ligado, quem abre ou tranca o app vê o jogo. Só a
+  // porta do jogo (Recorde, sem cofre ainda) leva ao começo do Pacto Talk.
+  if ((name === 'unlock' || name === 'welcome') && !params.door && await disguise.isOn()) name = 'snake';
   if (version !== routeVersion) return;
   try {
     const r = await routes[name](go, params);
@@ -94,6 +99,7 @@ async function start() {
   // Só em build de teste (MP_TEST_HOOKS=1, modo plain): expõe a sessão.
   if (CONFIG.testHooks) { globalThis.__mpTest = session; globalThis.__mpTrip = trip; }
   setupPrivacy();
+  disguise.apply(await disguise.isOn());
   await registerSW();
   try { await navigator.storage?.persist?.(); } catch {}
   await go((await session.hasVault()) ? 'unlock' : 'welcome');

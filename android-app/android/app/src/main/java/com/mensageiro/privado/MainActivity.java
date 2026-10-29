@@ -20,6 +20,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(BiometricSecretPlugin.class);
         registerPlugin(AttachmentPickerPlugin.class);
+        registerPlugin(DisguisePlugin.class);
         super.onCreate(savedInstanceState);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         if (Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(false);
@@ -27,7 +28,8 @@ public class MainActivity extends BridgeActivity {
         WebView web = getBridge().getWebView();
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override public void handleOnBackPressed() {
-                web.evaluateJavascript("!!document.querySelector('.viewer')", (open) -> {
+                // Visualizador, folha ou tela do jogo que tem "voltar" próprio.
+                web.evaluateJavascript("!!document.querySelector('.viewer, [data-back]')", (open) -> {
                     if ("true".equals(open)) web.evaluateJavascript("window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))", null);
                     else { setEnabled(false); getOnBackPressedDispatcher().onBackPressed(); setEnabled(true); }
                 });

@@ -11,6 +11,7 @@ import { readNativeAttachment } from '../attachment-picker.js';
 import { preparePhoto } from '../media.js';
 import { sensitiveScope } from '../sensitive-scope.js';
 import { pickImage } from '../pick-image.js';
+import * as disguise from '../snake/store.js';
 
 // Foto de perfil/grupo: quadrada, 512 px, sem metadados.
 export const pickSquarePhoto = (facing = 'user', resume = { target: 'settings', action: 'profile' }) => pickImage({ maxSide: 512, square: true, facing, resume });
@@ -72,6 +73,7 @@ export async function settingsScreen(go, { attachment = null } = {}) {
           } }),
           h('span', {}, h('strong', { text: 'Modo máximo' }), h('br'),
             h('span', { class: 'muted small', text: 'Fotos e vídeos só pela câmera do app.' })))),
+      disguiseSection(),
       updateSection(),
       isAdmin ? adminSection(me) : null,
       h('details', { class: 'card' },
@@ -96,6 +98,25 @@ export async function settingsScreen(go, { attachment = null } = {}) {
   }
   return () => owner.cancel();
 
+}
+
+// E2: o app abre num jogo da cobrinha (Hungry Snake). Vale para este aparelho.
+function disguiseSection() {
+  const native = !!globalThis.Capacitor?.isNativePlatform?.();
+  const input = h('input', { id: 'disguise', type: 'checkbox', onchange: async (e) => {
+    const on = e.target.checked;
+    const how = 'Para entrar: pause a partida, segure 3 segundos no Recorde e digite seu PIN.';
+    const icon = native ? 'O nome e o ícone mudam na tela inicial. Se o ícone sumir, pegue de novo na lista de apps.' : 'No iPhone, apague o ícone da tela de início e adicione de novo pelo Safari para trocar nome e ícone.';
+    if (on && !await confirmSheet(`O app vai abrir no jogo Hungry Snake. ${how} ${icon}`, 'Ligar')) { e.target.checked = false; return; }
+    try { await disguise.setOn(on); } catch (err) { e.target.checked = !on; return toast(`Não deu: ${errText(err)}`); }
+    toast(on ? 'Disfarce ligado. Vale no próximo bloqueio.' : 'Disfarce desligado.');
+  } });
+  disguise.isOn().then((v) => { input.checked = v; });
+  return h('section', { class: 'card' },
+    h('h2', { text: 'Disfarce' }),
+    h('label', { class: 'switch' }, input,
+      h('span', {}, h('strong', { text: 'Hungry Snake' }), h('br'),
+        h('span', { class: 'muted small', text: 'O app abre num jogo da cobrinha.' }))));
 }
 
 function pairForm() {

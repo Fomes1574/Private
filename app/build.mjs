@@ -48,6 +48,9 @@ for (const [from, to] of [
 ]) await cp(join(repo, from), join(stage, to), { recursive: true });
 await cp(join(repo, 'branding/pacto-talk-icon-180.png'), join(stage, 'icon-180.png'));
 await cp(join(repo, 'branding/pacto-talk-icon-512.webp'), join(stage, 'icon-512.webp'));
+// E2: nome e ícone do disfarce (o iPhone usa ao adicionar à tela de início).
+await cp(join(repo, 'branding/hungry-snake-icon-180.png'), join(stage, 'snake-180.png'));
+await cp(join(repo, 'branding/hungry-snake-icon-512.png'), join(stage, 'snake-512.png'));
 
 // Cópia de terceiros precisa bater com o SHA256SUMS conferido no CI.
 for (const dir of ['vendor/sqlite', 'video/vendor', 'vendor/pdfjs', 'vendor/qrcode']) {
@@ -75,6 +78,9 @@ const manifest = {
   icons: [{ src: 'icon-180.png', sizes: '180x180', type: 'image/png' }, { src: 'icon-512.webp', sizes: '512x512', type: 'image/webp' }],
 };
 await writeFile(join(stage, 'manifest.webmanifest'), JSON.stringify(manifest, null, 2));
+const snakeManifest = { ...manifest, name: 'Hungry Snake', short_name: 'Hungry Snake', background_color: '#4A752C', theme_color: '#4A752C',
+  icons: [{ src: 'snake-180.png', sizes: '180x180', type: 'image/png' }, { src: 'snake-512.png', sizes: '512x512', type: 'image/png' }] };
+await writeFile(join(stage, 'snake.webmanifest'), JSON.stringify(snakeManifest, null, 2));
 
 // O código curto depende do conteúdo; config.js entra com um marcador e o
 // código real é calculado sobre os outros arquivos.
@@ -121,7 +127,7 @@ if (mode === 'plain') {
   const sw = (await readFile(join(here, 'sw/sw.js'), 'utf8')).replace('__PUBLIC_KEY__', pubB64);
   await writeFile(join(dist, 'sw.js'), sw);
   // Primeira visita: a mesma página da release, que registra o SW e recarrega.
-  for (const f of ['index.html', 'styles.css', 'manifest.webmanifest', 'icon-180.png', 'icon-512.webp']) await cp(join(stage, f), join(dist, f));
+  for (const f of ['index.html', 'styles.css', 'manifest.webmanifest', 'icon-180.png', 'icon-512.webp', 'snake.webmanifest', 'snake-180.png', 'snake-512.png']) await cp(join(stage, f), join(dist, f));
   await cp(join(here, 'sw/bootstrap.js'), join(dist, 'bootstrap.js'));
   const boot = (await readFile(join(dist, 'index.html'), 'utf8')).replace('<script type="module" src="main.js"></script>', '<script src="bootstrap.js"></script>');
   await writeFile(join(dist, 'index.html'), boot);

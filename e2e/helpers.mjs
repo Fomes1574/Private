@@ -39,6 +39,9 @@ export async function browser({ args = [] } = {}) {
   return ctx;
 }
 
+// Navegador sem perfil persistente: contextos com tamanho e densidade de tela próprios.
+export const launch = () => chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH || undefined });
+
 export function watchErrors(page) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
